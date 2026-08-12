@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 大檔案與套件編譯產物 (Large files & build artifacts)
+*.apk
+*.msi
+*.aar
+temp_aar/
+
+# Tauri 產物與測試檔
+src-tauri/target/
+src-tauri/bin/*.mp4
+src-tauri/bin/*.json
+
+# Capacitor / Android 建置暫存檔
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+.gradle/
+
+# 測試與暫存檔案
+search_results.json
+test.json
+
