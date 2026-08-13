@@ -5,7 +5,7 @@ Write-Host "   開始執行全平台編譯 (APK + Windows)" -ForegroundColor Mag
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host ""
 
-Write-Host ">>> 第一階段：編譯 Android APK" -ForegroundColor Magenta
+Write-Host "[階段一] 編譯 Android APK" -ForegroundColor Magenta
 Write-Host "開始編譯前端 Vue 專案..." -ForegroundColor Cyan
 npm run build
 if ($LASTEXITCODE -ne 0) { Write-Error "Frontend Build Failed!"; exit 1 }
@@ -16,7 +16,85 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Capacitor Sync Failed!"; exit 1 }
 
 Write-Host "開始使用 Gradle 打包 APK (Debug版)..." -ForegroundColor Cyan
 cd android
-$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-21.0.6.7-hotspot"
+# 全自動動態檢測並設定有效的 JAVA_HOME (適用於任何電腦)
+$jdkPath = $env:JAVA_HOME
+if (-not ($jdkPath -and (Test-Path "$jdkPath\bin\javac.exe"))) {
+    # 1. 嘗試從系統 PATH 中的 javac.exe 指令位置反推
+    $javacCmd = Get-Command javac.exe -ErrorAction SilentlyContinue
+    if ($javacCmd) {
+        $possibleJdk = Split-Path -Parent (Split-Path -Parent $javacCmd.Source)
+        if (Test-Path "$possibleJdk\bin\javac.exe") {
+            $jdkPath = $possibleJdk
+        }
+    }
+    
+    # 2. 若 PATH 無 javac，則動態掃描常見 JDK / JBR 安裝根目錄
+    if (-not $jdkPath) {
+        $searchRoots = @(
+            "C:\Program Files\Java",
+            "C:\Program Files\Microsoft",
+            "C:\Program Files\Eclipse Adoptium",
+            "C:\Program Files\Amazon Corretto",
+            "C:\Program Files\Zulu",
+            "C:\Program Files\Android\Android Studio\jbr",
+            "$env:LOCALAPPDATA\Programs\Java"
+        )
+        foreach ($root in $searchRoots) {
+            if (Test-Path "$root\bin\javac.exe") {
+                $jdkPath = $root
+                break
+            }
+            if (Test-Path $root) {
+                $foundDir = Get-ChildItem -Path $root -ErrorAction SilentlyContinue | Where-Object { Test-Path "$($_.FullName)\bin\javac.exe" } | Select-Object -First 1 -ExpandProperty FullName
+                if ($foundDir) {
+                    $jdkPath = $foundDir
+                    break
+                }
+            }
+        }
+    }
+}
+
+if ($jdkPath -and (Test-Path "$jdkPath\bin\javac.exe")) {
+    $env:JAVA_HOME = $jdkPath
+    Write-Host "使用 JDK: $env:JAVA_HOME" -ForegroundColor Green
+} else {
+    Write-Warning "未找到有效的 JDK，將嘗試使用預設環境變數。"
+}
+# 自動檢測並設定有效的 ANDROID_HOME (Android SDK)
+$sdkPath = $env:ANDROID_HOME
+if (-not ($sdkPath -and (Test-Path $sdkPath))) {
+    $sdkCandidates = @(
+        "C:\Android\Sdk",
+        "$env:LOCALAPPDATA\Android\Sdk"
+    )
+    foreach ($cand in $sdkCandidates) {
+        if ($cand -and (Test-Path $cand)) {
+            $sdkPath = $cand
+            break
+        }
+    }
+}
+
+if ($sdkPath -and (Test-Path $sdkPath)) {
+    $env:ANDROID_HOME = $sdkPath
+    $env:ANDROID_SDK_ROOT = $sdkPath
+    Write-Host "使用 Android SDK: $env:ANDROID_HOME" -ForegroundColor Green
+    
+    # 確保 local.properties 存在且設定正確 sdk.dir
+    $localPropsPath = "local.properties"
+    $escapedSdk = $sdkPath.Replace('\', '/')
+    "sdk.dir=$escapedSdk" | Out-File -FilePath $localPropsPath -Encoding utf8 -Force
+
+    # 將 platform-tools 加入 PATH，確保 adb 指令可用
+    $platformTools = Join-Path $sdkPath "platform-tools"
+    if ((Test-Path $platformTools) -and ($env:PATH -notmatch [regex]::Escape($platformTools))) {
+        $env:PATH = "$platformTools;$env:PATH"
+    }
+} else {
+    Write-Warning "未找到有效的 Android SDK 路徑。"
+}
+
 .\gradlew assembleDebug
 if ($LASTEXITCODE -ne 0) { Write-Error "Gradle Build Failed!"; exit 1 }
 cd ..
@@ -41,7 +119,7 @@ if (Test-Path $apkPath) {
 }
 
 Write-Host ""
-Write-Host ">>> 第二階段：編譯 Windows MSI" -ForegroundColor Magenta
+Write-Host "[階段二] 編譯 Windows MSI" -ForegroundColor Magenta
 $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin"
 if ($env:PATH -notmatch [regex]::Escape($cargoPath)) {
     $env:PATH = "$cargoPath;$env:PATH"
