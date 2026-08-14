@@ -626,7 +626,7 @@
       :confirm-button-text="updateFailed ? '重試下載' : '立即更新'"
       cancel-button-text="稍後再說"
       :close-on-click-overlay="false"
-      @confirm="startDownloadAndInstall"
+      :before-close="handleBeforeCloseUpdateModal"
     >
       <div style="padding: 16px; max-height: 380px; overflow-y: auto;">
         <div style="font-size: 13px; color: #4b5563; margin-bottom: 8px; display: flex; justify-content: space-between;">
@@ -640,22 +640,30 @@
         </div>
 
         <!-- 下載進度條 -->
-        <div v-if="isUpdating" style="padding: 12px 0;">
-          <div style="font-size: 13px; color: #1f2937; margin-bottom: 8px; text-align: center; font-weight: 500;">
-            正在下載更新檔 ({{ updateProgress.percent }}%)...
+        <div v-if="isUpdating" style="padding: 16px 0; text-align: center;">
+          <div style="font-size: 14px; color: #1f2937; margin-bottom: 12px; font-weight: 600;">
+            {{ updateStatusText || `正在下載更新檔 (${updateProgress.percent}%)...` }}
           </div>
-          <van-progress :percentage="updateProgress.percent" stroke-width="8" color="#10b981" />
-          <div v-if="updateProgress.totalBytes > 0" style="font-size: 11px; color: #6b7280; text-align: right; margin-top: 6px;">
+          <van-progress :percentage="updateProgress.percent" stroke-width="10" color="#10b981" />
+          <div v-if="updateProgress.totalBytes > 0" style="font-size: 12px; color: #6b7280; text-align: right; margin-top: 8px;">
             {{ formatBytes(updateProgress.downloadedBytes) }} / {{ formatBytes(updateProgress.totalBytes) }}
+          </div>
+          <div v-if="updateProgress.percent >= 100" style="font-size: 12px; color: #10b981; margin-top: 10px; font-weight: 500;">
+            ⚡ 下載完成，正在啟動安裝程序...
           </div>
         </div>
 
         <!-- 錯誤狀態 -->
-        <div v-if="updateFailed" style="padding: 10px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; margin-top: 8px;">
-          <div style="font-size: 12px; color: #b91c1c;">⚠️ 下載失敗: {{ updateErrorMsg }}</div>
-          <van-button size="small" type="primary" plain block style="margin-top: 8px;" @click="openBrowserRelease">
-            在瀏覽器開啟下載頁面
-          </van-button>
+        <div v-if="updateFailed" style="padding: 12px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; margin-top: 8px;">
+          <div style="font-size: 12px; color: #b91c1c; font-weight: 500;">⚠️ 下載失敗: {{ updateErrorMsg }}</div>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <van-button size="small" type="primary" block @click="startDownloadAndInstall">
+              重試下載
+            </van-button>
+            <van-button size="small" type="default" block @click="openBrowserRelease">
+              瀏覽器下載
+            </van-button>
+          </div>
         </div>
       </div>
     </van-dialog>
@@ -798,6 +806,22 @@ const updateProgress = ref<DownloadProgress>({
   totalBytes: 0
 });
 
+const updateStatusText = ref('');
+
+// 攔截更新彈窗關閉動作 (防止點擊立即更新時彈窗自動關閉)
+const handleBeforeCloseUpdateModal = (action: string) => {
+  if (action === 'confirm') {
+    startDownloadAndInstall();
+    return false; // 關鍵：阻止 Vant Dialog 自動關閉！
+  } else if (action === 'cancel') {
+    if (isUpdating.value && !updateFailed.value) {
+      return false; // 下載進行中禁止關閉
+    }
+    return true; // 允許關閉
+  }
+  return true;
+};
+
 // 手動檢查更新 (設定面板)
 const handleManualCheckUpdate = async () => {
   showLoadingToast({
@@ -813,6 +837,7 @@ const handleManualCheckUpdate = async () => {
       updateInfo.value = res;
       updateFailed.value = false;
       isUpdating.value = false;
+      updateStatusText.value = '';
       showUpdateModal.value = true;
     } else {
       showToast({
@@ -834,6 +859,7 @@ const checkUpdateOnStartup = async () => {
       updateInfo.value = res;
       updateFailed.value = false;
       isUpdating.value = false;
+      updateStatusText.value = '';
       showUpdateModal.value = true;
     }
   } catch (e) {
@@ -847,6 +873,7 @@ const startDownloadAndInstall = async () => {
   isUpdating.value = true;
   updateFailed.value = false;
   updateErrorMsg.value = '';
+  updateStatusText.value = '正在連接伺服器...';
   updateProgress.value = {
     percent: 0,
     downloadedBytes: 0,
@@ -856,6 +883,11 @@ const startDownloadAndInstall = async () => {
   try {
     await UpdateService.downloadAndInstall(updateInfo.value, (progress) => {
       updateProgress.value = progress;
+      if (progress.percent >= 100) {
+        updateStatusText.value = '下載完成，正在啟動安裝程序...';
+      } else {
+        updateStatusText.value = `正在下載更新檔 (${progress.percent}%)...`;
+      }
     });
   } catch (e: any) {
     isUpdating.value = false;
