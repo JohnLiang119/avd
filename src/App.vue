@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -617,6 +617,7 @@ import pkg from '../package.json';
 const version = pkg.version;
 
 import { App } from '@capacitor/app';
+import { open as openShell } from '@tauri-apps/plugin-shell';
 import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
 
 const isTvMode = ref(localStorage.getItem('avd_tv_mode') === 'true');
@@ -1570,8 +1571,7 @@ const openOAuthPage = async () => {
   const authUrl = 'https://developers.google.com/oauthplayground/#step1&scopes=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file';
   if (isTauri()) {
     try {
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(authUrl);
+      await openShell(authUrl);
     } catch (e) {
       showToast('無法開啟瀏覽器');
       console.error('Failed to open browser', e);

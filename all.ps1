@@ -114,9 +114,21 @@ if (Test-Path $apkPath) {
     Write-Host "打包成功！APK 已匯出至: $pwd\$destPath" -ForegroundColor Green
     
     Write-Host "嘗試安裝 APK 到連接的手機..." -ForegroundColor Cyan
-    adb install -r $destPath
+    $installOutput = adb install -r $destPath 2>&1
+    Write-Host ($installOutput -join "`n")
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "自動安裝失敗！請確認手機已接上傳輸線、開啟 USB 偵錯，且允許電腦連線。"
+        if ("$installOutput" -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+            Write-Warning "偵測到手機上已有不同簽名之舊版 AVD，正在嘗試卸載舊版並重新安裝..."
+            adb uninstall com.mattpocock.avd
+            adb install -r $destPath
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
+            } else {
+                Write-Warning "重新安裝失敗！請手動在手機上將舊版 AVD App 解除安裝後重試。"
+            }
+        } else {
+            Write-Warning "自動安裝失敗！請確認手機螢幕是否跳出「允許 USB 安裝」對話框，或確認已開啟 USB 偵錯。"
+        }
     } else {
         Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
     }

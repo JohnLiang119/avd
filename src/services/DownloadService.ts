@@ -1,6 +1,9 @@
 import { registerPlugin } from '@capacitor/core';
 import { Command, open } from '@tauri-apps/plugin-shell';
 import { downloadDir } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { readTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
 import * as OpenCC from 'opencc-js';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -44,13 +47,13 @@ function emitEvent(eventName: string, data: any) {
 }
 
 if (isTauri()) {
-  import('@tauri-apps/api/event').then(({ listen }) => {
+  try {
     listen('serverUploadSpeed', (event: any) => {
       emitEvent('serverUploadSpeed', event.payload);
     });
-  }).catch(e => {
+  } catch (e) {
     console.error('Failed to listen for serverUploadSpeed', e);
-  });
+  }
 }
 
 export interface PlaylistItem {
@@ -315,7 +318,6 @@ export const DownloadService = {
       const infoPath = `${targetDirPath}/${uniqueId}.info.json`;
 
       try {
-        const { readTextFile } = await import('@tauri-apps/plugin-fs');
         const jsonStr = await readTextFile(infoPath);
         const info = JSON.parse(jsonStr);
         rawTitle = info.title || info.fulltitle || '';
@@ -341,7 +343,6 @@ export const DownloadService = {
       let downloadedFilePath = tempFilePath;
 
       try {
-        const { rename, remove, exists } = await import('@tauri-apps/plugin-fs');
         let targetFileName = `${cleanFileName}.${ext}`;
         let candidatePath = `${targetDirPath}/${targetFileName}`;
         let counter = 1;
@@ -420,7 +421,6 @@ export const DownloadService = {
       // 取得檔案大小
       if (downloadedFilePath) {
         try {
-          const { stat } = await import('@tauri-apps/plugin-fs');
           const fileInfo = await stat(downloadedFilePath);
           if (fileInfo.size) fileSizeBytes = fileInfo.size;
         } catch (e: any) {
@@ -482,7 +482,6 @@ export const DownloadService = {
     if (!targetPath) return;
 
     try {
-      const { remove, exists } = await import('@tauri-apps/plugin-fs');
       if (await exists(targetPath)) {
         await remove(targetPath);
       }
@@ -594,13 +593,11 @@ export const DownloadService = {
 
   async startLocalServer() {
     if (!isTauri()) return YoutubeDlPlugin.startLocalServer();
-    const { invoke } = await import('@tauri-apps/api/core');
     return invoke('start_win_local_server');
   },
 
   async stopLocalServer() {
     if (!isTauri()) return YoutubeDlPlugin.stopLocalServer();
-    const { invoke } = await import('@tauri-apps/api/core');
     return invoke('stop_win_local_server');
   },
 
