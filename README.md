@@ -1,4 +1,4 @@
-﻿# 🚀 AVD (Audio Video Downloader)
+# 🚀 AVD (Audio Video Downloader)
 
 <div align="center">
 
@@ -15,12 +15,12 @@
 
 ## 📥 軟體下載 (Downloads)
 
-> 💡 **提示**：以下為固定永久連結，每次點擊都會自動下載 GitHub 上的最新發行版本！
+> 💡 **提示**：請點擊下方連結前往 GitHub 最新發行版本頁面下載對應平台的最新安裝包：
 
-| 平台系統 | 最新安裝包下載 (點擊直接下載) | 適用設備說明 |
+| 平台系統 | 安裝包下載連結 | 適用設備說明 |
 | :--- | :--- | :--- |
-| 📱 **Android** | [👉 **點此下載最新 Android APK (`avd_apk.apk`)**](https://github.com/JohnLiang119/avd/releases/latest/download/avd_apk.apk) | 支援 Android 手機、平板及 Android TV |
-| 💻 **Windows** | [👉 **點此下載最新 Windows 安裝檔 (`avd_win.msi`)**](https://github.com/JohnLiang119/avd/releases/latest/download/avd_win.msi) | 支援 Windows 10 / 11 (64 位元) |
+| 📱 **Android** | [👉 **前往下載最新 Android APK (`AVD_*.apk`)**](https://github.com/JohnLiang119/avd/releases/latest) | 支援 Android 手機、平板及 Android TV |
+| 💻 **Windows** | [👉 **前往下載最新 Windows 安裝檔 (`AVD_*_x64.msi`)**](https://github.com/JohnLiang119/avd/releases/latest) | 支援 Windows 10 / 11 (64 位元) |
 
 ---
 
