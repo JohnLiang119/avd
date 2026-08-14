@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Instant;
 use tauri::Emitter;
 use tiny_http::{Header, Response, Server, StatusCode};
 use urlencoding::decode;
@@ -224,6 +223,7 @@ pub fn stop_server() {
     }
 }
 
+#[allow(dead_code)]
 pub fn is_server_running() -> bool {
     SERVER_RUNNING.load(Ordering::SeqCst)
 }

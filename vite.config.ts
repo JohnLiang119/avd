@@ -11,4 +11,19 @@ export default defineConfig({
       resolvers: [VantResolver()],
     }),
   ],
+  build: {
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/opencc-js')) {
+            return 'vendor-opencc'
+          }
+          if (id.includes('node_modules/vant')) {
+            return 'vendor-vant'
+          }
+        },
+      },
+    },
+  },
 })
