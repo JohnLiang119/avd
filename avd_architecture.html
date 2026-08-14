@@ -1,0 +1,912 @@
+﻿<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AVD (All Video Downloader) 系統架構圖</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --bg-base: #0a0f1d;
+      --bg-surface: #11192e;
+      --bg-card: rgba(22, 32, 57, 0.75);
+      --bg-card-hover: rgba(30, 43, 77, 0.9);
+      
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-bright: rgba(255, 255, 255, 0.18);
+      
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      
+      --accent-vue: #42b883;
+      --accent-tauri: #24c8db;
+      --accent-android: #3ddc84;
+      --accent-rust: #f74c00;
+      --accent-youtube: #ff0033;
+      --accent-purple: #a855f7;
+      --accent-amber: #f59e0b;
+      --accent-blue: #38bdf8;
+      
+      --shadow-glow-blue: 0 0 35px rgba(56, 189, 248, 0.15);
+      --shadow-glow-green: 0 0 35px rgba(66, 184, 131, 0.15);
+      --shadow-glow-purple: 0 0 35px rgba(168, 85, 247, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', 'Noto Sans TC', sans-serif;
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      line-height: 1.6;
+      padding: 40px 24px 80px;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(36, 200, 219, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 85% 20%, rgba(168, 85, 247, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 50% 80%, rgba(61, 220, 132, 0.06) 0%, transparent 50%),
+        linear-gradient(to bottom, #070b14, var(--bg-base));
+      background-attachment: fixed;
+    }
+
+    .container {
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+      position: relative;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 16px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      background: rgba(36, 200, 219, 0.1);
+      color: var(--accent-tauri);
+      border: 1px solid rgba(36, 200, 219, 0.3);
+      margin-bottom: 16px;
+      letter-spacing: 0.5px;
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1.15rem;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    /* Filter / Tab Buttons */
+    .view-controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin: 32px 0 48px;
+      flex-wrap: wrap;
+    }
+
+    .btn-tab {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 10px 22px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-tab:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border-color: var(--border-bright);
+    }
+
+    .btn-tab.active {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.2));
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.5);
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+    }
+
+    /* Architecture Grid Layout */
+    .arch-container {
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+    }
+
+    /* Layer Box */
+    .arch-layer {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 24px;
+      padding: 28px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+      position: relative;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .arch-layer:hover {
+      border-color: var(--border-bright);
+    }
+
+    .layer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .layer-title-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .layer-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .layer-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .layer-desc {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .layer-tag {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-dim);
+      font-family: 'Fira Code', monospace;
+    }
+
+    /* Grid of Cards */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .card-grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 992px) {
+      .card-grid-2col {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Interactive Component Card */
+    .comp-card {
+      background: rgba(13, 20, 36, 0.65);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 20px;
+      transition: all 0.25s ease;
+      cursor: pointer;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .comp-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-bright);
+      transform: translateY(-3px);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+    }
+
+    .comp-card.active-highlight {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.25);
+    }
+
+    .comp-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .comp-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .comp-file {
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+      color: var(--accent-tauri);
+      background: rgba(36, 200, 219, 0.08);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    .comp-body {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .tech-pill-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: auto;
+      padding-top: 8px;
+    }
+
+    .tech-pill {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    /* Dual Platform Runtime Wrapper */
+    .platform-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 1024px) {
+      .platform-container {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .platform-box {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .platform-box.win-platform {
+      border-top: 3px solid var(--accent-tauri);
+    }
+
+    .platform-box.android-platform {
+      border-top: 3px solid var(--accent-android);
+    }
+
+    .platform-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .platform-name {
+      font-size: 1.2rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Data Flow Connector Arrows */
+    .flow-connector {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin: -16px 0;
+      position: relative;
+      z-index: 2;
+    }
+
+    .flow-line {
+      height: 24px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent-blue), var(--accent-purple));
+      opacity: 0.6;
+    }
+
+    .flow-pill {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-bright);
+      padding: 4px 14px;
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-family: 'Fira Code', monospace;
+      font-size: 0.78rem;
+    }
+
+    /* Detail Modal Drawer */
+    .detail-panel {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 420px;
+      max-width: calc(100vw - 48px);
+      background: rgba(17, 25, 46, 0.95);
+      border: 1px solid var(--border-bright);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      border-radius: 20px;
+      backdrop-filter: blur(20px);
+      padding: 24px;
+      z-index: 1000;
+      transform: translateY(120%);
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .detail-panel.open {
+      transform: translateY(0);
+    }
+
+    .detail-close {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.3rem;
+      cursor: pointer;
+      padding: 4px;
+    }
+
+    .detail-close:hover {
+      color: #fff;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      margin-top: 60px;
+      color: var(--text-dim);
+      font-size: 0.88rem;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 30px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <!-- Top Header -->
+    <header>
+      <div class="badge-pill">
+        <span>⚡</span> AVD v3.0.1 • 跨平台影音下載與串流架構
+      </div>
+      <h1>AVD (All Video Downloader) 系統架構圖</h1>
+      <p class="subtitle">
+        全方位解析基於 <b>Vite + Vue 3</b> 跨平台前端、<b>Tauri v2 (Rust)</b> 桌面運行時與 <b>Capacitor (Android 原生)</b> 的高性能影音解析、多線程下載與局域網串流架構。
+      </p>
+
+      <!-- View Selector -->
+      <div class="view-controls">
+        <button class="btn-tab active" onclick="switchView('all', this)">🌐 全景架構 Overview</button>
+        <button class="btn-tab" onclick="switchView('desktop', this)">🖥️ Windows 桌面架構 (Tauri)</button>
+        <button class="btn-tab" onclick="switchView('mobile', this)">📱 Android 行動架構 (Capacitor)</button>
+        <button class="btn-tab" onclick="switchView('streaming', this)">📡 區域網路串流與伺服器 (HTTP & Stream)</button>
+      </div>
+    </header>
+
+    <div class="arch-container">
+
+      <!-- ================= 1. 前端視圖與互動層 ================= -->
+      <section class="arch-layer" id="layer-frontend">
+        <div class="layer-header">
+          <div class="layer-title-group">
+            <div class="layer-icon" style="color: var(--accent-vue);">✨</div>
+            <div>
+              <div class="layer-title">1. 前端視圖與互動展示層 (Frontend Presentation Layer)</div>
+              <div class="layer-desc">統一由 Vue 3 + TypeScript 構建，透過響應式 UI 與自適應元件支援桌面與行動端</div>
+            </div>
+          </div>
+          <span class="layer-tag">Vite 8 • Vue 3.5 • Vant 4</span>
+        </div>
+
+        <div class="card-grid">
+          <div class="comp-card" onclick="showDetail('app_vue')">
+            <div class="comp-header">
+              <div class="comp-title">🎨 主應用介面與控制器</div>
+              <span class="comp-file">App.vue</span>
+            </div>
+            <div class="comp-body">
+              集成了影片連結解析、畫質選擇 (1080P/2K/4K/音訊)、下載佇列進度、歷史紀錄管理、Web 存取 QR Code 及深色/淺色主題切換。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Vant UI</span>
+              <span class="tech-pill">qrcode.vue</span>
+              <span class="tech-pill">狀態反應性</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('batch_modal')">
+            <div class="comp-header">
+              <div class="comp-title">📑 批次解析與下載彈窗</div>
+              <span class="comp-file">YouTubeBatchModal.vue</span>
+            </div>
+            <div class="comp-body">
+              支援 YouTube 播放清單 (Playlist) 與頻道影片的遞迴平鋪解析，提供全選、自訂勾選、預估容量與一鍵佇列批次下載。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">批次排程</span>
+              <span class="tech-pill">播放清單解析</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('opencc')">
+            <div class="comp-header">
+              <div class="comp-title">🔤 簡繁智慧字詞轉換</div>
+              <span class="comp-file">opencc-js</span>
+            </div>
+            <div class="comp-body">
+              針對標題、頻道名與輸出日誌進行動態簡體轉臺灣繁體 (cn2tw)，並精確保護原繁體字（如「岳」避免被過度修正）。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">在地化</span>
+              <span class="tech-pill">繁體中文優化</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 連接線 -->
+      <div class="flow-connector">
+        <div class="flow-line"></div>
+        <div class="flow-pill">跨平台抽象層調用 (Unified API & Events)</div>
+        <div class="flow-line"></div>
+      </div>
+
+      <!-- ================= 2. 核心抽象服務層 ================= -->
+      <section class="arch-layer" id="layer-service">
+        <div class="layer-header">
+          <div class="layer-title-group">
+            <div class="layer-icon" style="color: var(--accent-purple);">⚡</div>
+            <div>
+              <div class="layer-title">2. 跨平台核心適配與排程層 (Core Adapter & Service Layer)</div>
+              <div class="layer-desc">抹平 Desktop 與 Mobile 平台的底層通訊差異，提供統一的調用介面與事件廣播</div>
+            </div>
+          </div>
+          <span class="layer-tag">DownloadService.ts</span>
+        </div>
+
+        <div class="card-grid">
+          <div class="comp-card" onclick="showDetail('download_service')">
+            <div class="comp-header">
+              <div class="comp-title">🔄 跨平台核心適配器</div>
+              <span class="comp-file">DownloadService.ts</span>
+            </div>
+            <div class="comp-body">
+              判斷 <code>isTauri()</code> 或 <code>Capacitor</code> 環境，自動分流執行緒：桌面端走 Rust Sidecar，Android 端走原生 Java 插件。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">平台偵測</span>
+              <span class="tech-pill">抹平差異</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('event_bus')">
+            <div class="comp-header">
+              <div class="comp-title">📡 雙向事件匯流排 (Event Bus)</div>
+              <span class="comp-file">listeners & Emitters</span>
+            </div>
+            <div class="comp-body">
+              統一分發 <code>downloadProgress</code> (下載進度)、<code>serverUploadSpeed</code> (串流頻寬) 與 <code>driveUploadProgress</code> (雲端上傳) 事件。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">即時回調</span>
+              <span class="tech-pill">頻寬監聽</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('rclone_integration')">
+            <div class="comp-header">
+              <div class="comp-title">☁️ 雲端硬碟同步管理</div>
+              <span class="comp-file">Rclone Bridge</span>
+            </div>
+            <div class="comp-body">
+              調度 Rclone 程序進行已下載影片背景上傳至 Google Drive 或 WebDAV，支援即時進度監控與完成通知。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Google Drive</span>
+              <span class="tech-pill">雲端備份</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 連接線 -->
+      <div class="flow-connector">
+        <div class="flow-line"></div>
+        <div class="flow-pill">底層呼叫 (Tauri IPC vs Capacitor JNI)</div>
+        <div class="flow-line"></div>
+      </div>
+
+      <!-- ================= 3. 雙平台原生運行時 ================= -->
+      <div class="platform-container">
+
+        <!-- Windows / 桌面端 -->
+        <div class="platform-box win-platform" id="box-desktop">
+          <div class="platform-header">
+            <div class="platform-name">
+              <span style="color: var(--accent-tauri);">🖥️</span>
+              <span>Windows 桌面運行時 (Tauri v2 + Rust)</span>
+            </div>
+            <span class="layer-tag">Rust Backend</span>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('tauri_core')">
+            <div class="comp-header">
+              <div class="comp-title">🦀 Tauri 主程式與命令系統</div>
+              <span class="comp-file">lib.rs / main.rs</span>
+            </div>
+            <div class="comp-body">
+              負責視窗生命週期、外掛註冊 (Shell, Fs, Dialog, OS)、IPC 命令處理 (<code>start_win_local_server</code>, <code>stop_win_local_server</code>)。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Tauri 2.11</span>
+              <span class="tech-pill">Rust IPC</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('rust_server')">
+            <div class="comp-header">
+              <div class="comp-title">🌐 內嵌 HTTP 伺服器 & 串流</div>
+              <span class="comp-file">server.rs (tiny_http)</span>
+            </div>
+            <div class="comp-body">
+              提供 Port 8080 局域網網頁服務、支援影片 Range 請求即時串流、分 IP 上傳速度統計 (<code>TrackingReader</code>) 與裝置 UA 智慧識別 (iPad, PC, 智慧電視)。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">tiny_http</span>
+              <span class="tech-pill">Range 串流</span>
+              <span class="tech-pill">速度追蹤</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('sidecar_bin')">
+            <div class="comp-header">
+              <div class="comp-title">⚙️ Sidecar 二進制執行庫</div>
+              <span class="comp-file">src-tauri/bin/*</span>
+            </div>
+            <div class="comp-body">
+              包含編譯封裝的 <code>yt-dlp.exe</code> (影音抽取)、<code>ffmpeg.exe</code> (轉碼與影音合併) 及 <code>rclone.exe</code> (雲端備份)。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">yt-dlp</span>
+              <span class="tech-pill">ffmpeg</span>
+              <span class="tech-pill">rclone</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Android / 行動端 -->
+        <div class="platform-box android-platform" id="box-mobile">
+          <div class="platform-header">
+            <div class="platform-name">
+              <span style="color: var(--accent-android);">📱</span>
+              <span>Android 行動運行時 (Capacitor + Java)</span>
+            </div>
+            <span class="layer-tag">Native Android</span>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('youtube_dl_plugin')">
+            <div class="comp-header">
+              <div class="comp-title">🔌 Capacitor 橋接外掛</div>
+              <span class="comp-file">YoutubeDlPlugin.java</span>
+            </div>
+            <div class="comp-body">
+              橋接 JavaScript 與 Android 原生核心，調度 Python/yt-dlp 執行庫進行影片解析、格式比對及下載調用。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Capacitor Plugin</span>
+              <span class="tech-pill">youtubedl-android</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('cronet_downloader')">
+            <div class="comp-header">
+              <div class="comp-title">🚀 高性能下載引擎</div>
+              <span class="comp-file">CronetDownloader.java</span>
+            </div>
+            <div class="comp-body">
+              基於 Google Chromium 的 Cronet 網路堆疊，支援多線程並行分塊下載、斷點續傳與極致頻寬利用。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Google Cronet</span>
+              <span class="tech-pill">多線程加速</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('local_file_server')">
+            <div class="comp-header">
+              <div class="comp-title">📡 行動端檔案與串流伺服器</div>
+              <span class="comp-file">LocalFileServer.java</span>
+            </div>
+            <div class="comp-body">
+              基於 NanoHTTPD，提供手機本機 Web 檔案總管、區域網路影片播放、遠端下載任務推送、即時每秒速度監聽。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">NanoHTTPD</span>
+              <span class="tech-pill">局域網分享</span>
+            </div>
+          </div>
+
+          <div class="comp-card" onclick="showDetail('keep_alive_ffmpeg')">
+            <div class="comp-header">
+              <div class="comp-title">🛡️ 背景保活與影音轉碼</div>
+              <span class="comp-file">KeepAlive & FFmpegHelper</span>
+            </div>
+            <div class="comp-body">
+              前台服務 (Foreground Service) 防止背景下載被 Android 系統終止；FFmpeg 負責多音軌合併與格式轉換。
+            </div>
+            <div class="tech-pill-container">
+              <span class="tech-pill">Foreground Service</span>
+              <span class="tech-pill">FFmpeg Native</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 連接線 -->
+      <div class="flow-connector">
+        <div class="flow-line"></div>
+        <div class="flow-pill">外部連線與儲存落地 (Storage & Networking)</div>
+        <div class="flow-line"></div>
+      </div>
+
+      <!-- ================= 4. 儲存、網路與外部生態 ================= -->
+      <section class="arch-layer" id="layer-external">
+        <div class="layer-header">
+          <div class="layer-title-group">
+            <div class="layer-icon" style="color: var(--accent-amber);">🌐</div>
+            <div>
+              <div class="layer-title">4. 儲存層、網路協定與外部生態 (Storage, Network & Ecosystem)</div>
+              <div class="layer-desc">涵蓋影片來源站台、雲端硬碟、本機檔案系統及區域網路消費端設備</div>
+            </div>
+          </div>
+          <span class="layer-tag">IO & Protocols</span>
+        </div>
+
+        <div class="card-grid">
+          <div class="comp-card">
+            <div class="comp-header">
+              <div class="comp-title">🎬 支援影音平台</div>
+              <span class="comp-file">1000+ Sites</span>
+            </div>
+            <div class="comp-body">
+              YouTube (含 4K/HDR/AV1)、Bilibili (含高畫質分流)、Twitter (X)、Facebook、TikTok、Instagram 等廣泛來源。
+            </div>
+          </div>
+
+          <div class="comp-card">
+            <div class="comp-header">
+              <div class="comp-title">📁 本地儲存庫 (Downloads)</div>
+              <span class="comp-file">~/Downloads/AVD</span>
+            </div>
+            <div class="comp-body">
+              標準化命名規則儲存音訊 (MP3/M4A)、影片 (MP4/MKV)、縮圖 (JPG/WEBP) 與字幕 (SRT/VTT)。
+            </div>
+          </div>
+
+          <div class="comp-card">
+            <div class="comp-header">
+              <div class="comp-title">📺 局域網客戶端 (Clients)</div>
+              <span class="comp-file">Smart TV / iPad / PC</span>
+            </div>
+            <div class="comp-body">
+              家庭區域網路內設備無需安裝 App，透過瀏覽器掃描 QR Code 即可線上點播已下載的高畫質影片與音訊。
+            </div>
+          </div>
+
+          <div class="comp-card">
+            <div class="comp-header">
+              <div class="comp-title">☁️ 雲端目標 (Cloud Sync)</div>
+              <span class="comp-file">Google Drive / Remote</span>
+            </div>
+            <div class="comp-body">
+              藉由 Rclone 配置遠端儲存庫，在下載完成後自動排程上傳，達成無縫雲端典藏與遠端備份。
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- 底部版權與註解 -->
+    <footer>
+      <p>AVD (All Video Downloader) 架構設計 • 專案探索模式 (/opsx-explore)</p>
+      <p style="margin-top: 6px; font-size: 0.8rem; color: #475569;">Powered by Tauri v2, Capacitor 8, Vue 3 & Vite</p>
+    </footer>
+
+  </div>
+
+  <!-- 點擊卡片彈出的詳細資訊面板 (Detail Drawer) -->
+  <div class="detail-panel" id="detail-panel">
+    <button class="detail-close" onclick="closeDetail()">&times;</button>
+    <div id="detail-content">
+      <!-- 動態載入詳細內容 -->
+    </div>
+  </div>
+
+  <script>
+    const detailsData = {
+      app_vue: {
+        title: "🎨 主應用介面 (App.vue)",
+        file: "src/App.vue (約 1,900+ 行)",
+        desc: "整個應用的核心 UI 控制中心。透過 Vue 3 Composition API 管理所有全域狀態，包含：<br>• 影片 URL 輸入、解析狀態與錯誤攔截<br>• 下載選項（MP4 影片 / MP3 音訊 / 畫質選擇）<br>• 即時下載任務清單與進度條渲染<br>• 本機檔案列表與線上串流播放按鈕<br>• 局域網 Web Server 開關與 QR Code 彈窗<br>• Google Drive 上傳排程與進度狀態"
+      },
+      batch_modal: {
+        title: "📑 批次解析彈窗 (YouTubeBatchModal.vue)",
+        file: "src/components/YouTubeBatchModal.vue",
+        desc: "專門處理 YouTube 播放清單與頻道列表批次下載的專用彈窗元件：<br>• 呼叫 <code>DownloadService.parsePlaylist()</code> 解析清單結構<br>• 遞迴抓取子清單所有影片條目<br>• 提供全選/反選/自選清單項目<br>• 批次塞入下載隊列循序下載"
+      },
+      opencc: {
+        title: "🔤 簡繁字體智慧轉換 (OpenCC)",
+        file: "opencc-js (src/services/DownloadService.ts)",
+        desc: "針對簡體中文影片標題與說明進行臺灣繁體化：<br>• 使用雙向檢驗演算法，若原文包含繁體專屬字（如「岳」），則保持原樣，避免過度校正為「嶽」<br>• 自動在解析完成與下載日誌回傳時進行字串轉換"
+      },
+      download_service: {
+        title: "🔄 跨平台核心適配器 (DownloadService.ts)",
+        file: "src/services/DownloadService.ts (600+ 行)",
+        desc: "抹平 Desktop (Tauri) 與 Mobile (Capacitor) 差異的核心門戶：<br>• <code>isTauri()</code> 判斷當前環境<br>• 封裝 <code>startDownload()</code>、<code>cancelDownload()</code>、<code>parsePlaylist()</code> 等 API<br>• 在桌面端調用 <code>Command.sidecar('bin/yt-dlp')</code><br>• 在 Android 端調用 <code>YoutubeDlPlugin</code>"
+      },
+      event_bus: {
+        title: "📡 雙向事件匯流排 (Event Bus)",
+        file: "DownloadService.ts & Tauri/Capacitor Listeners",
+        desc: "提供前端統一的事件訂閱機制：<br>• <code>downloadProgress</code>：傳遞下載百分比、速度與剩餘時間<br>• <code>serverUploadSpeed</code>：傳遞局域網客戶端串流消耗的每秒頻寬<br>• <code>driveUploadProgress</code>：傳遞 Rclone 雲端同步進度"
+      },
+      rclone_integration: {
+        title: "☁️ 雲端硬碟同步管理 (Rclone Bridge)",
+        file: "DownloadService.ts & bin/rclone",
+        desc: "將下載完成的影音檔案無縫同步至雲端：<br>• 呼叫 <code>rclone copy</code> 或 <code>rclone move</code><br>• 解析 Rclone stdout 的即時傳輸百分比<br>• 支援 Google Drive、OneDrive、WebDAV 等多種後端"
+      },
+      tauri_core: {
+        title: "🦀 Tauri 主程式與命令系統",
+        file: "src-tauri/src/lib.rs & main.rs",
+        desc: "Tauri v2 桌面應用程式核心：<br>• 註冊 <code>tauri-plugin-shell</code>、<code>tauri-plugin-fs</code>、<code>tauri-plugin-dialog</code><br>• 暴露 <code>start_win_local_server</code> 與 <code>stop_win_local_server</code> 指令供前端調用<br>• 控制原生視窗尺寸與生命週期"
+      },
+      rust_server: {
+        title: "🌐 內嵌 HTTP 伺服器 & 串流 (server.rs)",
+        file: "src-tauri/src/server.rs (480+ 行)",
+        desc: "基於 <code>tiny_http</code> 的高性能多執行緒局域網伺服器：<br>• 監聽 <code>0.0.0.0:8080</code><br>• 支援 HTTP Range 請求，允許遠端瀏覽器或電視進行流暢的影音拖拉快轉<br>• 自定義 <code>TrackingReader</code> 計算每個連線 IP 的傳輸位元組<br>• 智慧解析 Client User-Agent（區分 iPad, iPhone, Android, 智慧電視）"
+      },
+      sidecar_bin: {
+        title: "⚙️ Sidecar 二進制執行庫",
+        file: "src-tauri/bin/*",
+        desc: "包含獨立編譯的原生執行檔：<br>• <code>yt-dlp</code>：負責各大站台影音串流抽取與解密<br>• <code>ffmpeg</code>：處理音訊抽取 (mp3)、影片合併 (video+audio remux)<br>• <code>rclone</code>：負責雲端上傳通訊"
+      },
+      youtube_dl_plugin: {
+        title: "🔌 Capacitor 橋接外掛 (YoutubeDlPlugin.java)",
+        file: "android/.../YoutubeDlPlugin.java (1,000+ 行)",
+        desc: "Android 原生與前端的橋樑：<br>• 調用 youtubedl-android 函式庫執行影音抽取<br>• 解析格式清單並回傳 JSON 至 Vue 前端<br>• 監聽原生進度並透過 <code>notifyListeners()</code> 廣播"
+      },
+      cronet_downloader: {
+        title: "🚀 高性能下載引擎 (CronetDownloader.java)",
+        file: "android/.../CronetDownloader.java",
+        desc: "Google Chromium 原生網路堆疊：<br>• 多線程分塊並行下載 (Multi-part chunked downloading)<br>• 支援斷點續傳與自動重試機制<br>• 繞過部分行動網路的限速策略"
+      },
+      local_file_server: {
+        title: "📡 行動端檔案與串流伺服器 (LocalFileServer.java)",
+        file: "android/.../LocalFileServer.java (500+ 行)",
+        desc: "基於 <code>NanoHTTPD</code> 的行動端本地伺服器：<br>• 開放手機端下載目錄供局域網其他設備存取<br>• 支援影片串流播放、檔案下載<br>• 遠端推送下載任務至手機執行<br>• 每秒統計各 IP 頻寬消耗"
+      },
+      keep_alive_ffmpeg: {
+        title: "🛡️ 背景保活與影音轉碼",
+        file: "KeepAliveService.java & FFmpegHelper.java",
+        desc: "確保行動端穩定運行：<br>• <code>KeepAliveService</code>：以 Foreground Service 運行，顯示常駐通知，避免被 Android 記憶體管理殺死<br>• <code>FFmpegHelper</code>：在 Android 原生層執行音訊合併與轉碼指令"
+      }
+    };
+
+    function showDetail(key) {
+      const data = detailsData[key];
+      if (!data) return;
+
+      const panel = document.getElementById('detail-panel');
+      const content = document.getElementById('detail-content');
+
+      content.innerHTML = `
+        <div style="font-size: 1.15rem; font-weight: 700; margin-bottom: 6px; color: var(--text-main);">${data.title}</div>
+        <div style="font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--accent-tauri); margin-bottom: 14px;">${data.file}</div>
+        <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6;">${data.desc}</div>
+      `;
+
+      panel.classList.add('open');
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-panel').classList.remove('open');
+    }
+
+    function switchView(view, btn) {
+      document.querySelectorAll('.btn-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const frontend = document.getElementById('layer-frontend');
+      const service = document.getElementById('layer-service');
+      const winBox = document.getElementById('box-desktop');
+      const androidBox = document.getElementById('box-mobile');
+      const external = document.getElementById('layer-external');
+
+      // 重設所有顯示
+      frontend.style.display = 'block';
+      service.style.display = 'block';
+      winBox.style.display = 'flex';
+      androidBox.style.display = 'flex';
+      external.style.display = 'block';
+
+      if (view === 'desktop') {
+        androidBox.style.display = 'none';
+      } else if (view === 'mobile') {
+        winBox.style.display = 'none';
+      } else if (view === 'streaming') {
+        frontend.style.display = 'none';
+      }
+    }
+  </script>
+</body>
+</html>

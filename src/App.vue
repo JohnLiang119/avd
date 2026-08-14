@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -98,6 +98,7 @@
 
       <div class="queue-header">
         <div style="display: flex; gap: 8px; align-items: center;">
+          <span class="nav-version-text" style="font-size: 11px; color: #9ca3af; font-family: monospace; font-weight: 500;">v{{ version }}</span>
           <van-button 
             v-show="!isTvMode"
             size="small" 
@@ -109,8 +110,20 @@
             style="padding: 0; width: 32px; height: 32px;"
             title="開啟/關閉 快傳伺服器"
           />
-          <van-checkbox v-show="!isTvMode" v-model="mp3Mode" shape="square">MP3</van-checkbox>
           <van-button 
+            v-show="!isTvMode"
+            size="small" 
+            round 
+            :type="mp3Mode ? 'success' : 'default'" 
+            :plain="!mp3Mode" 
+            :icon="mp3Mode ? 'music' : 'music-o'" 
+            @click="mp3Mode = !mp3Mode" 
+            style="padding: 0; width: 32px; height: 32px;"
+            :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
+          />
+          <!-- TV 開關 (暫時隱藏，保留程式碼) -->
+          <van-button 
+            v-show="false"
             size="small" 
             round 
             :type="isTvMode ? 'warning' : 'default'" 
