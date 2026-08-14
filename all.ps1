@@ -107,7 +107,7 @@ cd ..
 
 Write-Host "複製 APK 檔案..." -ForegroundColor Cyan
 $apkPath = "android\app\build\outputs\apk\debug\app-debug.apk"
-$appVersion = "3.0.1"
+$appVersion = "1.0.0"
 try {
     if (Test-Path "package.json") {
         $pkg = Get-Content "package.json" -Raw | ConvertFrom-Json
