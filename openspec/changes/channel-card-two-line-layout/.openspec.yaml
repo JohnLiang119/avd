@@ -1,0 +1,3 @@
+schema: spec-driven
+name: channel-card-two-line-layout
+description: 優化頻道追蹤清單卡片版面為雙行佈局，解決按鈕擠壓導致頻道與影片標題過度截斷問題

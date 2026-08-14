@@ -1,4 +1,4 @@
-import { registerPlugin } from '@capacitor/core';
+﻿import { registerPlugin } from '@capacitor/core';
 import { Command, open } from '@tauri-apps/plugin-shell';
 import { downloadDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
@@ -610,5 +610,130 @@ export const DownloadService = {
       }
     }
     return { isTv: false };
+  },
+
+  async fetchYouTubeRss(channelId: string): Promise<Array<{ videoId: string; title: string; published: string; publishedTime: number; url: string }>> {
+    try {
+      let xmlText = '';
+      if (!isTauri()) {
+        // Android 端使用原生外掛繞過 WebView CORS 限制
+        const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
+        xmlText = res.xml || '';
+      } else {
+        // Windows/桌面端直接 fetch
+        const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
+        const response = await fetch(rssUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: 無法讀取頻道 RSS`);
+        }
+        xmlText = await response.text();
+      }
+
+      if (!xmlText) throw new Error('頻道 RSS 內容為空');
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlText, 'application/xml');
+      const entries = Array.from(doc.querySelectorAll('entry'));
+      
+      return entries.map(entry => {
+        const videoIdEl = entry.getElementsByTagName('yt:videoId')[0] || entry.getElementsByTagName('videoId')[0];
+        const videoId = videoIdEl ? videoIdEl.textContent || '' : '';
+        const titleEl = entry.getElementsByTagName('title')[0];
+        const rawTitle = titleEl ? titleEl.textContent || '' : '';
+        const publishedEl = entry.getElementsByTagName('published')[0];
+        const published = publishedEl ? publishedEl.textContent || '' : '';
+        const linkEl = entry.getElementsByTagName('link')[0];
+        const url = linkEl?.getAttribute('href') || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
+        
+        return {
+          videoId,
+          title: convertCnToTw(rawTitle),
+          published,
+          publishedTime: published ? new Date(published).getTime() : 0,
+          url
+        };
+      });
+    } catch (e: any) {
+      console.error(`獲取頻道 RSS 失敗 (${channelId}):`, e);
+      throw e;
+    }
+  },
+
+  async resolveYouTubeChannel(input: string): Promise<{ channelId: string; title?: string; thumbnail?: string }> {
+    const raw = input.trim();
+    if (!raw) throw new Error('請輸入頻道網址或 ID');
+
+    // 1. Android 行動端：直接調用原生外掛（支援 HttpURLConnection 高速讀取與 youtubedl-android）
+    if (!isTauri()) {
+      try {
+        const res = await YoutubeDlPlugin.resolveChannel({ input: raw });
+        if (res && res.channelId) {
+          return {
+            channelId: res.channelId,
+            title: res.title ? convertCnToTw(res.title) : undefined,
+            thumbnail: res.thumbnail || undefined
+          };
+        }
+      } catch (e: any) {
+        throw new Error(e.message || String(e));
+      }
+    }
+
+    // 2. Windows 桌面端
+    // 若已經是 UC 開頭的 Channel ID
+    if (/^UC[a-zA-Z0-9_-]{22}$/.test(raw)) {
+      return { channelId: raw };
+    }
+
+    // 若為 https://www.youtube.com/channel/UCxxxx
+    const matchChannel = raw.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{22})/i);
+    if (matchChannel && matchChannel[1]) {
+      return { channelId: matchChannel[1] };
+    }
+
+    // 若為 Handle 網址 (如 https://www.youtube.com/@channelName) 或 @handle
+    let targetUrl = raw;
+    if (raw.startsWith('@')) {
+      targetUrl = `https://www.youtube.com/${raw}`;
+    } else if (!raw.startsWith('http')) {
+      targetUrl = `https://www.youtube.com/@${raw}`;
+    }
+
+    // 桌面端透過 yt-dlp --flat-playlist -J 獲取精準 channel_id
+    if (isTauri()) {
+      try {
+        const cmd = Command.sidecar('bin/yt-dlp', ['--flat-playlist', '-J', '--playlist-end', '1', targetUrl]);
+        const out = await cmd.execute();
+        if (out.code === 0 && out.stdout.trim()) {
+          const data = JSON.parse(out.stdout.trim());
+          const cid = data.channel_id || (data.uploader_id?.startsWith('UC') ? data.uploader_id : '') || '';
+          const title = data.uploader || data.channel || data.title || '';
+          if (cid.startsWith('UC')) {
+            return {
+              channelId: cid,
+              title: title ? convertCnToTw(title) : undefined
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('yt-dlp resolve channelId fallback to fetch', e);
+      }
+    }
+
+    // Fallback 嘗試讀取網頁內容擷取 channelId
+    try {
+      const resp = await fetch(targetUrl);
+      if (resp.ok) {
+        const text = await resp.text();
+        const m1 = text.match(/"channelId":\s*"(UC[a-zA-Z0-9_-]{22})"/);
+        if (m1 && m1[1]) return { channelId: m1[1] };
+        const m2 = text.match(/<meta\s+itemprop="channelId"\s+content="(UC[a-zA-Z0-9_-]{22})"/);
+        if (m2 && m2[1]) return { channelId: m2[1] };
+      }
+    } catch (e) {
+      console.warn('Fetch web page failed', e);
+    }
+
+    throw new Error('無法識別 YouTube 頻道 ID，請確認頻道網址或直接提供 channel/UC... 連結');
   }
 };

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -121,6 +121,17 @@
             style="padding: 0; width: 32px; height: 32px;"
             :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
           />
+          <van-button 
+            v-show="!isTvMode"
+            size="small" 
+            round 
+            :type="monitoredChannels.length > 0 ? 'primary' : 'default'" 
+            :plain="monitoredChannels.length === 0"
+            icon="bullhorn-o" 
+            @click="showChannelModal = true" 
+            style="padding: 0; width: 32px; height: 32px;"
+            :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
+          />
           <!-- TV 開關 (暫時隱藏，保留程式碼) -->
           <van-button 
             v-show="false"
@@ -137,8 +148,9 @@
           </van-button>
         </div>
         <div style="display: flex; gap: 8px;" v-show="!isTvMode">
+          <!-- 推播清單 (暫時隱藏，保留程式碼) -->
           <van-button 
-            v-if="isTauri()"
+            v-if="false && isTauri()"
             size="small" 
             round 
             type="warning" 
@@ -597,6 +609,99 @@
       </div>
     </van-dialog>
 
+    <!-- 頻道自動追蹤管理彈窗 -->
+    <van-dialog v-model:show="showChannelModal" title="📡 頻道自動追蹤排程" confirm-button-text="關閉" :show-cancel-button="false">
+      <div style="padding: 16px; max-height: 70vh; overflow-y: auto;">
+        <!-- 頂部控制面板 -->
+        <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 13px; font-weight: 600; color: #1e293b;">每小時自動檢查新片</span>
+            <van-switch v-model="monitorConfig.autoCheckEnabled" size="20px" />
+          </div>
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 10px;">
+            上次檢查: {{ monitorConfig.lastGlobalCheckTime ? new Date(monitorConfig.lastGlobalCheckTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '尚未檢查' }}
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <van-button size="small" type="primary" plain block icon="replay" :loading="isCheckingChannels" @click="checkAllMonitoredChannels(true)">
+              立即檢查
+            </van-button>
+            <van-button size="small" type="warning" plain block icon="play-circle-o" @click="simulateGlobalNewVideo">
+              🧪 模擬測試
+            </van-button>
+          </div>
+        </div>
+
+        <!-- 手動加入頻道輸入框 -->
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <van-field
+            v-model="manualChannelInput"
+            placeholder="貼上 YouTube 頻道網址或 @handle"
+            clearable
+            style="background: #f1f5f9; border-radius: 8px; font-size: 12px; padding: 8px 12px;"
+          />
+          <van-button size="small" type="primary" :loading="isAddingManualChannel" @click="addManualChannel" style="flex-shrink: 0; height: 36px; border-radius: 8px;">
+            加入
+          </van-button>
+        </div>
+
+        <!-- 已追蹤頻道清單 -->
+        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 8px; display: flex; justify-content: space-between;">
+          <span>已追蹤頻道 ({{ monitoredChannels.length }})</span>
+          <span v-if="monitoredChannels.length > 0" style="color: #ef4444; cursor: pointer;" @click="clearAllChannels">清空</span>
+        </div>
+
+        <div v-if="monitoredChannels.length === 0" style="text-align: center; color: #94a3b8; padding: 24px 0; font-size: 12px;">
+          尚未新增追蹤頻道。<br>請在上方輸入框貼上 YouTube 頻道網址或 @handle 加入追蹤。
+        </div>
+
+        <div v-else style="display: flex; flex-direction: column; gap: 8px;">
+          <div
+            v-for="channel in monitoredChannels"
+            :key="channel.channelId"
+            style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);"
+          >
+            <!-- 第一行：頭像 + 頻道名稱 + Switch開關 + 刪除按鈕 -->
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1; margin-right: 8px;">
+                <img
+                  :src="channel.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png'"
+                  style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
+                  @error="($event.target as HTMLImageElement).src='https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png'"
+                />
+                <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  {{ channel.title }}
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                <van-switch v-model="channel.enabled" size="18px" />
+                <van-button size="mini" type="danger" plain icon="cross" round @click="removeMonitoredChannel(channel.channelId)" style="padding: 0; width: 22px; height: 22px;" />
+              </div>
+            </div>
+
+            <!-- 第二行：最新影片標題 + 測試按鈕 -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #f8fafc; padding: 4px 8px; border-radius: 6px; border: 1px solid #f1f5f9;">
+              <div style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
+                {{ channel.lastVideoTitle ? '最新: ' + channel.lastVideoTitle : '等待新片比對中...' }}
+              </div>
+              <van-button 
+                size="mini" 
+                type="warning" 
+                plain 
+                round 
+                icon="play-circle-o" 
+                title="模擬此頻道發布新片（插隊下載最新一部影片）" 
+                @click="simulateNewVideo(channel)"
+                style="padding: 0 8px; height: 20px; font-size: 10px; flex-shrink: 0;"
+              >
+                測試
+              </van-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </van-dialog>
+
     <YouTubeBatchModal
       v-model:show="showPlaylistModal"
       :channel-title="parsedChannelTitle"
@@ -784,7 +889,313 @@ onMounted(async () => {
       }
     }, 3000);
   }
+
+  // 頻道自動追蹤排程：APP 開啟時比對自上次檢查是否已達週期
+  const checkIntervalMs = (monitorConfig.value.checkIntervalMinutes || 60) * 60 * 1000;
+  const timeSinceLastCheck = Date.now() - (monitorConfig.value.lastGlobalCheckTime || 0);
+  if (monitorConfig.value.autoCheckEnabled && timeSinceLastCheck >= checkIntervalMs) {
+    setTimeout(() => {
+      checkAllMonitoredChannels(false);
+    }, 3000);
+  }
+
+  // 每一分鐘背景核對是否已達下一個一小時檢查週期
+  setInterval(() => {
+    if (!monitorConfig.value.autoCheckEnabled) return;
+    const intervalMs = (monitorConfig.value.checkIntervalMinutes || 60) * 60 * 1000;
+    const elapsed = Date.now() - (monitorConfig.value.lastGlobalCheckTime || 0);
+    if (elapsed >= intervalMs) {
+      checkAllMonitoredChannels(false);
+    }
+  }, 60000);
 });
+
+interface MonitoredChannel {
+  channelId: string;
+  title: string;
+  thumbnail: string;
+  enabled: boolean;
+  lastCheckTime: number;
+  lastKnownVideoId?: string;
+  lastVideoTitle?: string;
+}
+
+interface ChannelMonitorConfig {
+  autoCheckEnabled: boolean;
+  checkIntervalMinutes: number;
+  lastGlobalCheckTime: number;
+}
+
+const monitoredChannels = ref<MonitoredChannel[]>(
+  JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]')
+);
+
+const monitorConfig = ref<ChannelMonitorConfig>(
+  JSON.parse(localStorage.getItem('avd_monitor_config') || JSON.stringify({
+    autoCheckEnabled: true,
+    checkIntervalMinutes: 60,
+    lastGlobalCheckTime: 0
+  }))
+);
+
+watch(monitoredChannels, (val) => {
+  localStorage.setItem('avd_monitored_channels', JSON.stringify(val));
+}, { deep: true });
+
+watch(monitorConfig, (val) => {
+  localStorage.setItem('avd_monitor_config', JSON.stringify(val));
+}, { deep: true });
+
+const showChannelModal = ref(false);
+const isAddingManualChannel = ref(false);
+const isCheckingChannels = ref(false);
+const manualChannelInput = ref('');
+
+const addManualChannel = async () => {
+  if (!manualChannelInput.value.trim()) {
+    showToast('請輸入頻道網址或 @handle');
+    return;
+  }
+
+  isAddingManualChannel.value = true;
+  try {
+    const res = await DownloadService.resolveYouTubeChannel(manualChannelInput.value.trim());
+    if (monitoredChannels.value.some(c => c.channelId === res.channelId)) {
+      showToast('此頻道已在追蹤清單中');
+      return;
+    }
+
+    let channelTitle = res.title || manualChannelInput.value.trim();
+    let latestVid = '';
+    let latestTitle = '';
+    try {
+      const rss = await DownloadService.fetchYouTubeRss(res.channelId);
+      if (rss && rss.length > 0) {
+        latestVid = rss[0].videoId;
+        latestTitle = rss[0].title;
+      }
+    } catch (e) {
+      console.warn('Initial RSS fetch for title skipped', e);
+    }
+
+    monitoredChannels.value.push({
+      channelId: res.channelId,
+      title: channelTitle,
+      thumbnail: 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+      enabled: true,
+      lastCheckTime: Date.now(),
+      lastKnownVideoId: latestVid,
+      lastVideoTitle: latestTitle
+    });
+
+    manualChannelInput.value = '';
+    showToast(`成功加入頻道追蹤！`);
+  } catch (e: any) {
+    showToast(`加入失敗: ${e.message || String(e)}`);
+  } finally {
+    isAddingManualChannel.value = false;
+  }
+};
+
+const removeMonitoredChannel = (channelId: string) => {
+  monitoredChannels.value = monitoredChannels.value.filter(c => c.channelId !== channelId);
+  showToast('已取消追蹤');
+};
+
+const clearAllChannels = () => {
+  showDialog({
+    title: '確認清空',
+    message: '確定要清空所有追蹤的頻道嗎？',
+    showCancelButton: true
+  }).then(() => {
+    monitoredChannels.value = [];
+    showToast('已清空追蹤清單');
+  }).catch(() => {});
+};
+
+const checkAllMonitoredChannels = async (isManual = false) => {
+  if (isCheckingChannels.value) return;
+  if (!monitorConfig.value.autoCheckEnabled && !isManual) return;
+
+  const enabledChannels = monitoredChannels.value.filter(c => c.enabled);
+  if (enabledChannels.length === 0) {
+    if (isManual) showToast('目前沒有啟用的追蹤頻道');
+    return;
+  }
+
+  isCheckingChannels.value = true;
+  if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
+
+  let newVideoCount = 0;
+  const now = Date.now();
+
+  for (const channel of enabledChannels) {
+    try {
+      const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+      if (!videos || videos.length === 0) continue;
+
+      const latestVideo = videos[0];
+      const channelLastCheck = channel.lastCheckTime || 0;
+
+      if (channelLastCheck === 0) {
+        channel.lastCheckTime = now;
+        channel.lastKnownVideoId = latestVideo.videoId;
+        channel.lastVideoTitle = latestVideo.title;
+        continue;
+      }
+
+      const newVideos = videos.filter(v => {
+        const isTimeNewer = v.publishedTime > channelLastCheck;
+        const isDifferentId = v.videoId !== channel.lastKnownVideoId;
+        const alreadyInTasks = tasks.value.some((t: any) => {
+          if (t.url && typeof t.url === 'string' && t.url.includes(v.videoId)) return true;
+          if (t.playlists && Array.isArray(t.playlists)) {
+            return t.playlists.some((pl: any) => 
+              pl.subTasks && Array.isArray(pl.subTasks) && pl.subTasks.some((st: any) => st.url && st.url.includes(v.videoId))
+            );
+          }
+          return false;
+        });
+        return isTimeNewer && isDifferentId && !alreadyInTasks;
+      });
+
+      if (newVideos.length > 0) {
+        for (const vid of newVideos.reverse()) {
+          const newTask: DownloadTask = {
+            id: taskIdCounter++,
+            type: 'file',
+            isGroup: false,
+            url: vid.url,
+            title: `[${channel.title}] ${vid.title}`,
+            status: 'pending',
+            progress: 0,
+            eta: '',
+            line: '【自動追蹤】排隊優先下載中...',
+            path: '',
+            errorMsg: '',
+            mediaUri: '',
+            isAudio: false,
+            subFolder: channel.title ? channel.title.replace(/[\/\\:*?"<>|]/g, '_') : ''
+          };
+          tasks.value.unshift(newTask); // 優先插隊至佇列最前面第一位！
+          newVideoCount++;
+        }
+      }
+
+      channel.lastCheckTime = now;
+      channel.lastKnownVideoId = latestVideo.videoId;
+      channel.lastVideoTitle = latestVideo.title;
+    } catch (err) {
+      console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
+    }
+  }
+
+  monitorConfig.value.lastGlobalCheckTime = now;
+  isCheckingChannels.value = false;
+
+  if (newVideoCount > 0) {
+    showToast(`🔔 發現 ${newVideoCount} 部新影片，已優先加入下載佇列！`);
+    processQueue();
+  } else if (isManual) {
+    showToast('已檢查完成，目前沒有新影片');
+  }
+};
+
+const simulateNewVideo = async (channel: MonitoredChannel) => {
+  showLoadingToast({ message: '正在模擬抓取最新影片...', forbidClick: true });
+  try {
+    const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+    closeToast();
+    if (!videos || videos.length === 0) {
+      showToast('無法取得該頻道影片清單');
+      return;
+    }
+
+    const latestVideo = videos[0];
+    const testTask: DownloadTask = {
+      id: taskIdCounter++,
+      type: 'file',
+      isGroup: false,
+      url: latestVideo.url,
+      title: `[測試模擬] [${channel.title}] ${latestVideo.title}`,
+      status: 'pending',
+      progress: 0,
+      eta: '',
+      line: '【測試模式】優先排隊下載中...',
+      path: '',
+      errorMsg: '',
+      mediaUri: '',
+      isAudio: false,
+      subFolder: channel.title ? channel.title.replace(/[\/\\:*?"<>|]/g, '_') : ''
+    };
+
+    tasks.value.unshift(testTask); // 優先插隊至佇列最前面第一位！
+    showToast(`🔔 成功模擬！已將《${latestVideo.title}》插隊至最前面！`);
+    showChannelModal.value = false; // 關閉彈窗回到主介面直接看下載進度
+    processQueue();
+  } catch (e: any) {
+    closeToast();
+    showToast(`測試失敗: ${e.message || String(e)}`);
+  }
+};
+
+const simulateGlobalNewVideo = async () => {
+  const enabledChannels = monitoredChannels.value.filter(c => c.enabled);
+  if (enabledChannels.length === 0) {
+    showToast('請先新增並啟用至少一個追蹤頻道');
+    return;
+  }
+
+  showLoadingToast({ message: `正在抓取 ${enabledChannels.length} 個頻道最新 2 集影片...`, forbidClick: true });
+  let totalAdded = 0;
+
+  try {
+    for (const channel of enabledChannels) {
+      try {
+        const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+        if (!videos || videos.length === 0) continue;
+
+        // 取得最新 2 集影片
+        const topVideos = videos.slice(0, 2);
+        // 按時間正序反轉插入，讓最新的在最頂部
+        for (const vid of topVideos.reverse()) {
+          const testTask: DownloadTask = {
+            id: taskIdCounter++,
+            type: 'file',
+            isGroup: false,
+            url: vid.url,
+            title: `[測試模擬] [${channel.title}] ${vid.title}`,
+            status: 'pending',
+            progress: 0,
+            eta: '',
+            line: '【測試模式】優先排隊下載中...',
+            path: '',
+            errorMsg: '',
+            mediaUri: '',
+            isAudio: false,
+            subFolder: channel.title ? channel.title.replace(/[\/\\:*?"<>|]/g, '_') : ''
+          };
+          tasks.value.unshift(testTask);
+          totalAdded++;
+        }
+      } catch (err) {
+        console.warn(`模擬抓取頻道 ${channel.title} 失敗:`, err);
+      }
+    }
+
+    closeToast();
+    if (totalAdded > 0) {
+      showToast(`🔔 成功！已將各頻道最新影片（共 ${totalAdded} 部）插隊至最前面！`);
+      showChannelModal.value = false;
+      processQueue();
+    } else {
+      showToast('未能取得任何頻道的影片');
+    }
+  } catch (e: any) {
+    closeToast();
+    showToast(`模擬失敗: ${e.message || String(e)}`);
+  }
+};
 
 const url = ref('');
 const savedMp3Mode = localStorage.getItem('avd_mp3_mode');
