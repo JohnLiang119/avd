@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -606,6 +606,57 @@
             </template>
           </van-cell>
         </van-cell-group>
+
+        <p style="font-size: 13px; color: #4b5563; margin-top: 16px; margin-bottom: 12px; font-weight: bold;">
+          系統版本與更新
+        </p>
+        <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
+          <van-cell title="目前版本" :value="`v${version}`" />
+          <van-cell title="檢查新版本" is-link @click="handleManualCheckUpdate" />
+        </van-cell-group>
+      </div>
+    </van-dialog>
+
+    <!-- 🚀 應用程式更新彈窗 -->
+    <van-dialog
+      v-model:show="showUpdateModal"
+      :title="`🚀 發現新版本 v${updateInfo.latestVersion}`"
+      :show-confirm-button="!isUpdating"
+      :show-cancel-button="!isUpdating"
+      :confirm-button-text="updateFailed ? '重試下載' : '立即更新'"
+      cancel-button-text="稍後再說"
+      :close-on-click-overlay="false"
+      @confirm="startDownloadAndInstall"
+    >
+      <div style="padding: 16px; max-height: 380px; overflow-y: auto;">
+        <div style="font-size: 13px; color: #4b5563; margin-bottom: 8px; display: flex; justify-content: space-between;">
+          <span>目前版本: <b>v{{ version }}</b></span>
+          <span style="color: #10b981; font-weight: bold;">最新: v{{ updateInfo.latestVersion }}</span>
+        </div>
+
+        <div v-if="!isUpdating && !updateFailed" style="background: #f9fafb; border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid #e5e7eb;">
+          <div style="font-size: 12px; font-weight: bold; color: #374151; margin-bottom: 4px;">📝 更新說明:</div>
+          <div style="font-size: 12px; color: #4b5563; white-space: pre-wrap; line-height: 1.5;">{{ updateInfo.releaseNotes }}</div>
+        </div>
+
+        <!-- 下載進度條 -->
+        <div v-if="isUpdating" style="padding: 12px 0;">
+          <div style="font-size: 13px; color: #1f2937; margin-bottom: 8px; text-align: center; font-weight: 500;">
+            正在下載更新檔 ({{ updateProgress.percent }}%)...
+          </div>
+          <van-progress :percentage="updateProgress.percent" stroke-width="8" color="#10b981" />
+          <div v-if="updateProgress.totalBytes > 0" style="font-size: 11px; color: #6b7280; text-align: right; margin-top: 6px;">
+            {{ formatBytes(updateProgress.downloadedBytes) }} / {{ formatBytes(updateProgress.totalBytes) }}
+          </div>
+        </div>
+
+        <!-- 錯誤狀態 -->
+        <div v-if="updateFailed" style="padding: 10px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; margin-top: 8px;">
+          <div style="font-size: 12px; color: #b91c1c;">⚠️ 下載失敗: {{ updateErrorMsg }}</div>
+          <van-button size="small" type="primary" plain block style="margin-top: 8px;" @click="openBrowserRelease">
+            在瀏覽器開啟下載頁面
+          </van-button>
+        </div>
       </div>
     </van-dialog>
 
@@ -724,6 +775,104 @@ const version = pkg.version;
 import { App } from '@capacitor/app';
 import { open as openShell } from '@tauri-apps/plugin-shell';
 import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
+import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
+
+// ===== 🚀 自動更新狀態與邏輯 =====
+const showUpdateModal = ref(false);
+const updateInfo = ref<UpdateInfo>({
+  hasUpdate: false,
+  latestVersion: version,
+  currentVersion: version,
+  releaseTitle: '',
+  releaseNotes: '',
+  downloadUrl: '',
+  assetName: '',
+  htmlUrl: ''
+});
+const isUpdating = ref(false);
+const updateFailed = ref(false);
+const updateErrorMsg = ref('');
+const updateProgress = ref<DownloadProgress>({
+  percent: 0,
+  downloadedBytes: 0,
+  totalBytes: 0
+});
+
+// 手動檢查更新 (設定面板)
+const handleManualCheckUpdate = async () => {
+  showLoadingToast({
+    message: '正在檢查新版本...',
+    forbidClick: true,
+    duration: 0
+  });
+
+  try {
+    const res = await UpdateService.checkForUpdates(version, 8000);
+    closeToast();
+    if (res.hasUpdate) {
+      updateInfo.value = res;
+      updateFailed.value = false;
+      isUpdating.value = false;
+      showUpdateModal.value = true;
+    } else {
+      showToast({
+        message: `目前已是最新版本 (v${version})`,
+        icon: 'success'
+      });
+    }
+  } catch (e: any) {
+    closeToast();
+    showToast('檢查更新失敗，請確認網路連線');
+  }
+};
+
+// 啟動時靜默檢查更新 (背景執行，不打擾)
+const checkUpdateOnStartup = async () => {
+  try {
+    const res = await UpdateService.checkForUpdates(version, 5000);
+    if (res.hasUpdate) {
+      updateInfo.value = res;
+      updateFailed.value = false;
+      isUpdating.value = false;
+      showUpdateModal.value = true;
+    }
+  } catch (e) {
+    // 靜默忽略離線或超時
+  }
+};
+
+// 開始下載與安裝
+const startDownloadAndInstall = async () => {
+  if (isUpdating.value) return;
+  isUpdating.value = true;
+  updateFailed.value = false;
+  updateErrorMsg.value = '';
+  updateProgress.value = {
+    percent: 0,
+    downloadedBytes: 0,
+    totalBytes: 0
+  };
+
+  try {
+    await UpdateService.downloadAndInstall(updateInfo.value, (progress) => {
+      updateProgress.value = progress;
+    });
+  } catch (e: any) {
+    isUpdating.value = false;
+    updateFailed.value = true;
+    updateErrorMsg.value = e.message || String(e);
+  }
+};
+
+// 在瀏覽器開啟 Release 頁面
+const openBrowserRelease = () => {
+  if (updateInfo.value.htmlUrl) {
+    UpdateService.openReleasePage(updateInfo.value.htmlUrl);
+  }
+};
+
+// 啟動時觸發背景靜默檢查
+checkUpdateOnStartup();
 
 const isTvMode = ref(localStorage.getItem('avd_tv_mode') === 'true');
 
