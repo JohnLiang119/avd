@@ -142,46 +142,51 @@ export const UpdateService = {
 
     if (!isTauri()) {
       // Android 流程
-      return new Promise<void>((resolve, reject) => {
-        let listenerHandle: any = null;
-
-        const cleanup = () => {
-          if (listenerHandle && listenerHandle.remove) {
-            listenerHandle.remove();
-          }
-        };
-
-        YoutubeDlPlugin.addListener('updateDownloadProgress', (data: any) => {
+      // 1. 先完成 listener 註冊，確保不漏接任何進度事件
+      const listenerHandle = await YoutubeDlPlugin.addListener(
+        'updateDownloadProgress',
+        (data: any) => {
           onProgress({
             percent: data.percent || 0,
             downloadedBytes: data.downloadedBytes || 0,
             totalBytes: data.totalBytes || 0
           });
-        }).then((handle: any) => {
-          listenerHandle = handle;
-        });
+        }
+      );
 
+      const cleanup = () => {
+        if (listenerHandle && listenerHandle.remove) {
+          listenerHandle.remove();
+        }
+      };
+
+      try {
         const fileName = updateInfo.assetName || `AVD_${updateInfo.latestVersion}.apk`;
 
-        YoutubeDlPlugin.downloadUpdateFile({
+        const res = await YoutubeDlPlugin.downloadUpdateFile({
           url: updateInfo.downloadUrl,
           fileName
-        }).then((res: any) => {
-          cleanup();
-          const filePath = res.filePath;
-          if (!filePath) {
-            reject(new Error('下載完成但未取得檔案路徑'));
-            return;
-          }
-          // 喚起系統安裝 Intent
-          return YoutubeDlPlugin.installApk({ filePath });
-        }).then(() => {
-          resolve();
-        }).catch((err: any) => {
-          cleanup();
-          reject(err);
         });
-      });
+
+        // 下載完成，強制發送 100% 進度
+        onProgress({ percent: 100, downloadedBytes: 0, totalBytes: 0 });
+
+        // 等待 1.5 秒讓使用者看到 100% 完成狀態
+        await new Promise(r => setTimeout(r, 1500));
+
+        cleanup();
+
+        const filePath = res.filePath;
+        if (!filePath) {
+          throw new Error('下載完成但未取得檔案路徑');
+        }
+
+        // 喚起系統安裝 Intent
+        await YoutubeDlPlugin.installApk({ filePath });
+      } catch (err: any) {
+        cleanup();
+        throw err;
+      }
     } else {
       // Windows 流程
       try {
@@ -231,6 +236,12 @@ export const UpdateService = {
 
         // 寫入本地檔案
         await writeFile(targetPath, allChunks);
+
+        // 強制發送 100% 進度
+        onProgress({ percent: 100, downloadedBytes, totalBytes });
+
+        // 等待 1.5 秒讓使用者看到 100% 完成狀態
+        await new Promise(r => setTimeout(r, 1500));
 
         // 透過 Rust 執行 msiexec 安裝並重啟
         await invoke('install_win_msi', { msiPath: targetPath });
