@@ -1,4 +1,4 @@
-# 🚀 AVD (Audio Video Downloader)
+﻿# 🚀 AVD (Audio Video Downloader)
 
 <div align="center">
 
@@ -10,6 +10,9 @@
 支援 YouTube 頻道定時新片自動追蹤、高畫質 MP4 / MP3 轉換、播放清單批次解析與區域網路跨裝置快傳
 
 </div>
+
+> ⚠️ **免責聲明 (Disclaimer)**  
+> 本專案僅供程式開發、個人研究與合理使用（Fair Use）學習之用。請勿使用本工具下載受版權保護且未獲授權之商業內容。使用者須自行承擔因不當使用所衍生之所有法律責任。
 
 ---
 
