@@ -197,7 +197,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "複製安裝檔..." -ForegroundColor Cyan
-$installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*.msi" | Select-Object -First 1
+$installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*${appVersion}*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $installer) {
+    $installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
 $destMsiName = $null
 if ($installer) {
     $destMsiName = $installer.Name
