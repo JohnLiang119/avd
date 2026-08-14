@@ -1,4 +1,10 @@
-﻿Set-Location $PSScriptRoot
+﻿[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$false)]
+    [switch]$Clean
+)
+
+Set-Location $PSScriptRoot
 
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host "   開始執行全平台編譯 (APK + Windows)" -ForegroundColor Magenta
@@ -125,6 +131,12 @@ if ($env:PATH -notmatch [regex]::Escape($cargoPath)) {
     $env:PATH = "$cargoPath;$env:PATH"
 }
 
+# 支援手動 -Clean 預先清理快取
+if ($Clean -and (Test-Path "src-tauri\target")) {
+    Write-Host ">>> 已指定 -Clean 參數，正在預先清理 Rust 快取目錄..." -ForegroundColor Yellow
+    Remove-Item -Path "src-tauri\target" -Recurse -Force
+}
+
 # 自動檢測當前 Rust target triple 並確保 sidecar 二進制檔齊全
 try {
     $rustcHost = (rustc -vV | Select-String "host:\s*(.+)$").Matches.Groups[1].Value.Trim()
@@ -150,9 +162,19 @@ try {
 Write-Host "開始編譯 Windows 版 (Tauri)..." -ForegroundColor Cyan
 npm run tauri:build
 
+# 智慧容錯救援機制：若首次打包失敗，自動清理 target 快取並重新嘗試全量打包
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Windows 打包失敗！"
-    exit 1
+    Write-Warning "⚠️ 首次 Windows 打包失敗，可能存在舊路徑或快取衝突。"
+    Write-Host ">>> 正在自動清理 src-tauri\target 快取並重新嘗試全量打包..." -ForegroundColor Cyan
+    if (Test-Path "src-tauri\target") {
+        Remove-Item -Path "src-tauri\target" -Recurse -Force
+    }
+    
+    npm run tauri:build
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Windows 打包重試依然失敗，請檢查 Rust 原始碼或編譯環境。"
+        exit 1
+    }
 }
 
 Write-Host "複製安裝檔..." -ForegroundColor Cyan
