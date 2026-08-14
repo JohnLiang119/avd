@@ -18,6 +18,15 @@ fn stop_win_local_server() {
     server::stop_server();
 }
 
+#[tauri::command]
+fn install_win_msi(msi_path: String) -> Result<(), String> {
+    std::process::Command::new("msiexec")
+        .args(["/i", &msi_path, "/passive"])
+        .spawn()
+        .map_err(|e| format!("啟動 MSI 安裝失敗: {}", e))?;
+    std::process::exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -27,7 +36,8 @@ pub fn run() {
     .plugin(tauri_plugin_os::init())
     .invoke_handler(tauri::generate_handler![
         start_win_local_server,
-        stop_win_local_server
+        stop_win_local_server,
+        install_win_msi
     ])
     .setup(|_app| {
       Ok(())

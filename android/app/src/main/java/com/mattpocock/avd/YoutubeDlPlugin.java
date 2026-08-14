@@ -1126,4 +1126,122 @@ public class YoutubeDlPlugin extends Plugin {
             call.reject(e.getMessage());
         }
     }
+
+    @PluginMethod
+    public void downloadUpdateFile(PluginCall call) {
+        String urlString = call.getString("url");
+        String fileName = call.getString("fileName", "AVD_update.apk");
+
+        if (urlString == null || urlString.isEmpty()) {
+            call.reject("Must provide download URL");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                File dir = getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                if (dir == null) {
+                    dir = getContext().getCacheDir();
+                }
+                File targetFile = new File(dir, fileName);
+                if (targetFile.exists()) {
+                    targetFile.delete();
+                }
+
+                java.net.URL url = new java.net.URL(urlString);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setInstanceFollowRedirects(true);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(30000);
+                conn.connect();
+
+                // 處理手動轉址 (GitHub Releases 通常會轉址到 AWS S3 / Objects)
+                int status = conn.getResponseCode();
+                if (status == java.net.HttpURLConnection.HTTP_MOVED_TEMP || 
+                    status == java.net.HttpURLConnection.HTTP_MOVED_PERM || 
+                    status == 307 || status == 308) {
+                    String newUrl = conn.getHeaderField("Location");
+                    conn = (java.net.HttpURLConnection) new java.net.URL(newUrl).openConnection();
+                    conn.connect();
+                }
+
+                long totalBytes = conn.getContentLengthLong();
+                java.io.InputStream in = conn.getInputStream();
+                java.io.FileOutputStream out = new java.io.FileOutputStream(targetFile);
+
+                byte[] buffer = new byte[8192];
+                long downloadedBytes = 0;
+                int bytesRead;
+                long lastProgressTime = 0;
+
+                while ((bytesRead = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, bytesRead);
+                    downloadedBytes += bytesRead;
+
+                    long now = System.currentTimeMillis();
+                    if (now - lastProgressTime > 100 || downloadedBytes == totalBytes) {
+                        lastProgressTime = now;
+                        int percent = totalBytes > 0 ? (int) ((downloadedBytes * 100) / totalBytes) : 0;
+                        JSObject progress = new JSObject();
+                        progress.put("percent", percent);
+                        progress.put("downloadedBytes", downloadedBytes);
+                        progress.put("totalBytes", totalBytes);
+                        notifyListeners("updateDownloadProgress", progress);
+                    }
+                }
+
+                out.flush();
+                out.close();
+                in.close();
+                conn.disconnect();
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("filePath", targetFile.getAbsolutePath());
+                call.resolve(ret);
+
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to download update file", e);
+                call.reject("下載更新檔失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void installApk(PluginCall call) {
+        String filePath = call.getString("filePath");
+        if (filePath == null || filePath.isEmpty()) {
+            call.reject("Must provide filePath");
+            return;
+        }
+
+        try {
+            File apkFile = new File(filePath);
+            if (!apkFile.exists()) {
+                call.reject("APK file does not exist: " + filePath);
+                return;
+            }
+
+            Context context = getContext();
+            android.net.Uri apkUri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                context.getPackageName() + ".fileprovider",
+                apkFile
+            );
+
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            context.startActivity(intent);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to install APK", e);
+            call.reject("喚起安裝失敗: " + e.getMessage());
+        }
+    }
 }
