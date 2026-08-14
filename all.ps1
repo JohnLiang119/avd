@@ -119,26 +119,7 @@ $destApkName = "AVD_${appVersion}.apk"
 if (Test-Path $apkPath) {
     Copy-Item -Path $apkPath -Destination $destApkName -Force
     Write-Host "打包成功！APK 已匯出至: $pwd\$destApkName" -ForegroundColor Green
-    
-    Write-Host "嘗試安裝 APK 到連接的手機..." -ForegroundColor Cyan
-    $installOutput = adb install -r $destApkName 2>&1
-    Write-Host ($installOutput -join "`n")
-    if ($LASTEXITCODE -ne 0) {
-        if ("$installOutput" -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
-            Write-Warning "偵測到手機上已有不同簽名之舊版 AVD，正在嘗試卸載舊版並重新安裝..."
-            adb uninstall com.mattpocock.avd
-            adb install -r $destApkName
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
-            } else {
-                Write-Warning "重新安裝失敗！請手動在手機上將舊版 AVD App 解除安裝後重試。"
-            }
-        } else {
-            Write-Warning "自動安裝失敗！請確認手機螢幕是否跳出「允許 USB 安裝」對話框，或確認已開啟 USB 偵錯。"
-        }
-    } else {
-        Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
-    }
+
 } else {
     Write-Error "找不到編譯出的 APK 檔案。"
 }
@@ -221,17 +202,4 @@ if ($destMsiName -and (Test-Path $destMsiName)) {
 }
 Write-Host "========================================" -ForegroundColor Magenta
 
-Write-Host ""
-Write-Host "🚀 正在為您全自動安裝最新的 Windows 版本..." -ForegroundColor Cyan
-if ($destMsiName -and (Test-Path $destMsiName)) {
-    Start-Process msiexec.exe -ArgumentList "/i `"$pwd\$destMsiName`" /passive" -Wait
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 1641 -or $LASTEXITCODE -eq 3010) {
-        Write-Host "✅ 電腦版自動安裝成功！正在為您開啟新版程式..." -ForegroundColor Green
-        $appPath = Join-Path $env:LOCALAPPDATA "AVD\app.exe"
-        if (Test-Path $appPath) {
-            Start-Process $appPath
-        }
-    } else {
-        Write-Warning "自動安裝可能未完全成功，您可以手動雙擊 $destMsiName 進行安裝。"
-    }
-}
+
