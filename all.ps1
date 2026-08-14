@@ -125,6 +125,28 @@ if ($env:PATH -notmatch [regex]::Escape($cargoPath)) {
     $env:PATH = "$cargoPath;$env:PATH"
 }
 
+# 自動檢測當前 Rust target triple 並確保 sidecar 二進制檔齊全
+try {
+    $rustcHost = (rustc -vV | Select-String "host:\s*(.+)$").Matches.Groups[1].Value.Trim()
+    if ($rustcHost) {
+        Write-Host "檢測到 Rust 編譯目標平台: $rustcHost" -ForegroundColor Cyan
+        $binDir = "src-tauri\bin"
+        $binaries = @("yt-dlp", "ffmpeg", "rclone")
+        foreach ($bin in $binaries) {
+            $targetFile = Join-Path $binDir "$bin-$rustcHost.exe"
+            if (-not (Test-Path $targetFile)) {
+                $sourceFile = Get-ChildItem -Path $binDir -Filter "$bin-*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($sourceFile) {
+                    Write-Host "為 $bin 複製適配二進制檔: $($sourceFile.Name) -> $(Split-Path $targetFile -Leaf)" -ForegroundColor Green
+                    Copy-Item -Path $sourceFile.FullName -Destination $targetFile -Force
+                }
+            }
+        }
+    }
+} catch {
+    Write-Warning "自動檢測 Rust target 失敗，將使用現有二進制檔。"
+}
+
 Write-Host "開始編譯 Windows 版 (Tauri)..." -ForegroundColor Cyan
 npm run tauri:build
 
