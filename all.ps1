@@ -107,20 +107,27 @@ cd ..
 
 Write-Host "複製 APK 檔案..." -ForegroundColor Cyan
 $apkPath = "android\app\build\outputs\apk\debug\app-debug.apk"
-$destPath = "avd_apk.apk"
+$appVersion = "3.0.1"
+try {
+    if (Test-Path "package.json") {
+        $pkg = Get-Content "package.json" -Raw | ConvertFrom-Json
+        if ($pkg.version) { $appVersion = $pkg.version }
+    }
+} catch {}
+$destApkName = "AVD_${appVersion}.apk"
 
 if (Test-Path $apkPath) {
-    Copy-Item -Path $apkPath -Destination $destPath -Force
-    Write-Host "打包成功！APK 已匯出至: $pwd\$destPath" -ForegroundColor Green
+    Copy-Item -Path $apkPath -Destination $destApkName -Force
+    Write-Host "打包成功！APK 已匯出至: $pwd\$destApkName" -ForegroundColor Green
     
     Write-Host "嘗試安裝 APK 到連接的手機..." -ForegroundColor Cyan
-    $installOutput = adb install -r $destPath 2>&1
+    $installOutput = adb install -r $destApkName 2>&1
     Write-Host ($installOutput -join "`n")
     if ($LASTEXITCODE -ne 0) {
         if ("$installOutput" -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
             Write-Warning "偵測到手機上已有不同簽名之舊版 AVD，正在嘗試卸載舊版並重新安裝..."
             adb uninstall com.mattpocock.avd
-            adb install -r $destPath
+            adb install -r $destApkName
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
             } else {
@@ -191,9 +198,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "複製安裝檔..." -ForegroundColor Cyan
 $installer = Get-ChildItem -Path "src-tauri\target\release\bundle\msi\*.msi" | Select-Object -First 1
+$destMsiName = $null
 if ($installer) {
-    Copy-Item -Path $installer.FullName -Destination "avd_win.msi" -Force
-    Write-Host "打包成功！安裝檔已匯出至: $pwd\avd_win.msi" -ForegroundColor Green
+    $destMsiName = $installer.Name
+    Copy-Item -Path $installer.FullName -Destination $destMsiName -Force
+    Write-Host "打包成功！安裝檔已匯出至: $pwd\$destMsiName" -ForegroundColor Green
 } else {
     Write-Warning "找不到 MSI 安裝檔"
 }
@@ -201,19 +210,25 @@ if ($installer) {
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host "   🎉 全平台任務順利完成！" -ForegroundColor Magenta
-Write-Host "   APK: $pwd\avd_apk.apk" -ForegroundColor Green
-Write-Host "   WIN: $pwd\avd_win.msi" -ForegroundColor Green
+if ($destApkName -and (Test-Path $destApkName)) {
+    Write-Host "   APK: $pwd\$destApkName" -ForegroundColor Green
+}
+if ($destMsiName -and (Test-Path $destMsiName)) {
+    Write-Host "   WIN: $pwd\$destMsiName" -ForegroundColor Green
+}
 Write-Host "========================================" -ForegroundColor Magenta
 
 Write-Host ""
 Write-Host "🚀 正在為您全自動安裝最新的 Windows 版本..." -ForegroundColor Cyan
-Start-Process msiexec.exe -ArgumentList "/i `"$pwd\avd_win.msi`" /passive" -Wait
-if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 1641 -or $LASTEXITCODE -eq 3010) {
-    Write-Host "✅ 電腦版自動安裝成功！正在為您開啟新版程式..." -ForegroundColor Green
-    $appPath = Join-Path $env:LOCALAPPDATA "AVD\app.exe"
-    if (Test-Path $appPath) {
-        Start-Process $appPath
+if ($destMsiName -and (Test-Path $destMsiName)) {
+    Start-Process msiexec.exe -ArgumentList "/i `"$pwd\$destMsiName`" /passive" -Wait
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq 1641 -or $LASTEXITCODE -eq 3010) {
+        Write-Host "✅ 電腦版自動安裝成功！正在為您開啟新版程式..." -ForegroundColor Green
+        $appPath = Join-Path $env:LOCALAPPDATA "AVD\app.exe"
+        if (Test-Path $appPath) {
+            Start-Process $appPath
+        }
+    } else {
+        Write-Warning "自動安裝可能未完全成功，您可以手動雙擊 $destMsiName 進行安裝。"
     }
-} else {
-    Write-Warning "自動安裝可能未完全成功，您可以手動雙擊 avd_win.msi 進行安裝。"
 }

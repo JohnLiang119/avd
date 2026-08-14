@@ -185,6 +185,176 @@ public class YoutubeDlPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void resolveChannel(PluginCall call) {
+        String input = call.getString("input", "");
+        if (input == null || input.trim().isEmpty()) {
+            call.reject("請輸入頻道網址或 ID");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String raw = input.trim();
+                
+                // 1. 若已經是 UC 開頭的 Channel ID
+                if (raw.matches("^UC[a-zA-Z0-9_-]{22}$")) {
+                    JSObject ret = new JSObject();
+                    ret.put("channelId", raw);
+                    ret.put("title", raw);
+                    ret.put("thumbnail", "");
+                    call.resolve(ret);
+                    return;
+                }
+
+                // 2. 若網址已包含 channel/UC...
+                java.util.regex.Matcher mChan = java.util.regex.Pattern.compile("youtube\\.com/channel/(UC[a-zA-Z0-9_-]{22})", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(raw);
+                if (mChan.find()) {
+                    JSObject ret = new JSObject();
+                    ret.put("channelId", mChan.group(1));
+                    ret.put("title", mChan.group(1));
+                    ret.put("thumbnail", "");
+                    call.resolve(ret);
+                    return;
+                }
+
+                // 3. 處理 @handle 或一般網址
+                String targetUrl = raw;
+                if (raw.startsWith("@")) {
+                    targetUrl = "https://www.youtube.com/" + raw;
+                } else if (!raw.startsWith("http")) {
+                    targetUrl = "https://www.youtube.com/@" + raw;
+                }
+
+                String channelId = "";
+                String title = "";
+                String thumbnail = "";
+
+                // 先透過 HttpURLConnection 嘗試高速讀取網頁
+                try {
+                    java.net.URL urlObj = new java.net.URL(targetUrl);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) urlObj.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                    conn.setRequestProperty("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+                    conn.setInstanceFollowRedirects(true);
+
+                    if (conn.getResponseCode() == 200) {
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                            StringBuilder sb = new StringBuilder();
+                            String line;
+                            while ((line = reader.readLine()) != null) {
+                                sb.append(line);
+                                if (sb.length() > 500000) break;
+                            }
+                            String html = sb.toString();
+                            
+                            java.util.regex.Matcher m1 = java.util.regex.Pattern.compile("\"channelId\":\\s*\"(UC[a-zA-Z0-9_-]{22})\"").matcher(html);
+                            if (m1.find()) {
+                                channelId = m1.group(1);
+                            } else {
+                                java.util.regex.Matcher m2 = java.util.regex.Pattern.compile("<meta\\s+itemprop=\"channelId\"\\s+content=\"(UC[a-zA-Z0-9_-]{22})\"").matcher(html);
+                                if (m2.find()) {
+                                    channelId = m2.group(1);
+                                }
+                            }
+
+                            java.util.regex.Matcher mt = java.util.regex.Pattern.compile("<meta\\s+property=\"og:title\"\\s+content=\"([^\"]+)\"").matcher(html);
+                            if (mt.find()) {
+                                title = mt.group(1);
+                            }
+                            
+                            java.util.regex.Matcher mi = java.util.regex.Pattern.compile("<meta\\s+property=\"og:image\"\\s+content=\"([^\"]+)\"").matcher(html);
+                            if (mi.find()) {
+                                thumbnail = mi.group(1);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "HttpURLConnection fetch channel page failed, fallback to yt-dlp", e);
+                }
+
+                // 4. 若 Http 讀取未拿到 channelId，呼叫 youtubedl-android
+                if (channelId == null || channelId.isEmpty()) {
+                    YoutubeDLRequest request = new YoutubeDLRequest(targetUrl);
+                    request.addOption("--flat-playlist");
+                    request.addOption("-J");
+                    request.addOption("--playlist-end", "1");
+                    request.addOption("--no-warnings");
+
+                    YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
+                    String jsonStr = response.getOut();
+                    org.json.JSONObject data = new org.json.JSONObject(jsonStr);
+
+                    channelId = data.optString("channel_id", "");
+                    if (channelId.isEmpty() && data.has("uploader_id")) {
+                        String uid = data.optString("uploader_id", "");
+                        if (uid.startsWith("UC")) channelId = uid;
+                    }
+                    if (title.isEmpty()) {
+                        title = data.optString("uploader", data.optString("channel", raw));
+                    }
+                }
+
+                if (channelId != null && !channelId.isEmpty()) {
+                    JSObject ret = new JSObject();
+                    ret.put("channelId", channelId);
+                    ret.put("title", title.isEmpty() ? channelId : title);
+                    ret.put("thumbnail", thumbnail);
+                    call.resolve(ret);
+                } else {
+                    call.reject("無法識別 YouTube 頻道 ID，請確認頻道網址或直接提供 channel/UC... 連結");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to resolve channel", e);
+                call.reject("解析頻道失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void fetchChannelRss(PluginCall call) {
+        String channelId = call.getString("channelId");
+        if (channelId == null || channelId.isEmpty()) {
+            call.reject("Must provide channelId");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String rssUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=" + java.net.URLEncoder.encode(channelId, "UTF-8");
+                java.net.URL urlObj = new java.net.URL(rssUrl);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) urlObj.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(8000);
+
+                if (conn.getResponseCode() != 200) {
+                    call.reject("HTTP " + conn.getResponseCode() + ": 無法獲取頻道 RSS");
+                    return;
+                }
+
+                StringBuilder sb = new StringBuilder();
+                try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                    String line;
+                    while ((line = in.readLine()) != null) {
+                        sb.append(line).append("\n");
+                    }
+                }
+
+                JSObject ret = new JSObject();
+                ret.put("xml", sb.toString());
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to fetch channel RSS", e);
+                call.reject("獲取頻道 RSS 失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    @PluginMethod
     public void startLocalServer(PluginCall call) {
         if (localServer != null && localServer.isAlive()) {
             JSObject ret = new JSObject();
@@ -737,43 +907,12 @@ public class YoutubeDlPlugin extends Plugin {
             return;
         }
         try {
-            // 1. 強制釋放背景第三方播放器 (如 VLC) 相關進程
-            try {
-                android.app.ActivityManager am = (android.app.ActivityManager) getContext().getSystemService(android.content.Context.ACTIVITY_SERVICE);
-                if (am != null) {
-                    am.killBackgroundProcesses("org.videolan.vlc");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to kill background VLC process", e);
-            }
-
-            // 2. 請求最高音訊焦點 (AUDIOFOCUS_GAIN)，迫使背景播放服務自動停止並釋放 AudioTrack 聲卡快取
-            try {
-                android.media.AudioManager audioManager = (android.media.AudioManager) getContext().getSystemService(android.content.Context.AUDIO_SERVICE);
-                if (audioManager != null) {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        android.media.AudioFocusRequest focusRequest = new android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
-                                .setAudioAttributes(new android.media.AudioAttributes.Builder()
-                                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                                        .build())
-                                .build();
-                        audioManager.requestAudioFocus(focusRequest);
-                    } else {
-                        audioManager.requestAudioFocus(null, android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.AUDIOFOCUS_GAIN);
-                    }
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to request audio focus", e);
-            }
-
             android.net.Uri uri = android.net.Uri.parse(uriString);
             String mimeType = call.getString("mimeType", "video/*");
             android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
             intent.setDataAndType(uri, mimeType);
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP);
             intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
             getContext().startActivity(intent);
             call.resolve();
