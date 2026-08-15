@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.4"
+version = "1.0.5"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -30,3 +30,4 @@ tauri-plugin-os = "2.3.2"
 tiny_http = "0.12"
 local-ip-address = "0.6"
 urlencoding = "2.1"
+ureq = "2.10"
