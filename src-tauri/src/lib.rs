@@ -83,10 +83,29 @@ fn download_win_update_file(
 #[tauri::command]
 fn install_win_msi(msi_path: String) -> Result<(), String> {
     let win_path = msi_path.replace("/", "\\");
+
+    // 取得目前 exe 路徑，安裝完後重新啟動
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("無法取得目前程式路徑: {}", e))?;
+    let exe_path = current_exe.to_string_lossy().to_string();
+
+    // 建立臨時 bat 腳本：等 AVD 關閉 → 安裝 MSI → 重啟 AVD → 自刪
+    let temp_dir = std::env::temp_dir();
+    let bat_path = temp_dir.join("avd_update.bat");
+
+    let bat_content = format!(
+        "@echo off\r\ntimeout /t 3 /nobreak >nul\r\nmsiexec /i \"{}\" /passive\r\ntimeout /t 2 /nobreak >nul\r\nstart \"\" \"{}\"\r\ndel \"%~f0\"\r\n",
+        win_path, exe_path
+    );
+
+    std::fs::write(&bat_path, &bat_content)
+        .map_err(|e| format!("建立更新腳本失敗: {}", e))?;
+
     std::process::Command::new("cmd")
-        .args(["/C", "start", "", "msiexec", "/i", &win_path, "/passive"])
+        .args(["/C", "start", "/min", "", &bat_path.to_string_lossy()])
         .spawn()
-        .map_err(|e| format!("啟動 MSI 安裝失敗: {}", e))?;
+        .map_err(|e| format!("啟動更新腳本失敗: {}", e))?;
+
     std::process::exit(0);
 }
 
