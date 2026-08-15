@@ -1,8 +1,8 @@
 import { registerPlugin } from '@capacitor/core';
 import { isTauri } from './DownloadService';
 import { downloadDir } from '@tauri-apps/api/path';
-import { writeFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { open as openShell } from '@tauri-apps/plugin-shell';
 
 const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
@@ -188,64 +188,45 @@ export const UpdateService = {
         throw err;
       }
     } else {
-      // Windows 流程
+      // Windows 流程：透過 Rust 原生呼叫 ureq 下載，徹底解決 WebView2 CORS 限制與 GitHub 轉址問題
+      let unlisten: (() => void) | null = null;
       try {
         const fileName = updateInfo.assetName || `AVD_${updateInfo.latestVersion}.msi`;
         const rawDownDir = await downloadDir();
         const downDir = rawDownDir.replace(/[/\\]+$/, '');
         const targetPath = `${downDir}/${fileName}`;
 
-        const response = await fetch(updateInfo.downloadUrl);
-        if (!response.ok) {
-          throw new Error(`下載失敗 (${response.status} ${response.statusText})`);
-        }
-
-        const contentLength = response.headers.get('content-length');
-        const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
-        let downloadedBytes = 0;
-
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('無法讀取下載資料流');
-        }
-
-        const chunks: Uint8Array[] = [];
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            downloadedBytes += value.length;
-            const percent = totalBytes > 0 ? Math.round((downloadedBytes / totalBytes) * 100) : 0;
+        unlisten = await listen<any>('updateDownloadProgress', (event) => {
+          const data = event.payload;
+          if (data) {
             onProgress({
-              percent,
-              downloadedBytes,
-              totalBytes
+              percent: data.percent || 0,
+              downloadedBytes: data.downloadedBytes || 0,
+              totalBytes: data.totalBytes || 0
             });
           }
-        }
+        });
 
-        // 合併 bytes
-        const allChunks = new Uint8Array(downloadedBytes);
-        let position = 0;
-        for (const chunk of chunks) {
-          allChunks.set(chunk, position);
-          position += chunk.length;
-        }
+        await invoke('download_win_update_file', {
+          url: updateInfo.downloadUrl,
+          filePath: targetPath
+        });
 
-        // 寫入本地檔案
-        await writeFile(targetPath, allChunks);
-
-        // 強制發送 100% 進度
-        onProgress({ percent: 100, downloadedBytes, totalBytes });
+        // 下載完成，強制發送 100% 進度
+        onProgress({ percent: 100, downloadedBytes: 0, totalBytes: 0 });
 
         // 等待 1.5 秒讓使用者看到 100% 完成狀態
         await new Promise(r => setTimeout(r, 1500));
 
+        if (unlisten) {
+          unlisten();
+          unlisten = null;
+        }
+
         // 透過 Rust 執行 msiexec 安裝並重啟
         await invoke('install_win_msi', { msiPath: targetPath });
       } catch (e: any) {
+        if (unlisten) unlisten();
         throw new Error(`Windows 更新失敗: ${e.message || String(e)}`);
       }
     }
