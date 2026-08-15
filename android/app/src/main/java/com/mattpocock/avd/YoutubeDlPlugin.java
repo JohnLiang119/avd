@@ -637,6 +637,8 @@ public class YoutubeDlPlugin extends Plugin {
                     // 使用 yt-dlp 原生下載（繞過 YouTube n 參數限速）
                     YoutubeDLRequest request = new YoutubeDLRequest(url);
                     request.addOption("--no-warnings");
+                    request.addOption("--retries", "3");
+                    request.addOption("--fragment-retries", "3");
                     request.addOption("--extractor-retries", "3");
 
                     if (isMp3 != null && isMp3) {

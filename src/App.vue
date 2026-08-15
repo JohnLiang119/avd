@@ -880,19 +880,33 @@ const startDownloadAndInstall = async () => {
     totalBytes: 0
   };
 
-  try {
-    await UpdateService.downloadAndInstall(updateInfo.value, (progress) => {
-      updateProgress.value = progress;
-      if (progress.percent >= 100) {
-        updateStatusText.value = '下載完成，正在啟動安裝程序...';
-      } else {
-        updateStatusText.value = `正在下載更新檔 (${progress.percent}%)...`;
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+
+  while (attempt <= MAX_RETRIES) {
+    if (attempt > 0) {
+      updateStatusText.value = `下載失敗，正在進行第 ${attempt} 次重試 (共 ${MAX_RETRIES} 次)...`;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    try {
+      await UpdateService.downloadAndInstall(updateInfo.value, (progress) => {
+        updateProgress.value = progress;
+        if (progress.percent >= 100) {
+          updateStatusText.value = '下載完成，正在啟動安裝程序...';
+        } else {
+          updateStatusText.value = `正在下載更新檔 (${progress.percent}%)...`;
+        }
+      });
+      return;
+    } catch (e: any) {
+      attempt++;
+      if (attempt > MAX_RETRIES) {
+        isUpdating.value = false;
+        updateFailed.value = true;
+        updateErrorMsg.value = `已自動重試 ${MAX_RETRIES} 次仍失敗: ${e.message || String(e)}`;
       }
-    });
-  } catch (e: any) {
-    isUpdating.value = false;
-    updateFailed.value = true;
-    updateErrorMsg.value = e.message || String(e);
+    }
   }
 };
 
@@ -1944,48 +1958,70 @@ const processQueue = async () => {
   if (parentPlaylist) parentPlaylist.status = 'downloading';
   if (parentChannel) parentChannel.status = 'downloading';
 
-  try {
-    const result = await DownloadService.download({
-      url: nextTask.url,
-      mp3: nextTask.isAudio,
-      subFolder: nextTask.subFolder
-    });
-    nextTask.status = 'success';
-    nextTask.progress = 100;
-    nextTask.path = result.path;
-    if (!nextTask.title && result.title) nextTask.title = result.title;
-    if (result.quality) nextTask.quality = result.quality;
-    if (result.fileSizeBytes) nextTask.fileSizeBytes = result.fileSizeBytes;
-    nextTask.mediaUri = result.mediaUri || '';
-    nextTask.line = nextTask.isAudio ? '音樂已轉換完成 (MP3)' : '影片已處理完畢並合併成功';
-  } catch (error: any) {
-    const errorMsgStr = String(error.message || error);
-    nextTask.status = 'error';
-    if (errorMsgStr.includes('CANCELLED_BY_USER') || nextTask.line === '已手動中止下載' || nextTask.line === '已中止下載') {
-      nextTask.errorMsg = '已手動中止下載';
-      nextTask.line = '已手動中止下載';
-    } else {
-      nextTask.errorMsg = errorMsgStr;
-      nextTask.line = nextTask.errorMsg;
-    }
-  } finally {
-    if (parentPlaylist) {
-      const allSubDone = parentPlaylist.subTasks.every(s => s.status === 'success' || s.status === 'error');
-      if (allSubDone) {
-        const hasError = parentPlaylist.subTasks.some(s => s.status === 'error');
-        parentPlaylist.status = hasError ? 'error' : 'success';
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+
+  while (attempt <= MAX_RETRIES) {
+    if (attempt > 0) {
+      nextTask.line = `下載失敗，正在進行第 ${attempt} 次重試 (共 ${MAX_RETRIES} 次)...`;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      // 檢查是否在此期間被手動取消
+      if (nextTask.errorMsg === '已手動中止下載' || nextTask.line === '已手動中止下載') {
+        break;
       }
     }
-    if (parentChannel) {
-      const allPlDone = parentChannel.playlists.every(p => p.status === 'success' || p.status === 'error');
-      if (allPlDone) {
-        const hasError = parentChannel.playlists.some(p => p.status === 'error');
-        parentChannel.status = hasError ? 'error' : 'success';
+
+    try {
+      const result = await DownloadService.download({
+        url: nextTask.url,
+        mp3: nextTask.isAudio,
+        subFolder: nextTask.subFolder
+      });
+      nextTask.status = 'success';
+      nextTask.progress = 100;
+      nextTask.path = result.path;
+      if (!nextTask.title && result.title) nextTask.title = result.title;
+      if (result.quality) nextTask.quality = result.quality;
+      if (result.fileSizeBytes) nextTask.fileSizeBytes = result.fileSizeBytes;
+      nextTask.mediaUri = result.mediaUri || '';
+      nextTask.line = nextTask.isAudio ? '音樂已轉換完成 (MP3)' : '影片已處理完畢並合併成功';
+      break;
+    } catch (error: any) {
+      const errorMsgStr = String(error.message || error);
+      if (errorMsgStr.includes('CANCELLED_BY_USER') || nextTask.line === '已手動中止下載' || nextTask.line === '已中止下載' || nextTask.errorMsg === '已手動中止下載') {
+        nextTask.status = 'error';
+        nextTask.errorMsg = '已手動中止下載';
+        nextTask.line = '已手動中止下載';
+        break;
+      }
+
+      attempt++;
+      if (attempt > MAX_RETRIES) {
+        nextTask.status = 'error';
+        nextTask.errorMsg = `已自動重試 ${MAX_RETRIES} 次仍失敗: ${errorMsgStr}`;
+        nextTask.line = nextTask.errorMsg;
+      } else {
+        nextTask.line = `下載失敗，準備進行第 ${attempt}/${MAX_RETRIES} 次自動重試...`;
       }
     }
-    isProcessingQueue.value = false;
-    processQueue(); 
   }
+
+  if (parentPlaylist) {
+    const allSubDone = parentPlaylist.subTasks.every(s => s.status === 'success' || s.status === 'error');
+    if (allSubDone) {
+      const hasError = parentPlaylist.subTasks.some(s => s.status === 'error');
+      parentPlaylist.status = hasError ? 'error' : 'success';
+    }
+  }
+  if (parentChannel) {
+    const allPlDone = parentChannel.playlists.every(p => p.status === 'success' || p.status === 'error');
+    if (allPlDone) {
+      const hasError = parentChannel.playlists.some(p => p.status === 'error');
+      parentChannel.status = hasError ? 'error' : 'success';
+    }
+  }
+  isProcessingQueue.value = false;
+  processQueue(); 
 };
 
 const retryTask = (id: number) => {
@@ -2071,11 +2107,11 @@ const cancelTask = async (id: number) => {
   }
 
   if (!targetTask || targetTask.status !== 'downloading') return;
+  targetTask.status = 'error';
+  targetTask.errorMsg = '已手動中止下載';
+  targetTask.line = '已手動中止下載';
   try {
     await DownloadService.cancelDownload();
-    targetTask.status = 'error';
-    targetTask.errorMsg = '已手動中止下載';
-    targetTask.line = '已手動中止下載';
   } catch (e) {
     console.warn('cancel error', e);
   }
