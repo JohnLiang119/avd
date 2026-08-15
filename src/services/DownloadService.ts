@@ -1,4 +1,4 @@
-﻿import { registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
 import { Command, open } from '@tauri-apps/plugin-shell';
 import { downloadDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
@@ -240,6 +240,9 @@ export const DownloadService = {
       const args = [
         '--extractor-args', 'youtube:player_client=web_creator,default',
         '--rm-cache-dir',
+        '--retries', '3',
+        '--fragment-retries', '3',
+        '--extractor-retries', '3',
         '--newline',
         '-q',              // 靜默模式：只輸出 ASCII 進度，不輸出中文訊息
         '--progress',
