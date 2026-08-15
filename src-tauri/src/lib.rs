@@ -82,8 +82,9 @@ fn download_win_update_file(
 
 #[tauri::command]
 fn install_win_msi(msi_path: String) -> Result<(), String> {
-    std::process::Command::new("msiexec")
-        .args(["/i", &msi_path, "/passive"])
+    let win_path = msi_path.replace("/", "\\");
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", "msiexec", "/i", &win_path, "/passive"])
         .spawn()
         .map_err(|e| format!("啟動 MSI 安裝失敗: {}", e))?;
     std::process::exit(0);
