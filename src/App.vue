@@ -96,91 +96,11 @@
         </div>
       </van-form>
 
-      <div class="queue-header">
+      <div class="queue-header" style="margin-bottom: 5px;">
         <div style="display: flex; gap: 8px; align-items: center;">
           <span class="nav-version-text" style="font-size: 11px; color: #9ca3af; font-family: monospace; font-weight: 500;">v{{ version }}</span>
-          <van-button 
-            v-show="!isTvMode"
-            size="small" 
-            round 
-            :type="serverStatus.isActive ? 'danger' : 'primary'" 
-            plain 
-            :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'" 
-            @click="toggleLocalServer" 
-            style="padding: 0; width: 32px; height: 32px;"
-            title="開啟/關閉 快傳伺服器"
-          />
-          <van-button 
-            v-show="!isTvMode"
-            size="small" 
-            round 
-            :type="mp3Mode ? 'success' : 'default'" 
-            :plain="!mp3Mode" 
-            :icon="mp3Mode ? 'music' : 'music-o'" 
-            @click="mp3Mode = !mp3Mode" 
-            style="padding: 0; width: 32px; height: 32px;"
-            :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
-          />
-          <van-button 
-            v-show="!isTvMode"
-            size="small" 
-            round 
-            :type="monitoredChannels.length > 0 ? 'primary' : 'default'" 
-            :plain="monitoredChannels.length === 0"
-            icon="bullhorn-o" 
-            @click="showChannelModal = true" 
-            style="padding: 0; width: 32px; height: 32px;"
-            :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
-          />
-          <!-- TV 開關 (暫時隱藏，保留程式碼) -->
-          <van-button 
-            v-show="false"
-            size="small" 
-            round 
-            :type="isTvMode ? 'warning' : 'default'" 
-            plain 
-            icon="tv-o" 
-            @click="toggleTvMode" 
-            style="padding: 0 8px; height: 32px; font-size: 11px;"
-            :title="isTvMode ? '切換為 手機模式' : '切換為 TV 遙控器模式'"
-          >
-            {{ isTvMode ? 'TV 模式' : 'TV 關' }}
-          </van-button>
         </div>
         <div style="display: flex; gap: 8px;" v-show="!isTvMode">
-          <!-- 推播清單 (暫時隱藏，保留程式碼) -->
-          <van-button 
-            v-if="false && isTauri()"
-            size="small" 
-            round 
-            type="warning" 
-            icon="tv-o" 
-            @click="showCastListModal = true" 
-            style="padding: 0 8px; height: 32px;"
-            title="推播清單至 TV"
-          >
-            推播清單
-          </van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="primary"
-            plain
-            icon="arrow-down" 
-            @click="expandAll" 
-            style="padding: 0; width: 32px; height: 32px;"
-            title="全部展開"
-          />
-          <van-button 
-            size="small" 
-            round 
-            type="primary"
-            plain
-            icon="arrow-up" 
-            @click="collapseAll" 
-            style="padding: 0; width: 32px; height: 32px;"
-            title="全部收起"
-          />
           <van-button 
             size="small" 
             round 
@@ -200,15 +120,64 @@
             style="padding: 0; width: 32px; height: 32px;"
             title="偏好設定"
           />
+        </div>
+      </div>
+
+      <div class="toolbar-row" style="display: flex; gap: 8px; overflow-x: auto; padding: 0 5px 10px; margin: 0 5px 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
+          <van-button 
+            size="small" 
+            round 
+            :type="mp3Mode ? 'success' : 'default'" 
+            :plain="!mp3Mode" 
+            :icon="mp3Mode ? 'music' : 'music-o'" 
+            @click="mp3Mode = !mp3Mode" 
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
+            :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
+          >音訊</van-button>
+          
+          <van-button 
+            size="small" 
+            round 
+            :type="monitoredChannels.length > 0 ? 'primary' : 'default'" 
+            :plain="monitoredChannels.length === 0"
+            icon="bullhorn-o" 
+            @click="showChannelModal = true" 
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
+            :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
+          >頻道</van-button>
+
+          <van-button 
+            size="small" 
+            round 
+            :type="serverStatus.isActive ? 'danger' : 'primary'" 
+            plain 
+            :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'" 
+            @click="toggleLocalServer" 
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
+            title="開啟/關閉 快傳伺服器"
+          >快傳</van-button>
+
+          <van-button 
+            size="small" 
+            round 
+            type="primary"
+            plain
+            :icon="isAllExpanded ? 'arrow-up' : 'arrow-down'" 
+            @click="toggleExpandAll" 
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
+            :title="isAllExpanded ? '全部收合' : '全部展開'"
+          >{{ isAllExpanded ? '收合' : '展開' }}</van-button>
+
           <van-button 
             size="small" 
             round 
             type="default" 
             icon="delete-o" 
             @click="clearCompleted" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="清除已完成紀錄"
-          />
+          >清除</van-button>
+
           <van-button 
             size="small" 
             round 
@@ -216,11 +185,25 @@
             plain 
             icon="delete" 
             @click="deleteAllFiles" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0; width: 30px; height: 30px; flex-shrink: 0;"
             title="刪除全部實體檔案"
           />
+
+          <!-- TV 開關 (暫時隱藏，保留程式碼) -->
+          <van-button 
+            v-show="false"
+            size="small" 
+            round 
+            :type="isTvMode ? 'warning' : 'default'" 
+            plain 
+            icon="tv-o" 
+            @click="toggleTvMode" 
+            style="padding: 0 8px; height: 32px; font-size: 11px;"
+            :title="isTvMode ? '切換為 手機模式' : '切換為 TV 遙控器模式'"
+          >
+            {{ isTvMode ? 'TV 模式' : 'TV 關' }}
+          </van-button>
         </div>
-      </div>
 
       <!-- TV 模式專屬大字體接收端畫面 (未推播時) -->
       <div v-if="isTvMode && remoteTasks.length === 0" class="tv-receiver-screen" style="display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 60vh; padding: 20px; text-align: center;">
@@ -1664,6 +1647,16 @@ const collapseAll = () => {
       }
     }
   });
+};
+
+const isAllExpanded = ref(true);
+const toggleExpandAll = () => {
+  isAllExpanded.value = !isAllExpanded.value;
+  if (isAllExpanded.value) {
+    expandAll();
+  } else {
+    collapseAll();
+  }
 };
 const isProcessingQueue = ref(false);
 let taskIdCounter = 1;
