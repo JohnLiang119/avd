@@ -108,18 +108,18 @@
             plain
             icon="replay" 
             @click="batchRetryDownloads" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="批次重新下載失敗/中止的任務"
-          />
+          >重整</van-button>
           <van-button 
             size="small" 
             round 
             type="default" 
             icon="delete-o" 
             @click="clearCompleted" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="清除已完成紀錄"
-          />
+          >清除</van-button>
           <van-button 
             size="small" 
             round 
@@ -127,22 +127,22 @@
             plain 
             icon="delete" 
             @click="deleteAllFiles" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="刪除全部實體檔案"
-          />
+          >刪除</van-button>
           <van-button 
             size="small" 
             round 
             type="default" 
             icon="setting-o" 
             @click="showSettingsModal = true" 
-            style="padding: 0; width: 32px; height: 32px;"
+            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="偏好設定"
-          />
+          >設定</van-button>
         </div>
       </div>
 
-      <div class="toolbar-row" style="display: flex; gap: 8px; overflow-x: auto; padding: 0 5px 10px; margin: 0 5px 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
+      <div class="toolbar-row" style="display: flex; gap: 8px; justify-content: flex-end; overflow-x: auto; padding: 0 5px 10px; margin: 0 5px 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
           <van-button 
             size="small" 
             round 
