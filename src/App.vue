@@ -115,6 +115,25 @@
             size="small" 
             round 
             type="default" 
+            icon="delete-o" 
+            @click="clearCompleted" 
+            style="padding: 0; width: 32px; height: 32px;"
+            title="清除已完成紀錄"
+          />
+          <van-button 
+            size="small" 
+            round 
+            type="danger" 
+            plain 
+            icon="delete" 
+            @click="deleteAllFiles" 
+            style="padding: 0; width: 32px; height: 32px;"
+            title="刪除全部實體檔案"
+          />
+          <van-button 
+            size="small" 
+            round 
+            type="default" 
             icon="setting-o" 
             @click="showSettingsModal = true" 
             style="padding: 0; width: 32px; height: 32px;"
@@ -167,27 +186,6 @@
             style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             :title="isAllExpanded ? '全部收合' : '全部展開'"
           >{{ isAllExpanded ? '收合' : '展開' }}</van-button>
-
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="delete-o" 
-            @click="clearCompleted" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
-            title="清除已完成紀錄"
-          >清除</van-button>
-
-          <van-button 
-            size="small" 
-            round 
-            type="danger" 
-            plain 
-            icon="delete" 
-            @click="deleteAllFiles" 
-            style="padding: 0; width: 30px; height: 30px; flex-shrink: 0;"
-            title="刪除全部實體檔案"
-          />
 
           <!-- TV 開關 (暫時隱藏，保留程式碼) -->
           <van-button 
