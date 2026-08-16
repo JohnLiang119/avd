@@ -789,6 +789,20 @@ import { App } from '@capacitor/app';
 import { open as openShell } from '@tauri-apps/plugin-shell';
 import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
+import { LazyStore } from '@tauri-apps/plugin-store';
+
+const store = new LazyStore('config.json');
+const isStoreInitialized = ref(false);
+
+const saveConfig = (key: string, value: any) => {
+  const strVal = typeof value === 'string' ? value : JSON.stringify(value);
+  localStorage.setItem(key, strVal);
+  if (isTauri() && isStoreInitialized.value) {
+    store.set(key, value).then(() => {
+      store.save().catch((e: any) => console.error('Store save error:', e));
+    }).catch((e: any) => console.error('Store set error:', e));
+  }
+};
 
 // ===== 🚀 自動更新狀態與邏輯 =====
 const showUpdateModal = ref(false);
@@ -929,7 +943,7 @@ const isTvMode = ref(localStorage.getItem('avd_tv_mode') === 'true');
 
 const toggleTvMode = () => {
   isTvMode.value = !isTvMode.value;
-  localStorage.setItem('avd_tv_mode', String(isTvMode.value));
+  saveConfig('avd_tv_mode', isTvMode.value);
   showToast(isTvMode.value ? '已開啟 TV 遙控器模式' : '已恢復 手機模式');
   if (isTvMode.value && !isTauri() && !serverStatus.value.isActive) {
     startLocalServer();
@@ -947,7 +961,7 @@ const pushListToTv = async () => {
     return;
   }
   
-  localStorage.setItem('avd_target_tv_ip', targetTvIp.value);
+  saveConfig('avd_target_tv_ip', targetTvIp.value);
   let targetIp = targetTvIp.value.trim();
   if (targetIp.startsWith('http://')) targetIp = targetIp.replace('http://', '');
   if (targetIp.includes(':')) targetIp = targetIp.split(':')[0];
@@ -1047,13 +1061,81 @@ const fetchRemoteTasks = async () => {
 };
 
 
+
+const initStore = async () => {
+  if (!isTauri()) {
+    monitoredChannels.value = JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]');
+    monitorConfig.value = JSON.parse(localStorage.getItem('avd_monitor_config') || JSON.stringify({
+      autoCheckEnabled: true,
+      checkIntervalMinutes: 60,
+      lastGlobalCheckTime: 0
+    }));
+    isStoreInitialized.value = true;
+    return;
+  }
+
+  try {
+    const loadStoreItem = async (key: string, refVar: any, isJson = false) => {
+      const stored = await store.get(key);
+      if (stored !== undefined && stored !== null) {
+        if (isJson && typeof stored === 'string') {
+          refVar.value = JSON.parse(stored);
+        } else if (['avd_tv_mode', 'avd_mp3_mode', 'avd_confirm_delete_all', 'avd_confirm_delete_single', 'avd_confirm_clear_all', 'avd_confirm_clear_single', 'avd_test_mode_enabled'].includes(key)) {
+          refVar.value = typeof stored === 'string' ? stored === 'true' : !!stored;
+        } else {
+          refVar.value = stored;
+        }
+        const strVal = typeof refVar.value === 'string' ? refVar.value : JSON.stringify(refVar.value);
+        localStorage.setItem(key, strVal);
+      } else {
+        const local = localStorage.getItem(key);
+        if (local !== null) {
+          if (isJson) {
+            const parsed = JSON.parse(local);
+            refVar.value = parsed;
+            await store.set(key, parsed);
+          } else if (['avd_tv_mode', 'avd_mp3_mode', 'avd_confirm_delete_all', 'avd_confirm_delete_single', 'avd_confirm_clear_all', 'avd_confirm_clear_single', 'avd_test_mode_enabled'].includes(key)) {
+            refVar.value = local === 'true';
+            await store.set(key, refVar.value);
+          } else {
+            refVar.value = local;
+            await store.set(key, local);
+          }
+          await store.save();
+        }
+      }
+    };
+
+    await loadStoreItem('avd_monitored_channels', monitoredChannels, true);
+    await loadStoreItem('avd_monitor_config', monitorConfig, true);
+    await loadStoreItem('avd_tv_mode', isTvMode, false);
+    await loadStoreItem('avd_target_tv_ip', targetTvIp, false);
+    await loadStoreItem('avd_mp3_mode', mp3Mode, false);
+    await loadStoreItem('avd_wifi_ssid', wifiSsid, false);
+    await loadStoreItem('avd_wifi_pwd', wifiPassword, false);
+    await loadStoreItem('avd_confirm_delete_all', confirmDeleteAll, false);
+    await loadStoreItem('avd_confirm_delete_single', confirmDeleteSingle, false);
+    await loadStoreItem('avd_confirm_clear_all', confirmClearAll, false);
+    await loadStoreItem('avd_confirm_clear_single', confirmClearSingle, false);
+    await loadStoreItem('avd_test_mode_enabled', testModeEnabled, false);
+    await loadStoreItem('avd_tasks', tasks, true);
+    await loadStoreItem('avd_drive_token', driveToken, false);
+
+  } catch (e) {
+    console.error('Failed to init store', e);
+  }
+  isStoreInitialized.value = true;
+};
+
 onMounted(async () => {
+  await initStore();
+
   if (localStorage.getItem('avd_tv_mode') === null) {
     try {
       const res = await DownloadService.isTvDevice();
       if (res && res.isTv) {
         isTvMode.value = true;
-        localStorage.setItem('avd_tv_mode', 'true');
+        saveConfig('avd_tv_mode', true);
       }
     } catch (e) {
       console.error('Failed to detect TV device', e);
@@ -1139,11 +1221,13 @@ const monitorConfig = ref<ChannelMonitorConfig>(
 );
 
 watch(monitoredChannels, (val) => {
-  localStorage.setItem('avd_monitored_channels', JSON.stringify(val));
+  if (!isStoreInitialized.value) return;
+  saveConfig('avd_monitored_channels', val);
 }, { deep: true });
 
 watch(monitorConfig, (val) => {
-  localStorage.setItem('avd_monitor_config', JSON.stringify(val));
+  if (!isStoreInitialized.value) return;
+  saveConfig('avd_monitor_config', val);
 }, { deep: true });
 
 const showChannelModal = ref(false);
@@ -1418,15 +1502,15 @@ const confirmClearAll = ref(getStoredBool('avd_confirm_clear_all', true));
 const confirmClearSingle = ref(getStoredBool('avd_confirm_clear_single', true));
 const testModeEnabled = ref(getStoredBool('avd_test_mode_enabled', false));
 
-watch(confirmDeleteAll, (val) => localStorage.setItem('avd_confirm_delete_all', String(val)));
-watch(confirmDeleteSingle, (val) => localStorage.setItem('avd_confirm_delete_single', String(val)));
-watch(confirmClearAll, (val) => localStorage.setItem('avd_confirm_clear_all', String(val)));
-watch(confirmClearSingle, (val) => localStorage.setItem('avd_confirm_clear_single', String(val)));
-watch(testModeEnabled, (val) => localStorage.setItem('avd_test_mode_enabled', String(val)));
+watch(confirmDeleteAll, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_delete_all', val); });
+watch(confirmDeleteSingle, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_delete_single', val); });
+watch(confirmClearAll, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_clear_all', val); });
+watch(confirmClearSingle, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_clear_single', val); });
+watch(testModeEnabled, (val) => { if (isStoreInitialized.value) saveConfig('avd_test_mode_enabled', val); });
 
 const saveWifiConfig = () => {
-  localStorage.setItem('avd_wifi_ssid', wifiSsid.value);
-  localStorage.setItem('avd_wifi_pwd', wifiPassword.value);
+  saveConfig('avd_wifi_ssid', wifiSsid.value);
+  saveConfig('avd_wifi_pwd', wifiPassword.value);
   showToast('Wi-Fi 設定已儲存');
 };
 
@@ -1477,7 +1561,7 @@ DownloadService.addListener('serverUploadSpeed', (info: any) => {
 });
 
 watch(mp3Mode, (newVal) => {
-  localStorage.setItem('avd_mp3_mode', String(newVal));
+  saveConfig('avd_mp3_mode', newVal);
 });
 
 interface DownloadTask {
@@ -1819,7 +1903,7 @@ if (savedTasks) {
 
 // Watch and save to localStorage
 watch(tasks, (newTasks) => {
-  localStorage.setItem('avd_tasks', JSON.stringify(newTasks));
+  saveConfig('avd_tasks', newTasks);
 }, { deep: true });
 
 const getStatusType = (status: string) => {
@@ -2218,7 +2302,7 @@ const openOAuthPage = async () => {
 
 const saveDriveToken = () => {
   driveToken.value = driveTokenInput.value.trim();
-  localStorage.setItem('avd_drive_token', driveToken.value);
+  saveConfig('avd_drive_token', driveToken.value);
   showToast('Google 雲端帳號連結成功！已開啟進度模式');
 };
 
