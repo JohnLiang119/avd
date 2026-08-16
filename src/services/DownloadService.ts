@@ -615,6 +615,26 @@ export const DownloadService = {
     return { isTv: false };
   },
 
+  async checkVideoLiveStatus(url: string): Promise<boolean> {
+    try {
+      if (!isTauri()) {
+        // Android 目前不支援此功能，預設當作非直播
+        return false;
+      }
+      
+      const cmd = Command.sidecar('bin/yt-dlp', [
+        '--print', 'live_status',
+        url
+      ]);
+      const output = await cmd.execute();
+      const status = output.stdout.trim().toLowerCase();
+      return status === 'is_live' || status === 'is_upcoming';
+    } catch (e) {
+      console.warn(`檢查直播狀態失敗 (${url}):`, e);
+      return false; // 如果檢查失敗，預設加入佇列以免漏掉
+    }
+  },
+
   async fetchYouTubeRss(channelId: string): Promise<Array<{ videoId: string; title: string; published: string; publishedTime: number; url: string }>> {
     try {
       let xmlText = '';

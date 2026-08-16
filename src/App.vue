@@ -1357,6 +1357,12 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
       if (newVideos.length > 0) {
         for (const vid of newVideos.reverse()) {
+          const isLive = await DownloadService.checkVideoLiveStatus(vid.url);
+          if (isLive) {
+            console.log(`[自動追蹤] 跳過直播/首播影片: ${vid.title}`);
+            continue;
+          }
+
           const newTask: DownloadTask = {
             id: taskIdCounter++,
             type: 'file',
