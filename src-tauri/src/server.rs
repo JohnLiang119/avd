@@ -20,12 +20,24 @@ static SERVER_TIMER_THREAD_SPAWNED: AtomicBool = AtomicBool::new(false);
 
 fn parse_device_name(ua: &str) -> String {
     let lower_ua = ua.to_lowercase();
-    if lower_ua.contains("ipad") { return "iPad".to_string(); }
-    if lower_ua.contains("iphone") { return "iPhone".to_string(); }
-    if lower_ua.contains("macintosh") || lower_ua.contains("mac os x") { return "Mac".to_string(); }
-    if lower_ua.contains("windows") { return "Windows PC".to_string(); }
-    if lower_ua.contains("android") { return "Android 設備".to_string(); }
-    if lower_ua.contains("tizen") || lower_ua.contains("webos") || lower_ua.contains("smart-tv") { return "智慧電視".to_string(); }
+    if lower_ua.contains("ipad") {
+        return "iPad".to_string();
+    }
+    if lower_ua.contains("iphone") {
+        return "iPhone".to_string();
+    }
+    if lower_ua.contains("macintosh") || lower_ua.contains("mac os x") {
+        return "Mac".to_string();
+    }
+    if lower_ua.contains("windows") {
+        return "Windows PC".to_string();
+    }
+    if lower_ua.contains("android") {
+        return "Android 設備".to_string();
+    }
+    if lower_ua.contains("tizen") || lower_ua.contains("webos") || lower_ua.contains("smart-tv") {
+        return "智慧電視".to_string();
+    }
     "未知設備".to_string()
 }
 
@@ -36,10 +48,7 @@ pub struct TrackingReader<R: Read> {
 
 impl<R: Read> TrackingReader<R> {
     pub fn new(inner: R, client_ip: String) -> Self {
-        Self {
-            inner,
-            client_ip,
-        }
+        Self { inner, client_ip }
     }
 
     fn track(&mut self, bytes: u64) {
@@ -60,7 +69,6 @@ impl<R: Read> Read for TrackingReader<R> {
         Ok(n)
     }
 }
-
 
 pub fn get_local_ip() -> String {
     local_ip_address::local_ip()
@@ -91,7 +99,7 @@ pub fn start_server(app_handle: tauri::AppHandle) -> Result<String, String> {
 
     let server = Arc::new(
         Server::http(format!("0.0.0.0:{}", PORT))
-            .map_err(|e| format!("無法啟動 HTTP 伺服器: {}", e))?
+            .map_err(|e| format!("無法啟動 HTTP 伺服器: {}", e))?,
     );
 
     SERVER_RUNNING.store(true, Ordering::SeqCst);
@@ -100,48 +108,52 @@ pub fn start_server(app_handle: tauri::AppHandle) -> Result<String, String> {
     }
 
     let server_clone = server.clone();
-    
+
     if !SERVER_TIMER_THREAD_SPAWNED.swap(true, Ordering::SeqCst) {
         let app_handle_timer = app_handle.clone();
         *BYTES_PER_IP.lock().unwrap() = Some(HashMap::new());
         *UA_PER_IP.lock().unwrap() = Some(HashMap::new());
-        
-        thread::spawn(move || {
-            loop {
-                thread::sleep(std::time::Duration::from_millis(1000));
-                let mut total_speed = 0;
-                let mut current_speeds = HashMap::new();
-                let mut devices_obj = serde_json::Map::new();
-                
-                if let Ok(mut guard) = BYTES_PER_IP.lock() {
-                    if let Some(map) = guard.as_mut() {
-                        for (ip, bytes) in map.iter_mut() {
-                            let speed = *bytes;
-                            *bytes = 0;
-                            if speed > 0 {
-                                total_speed += speed;
-                                current_speeds.insert(ip.clone(), speed);
-                            }
+
+        thread::spawn(move || loop {
+            thread::sleep(std::time::Duration::from_millis(1000));
+            let mut total_speed = 0;
+            let mut current_speeds = HashMap::new();
+            let mut devices_obj = serde_json::Map::new();
+
+            if let Ok(mut guard) = BYTES_PER_IP.lock() {
+                if let Some(map) = guard.as_mut() {
+                    for (ip, bytes) in map.iter_mut() {
+                        let speed = *bytes;
+                        *bytes = 0;
+                        if speed > 0 {
+                            total_speed += speed;
+                            current_speeds.insert(ip.clone(), speed);
                         }
                     }
                 }
-                
-                if let Ok(guard) = UA_PER_IP.lock() {
-                    if let Some(ua_map) = guard.as_ref() {
-                        for (ip, speed) in current_speeds.iter() {
-                            let ua = ua_map.get(ip).cloned().unwrap_or_else(|| "未知設備".to_string());
-                            let friendly_name = parse_device_name(&ua);
-                            let key = format!("{} ({})", ip, friendly_name);
-                            devices_obj.insert(key, serde_json::json!(speed));
-                        }
+            }
+
+            if let Ok(guard) = UA_PER_IP.lock() {
+                if let Some(ua_map) = guard.as_ref() {
+                    for (ip, speed) in current_speeds.iter() {
+                        let ua = ua_map
+                            .get(ip)
+                            .cloned()
+                            .unwrap_or_else(|| "未知設備".to_string());
+                        let friendly_name = parse_device_name(&ua);
+                        let key = format!("{} ({})", ip, friendly_name);
+                        devices_obj.insert(key, serde_json::json!(speed));
                     }
                 }
-                
-                let _ = app_handle_timer.emit("serverUploadSpeed", serde_json::json!({
+            }
+
+            let _ = app_handle_timer.emit(
+                "serverUploadSpeed",
+                serde_json::json!({
                     "speed": total_speed,
                     "devices": devices_obj
-                }));
-            }
+                }),
+            );
         });
     }
 
@@ -151,9 +163,17 @@ pub fn start_server(app_handle: tauri::AppHandle) -> Result<String, String> {
         while SERVER_RUNNING.load(Ordering::SeqCst) {
             match server_clone.recv() {
                 Ok(request) => {
-                    let client_ip = request.remote_addr().map(|addr| addr.ip().to_string()).unwrap_or_else(|| "unknown".to_string());
-                    let user_agent = request.headers().iter().find(|h| h.field.equiv("User-Agent")).map(|h| h.value.as_str().to_string()).unwrap_or_else(|| "unknown".to_string());
-                    
+                    let client_ip = request
+                        .remote_addr()
+                        .map(|addr| addr.ip().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let user_agent = request
+                        .headers()
+                        .iter()
+                        .find(|h| h.field.equiv("User-Agent"))
+                        .map(|h| h.value.as_str().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
+
                     if let Ok(mut guard) = UA_PER_IP.lock() {
                         if let Some(map) = guard.as_mut() {
                             map.insert(client_ip.clone(), user_agent);
@@ -161,29 +181,56 @@ pub fn start_server(app_handle: tauri::AppHandle) -> Result<String, String> {
                     }
 
                     let url = request.url().to_string();
-                    let decoded_url = decode(&url).unwrap_or(std::borrow::Cow::Borrowed(&url)).to_string();
+                    let decoded_url = decode(&url)
+                        .unwrap_or(std::borrow::Cow::Borrowed(&url))
+                        .to_string();
 
                     if decoded_url == "/" {
                         let html = serve_index(&downloads_dir);
-                        let response = Response::from_string(html)
-                            .with_header(Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=UTF-8"[..]).unwrap());
+                        let response = Response::from_string(html).with_header(
+                            Header::from_bytes(
+                                &b"Content-Type"[..],
+                                &b"text/html; charset=UTF-8"[..],
+                            )
+                            .unwrap(),
+                        );
                         let _ = request.respond(response);
                     } else if decoded_url == "/api/list" {
                         let json = serve_api_list(&downloads_dir);
-                        let response = Response::from_string(json)
-                            .with_header(Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=UTF-8"[..]).unwrap());
+                        let response = Response::from_string(json).with_header(
+                            Header::from_bytes(
+                                &b"Content-Type"[..],
+                                &b"application/json; charset=UTF-8"[..],
+                            )
+                            .unwrap(),
+                        );
                         let _ = request.respond(response);
                     } else if decoded_url.starts_with("/api/remote-play") {
-                        let play_uri = url.split("uri=").nth(1).or_else(|| url.split("url=").nth(1)).unwrap_or("");
-                        let play_uri = decode(play_uri).unwrap_or(std::borrow::Cow::Borrowed(play_uri)).to_string();
+                        let play_uri = url
+                            .split("uri=")
+                            .nth(1)
+                            .or_else(|| url.split("url=").nth(1))
+                            .unwrap_or("");
+                        let play_uri = decode(play_uri)
+                            .unwrap_or(std::borrow::Cow::Borrowed(play_uri))
+                            .to_string();
                         if !play_uri.is_empty() {
-                            let _ = std::process::Command::new("cmd").args(["/C", "start", "", &play_uri]).spawn();
-                            let response = Response::from_string("{\"success\":true}")
-                                .with_header(Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=UTF-8"[..]).unwrap());
+                            let _ = std::process::Command::new("cmd")
+                                .args(["/C", "start", "", &play_uri])
+                                .spawn();
+                            let response = Response::from_string("{\"success\":true}").with_header(
+                                Header::from_bytes(
+                                    &b"Content-Type"[..],
+                                    &b"application/json; charset=UTF-8"[..],
+                                )
+                                .unwrap(),
+                            );
                             let _ = request.respond(response);
                         } else {
-                            let response = Response::from_string("{\"success\":false,\"error\":\"Missing uri parameter\"}")
-                                .with_status_code(StatusCode(400));
+                            let response = Response::from_string(
+                                "{\"success\":false,\"error\":\"Missing uri parameter\"}",
+                            )
+                            .with_status_code(StatusCode(400));
                             let _ = request.respond(response);
                         }
                     } else if decoded_url.starts_with("/play/") {
@@ -228,7 +275,11 @@ pub fn is_server_running() -> bool {
     SERVER_RUNNING.load(Ordering::SeqCst)
 }
 
-fn collect_files_from_dir(dir: &PathBuf, base_dir: &PathBuf, files_list: &mut Vec<(String, u64, std::time::SystemTime, String)>) {
+fn collect_files_from_dir(
+    dir: &PathBuf,
+    base_dir: &PathBuf,
+    files_list: &mut Vec<(String, u64, std::time::SystemTime, String)>,
+) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -236,12 +287,22 @@ fn collect_files_from_dir(dir: &PathBuf, base_dir: &PathBuf, files_list: &mut Ve
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let ext_lower = ext.to_lowercase();
                     if matches!(ext_lower.as_str(), "mp4" | "m4a" | "mp3" | "webm" | "mkv") {
-                        let rel_path = path.strip_prefix(base_dir).unwrap_or(&path).to_string_lossy().to_string().replace('\\', "/");
+                        let rel_path = path
+                            .strip_prefix(base_dir)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .to_string()
+                            .replace('\\', "/");
                         let metadata = entry.metadata().ok();
                         let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let modified = metadata.as_ref().and_then(|m| m.modified().ok()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        let modified = metadata
+                            .as_ref()
+                            .and_then(|m| m.modified().ok())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                         let folder_name = if dir != base_dir {
-                            dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+                            dir.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default()
                         } else {
                             String::new()
                         };
@@ -283,7 +344,8 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
     files_list.sort_by(|a, b| b.2.cmp(&a.2));
 
     // Group files by folder_name preserving order
-    let mut grouped_files: HashMap<String, Vec<(String, u64, std::time::SystemTime, String)>> = HashMap::new();
+    let mut grouped_files: HashMap<String, Vec<(String, u64, std::time::SystemTime, String)>> =
+        HashMap::new();
     let mut group_order = Vec::new();
 
     for file in files_list {
@@ -314,8 +376,12 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
     html.push_str(".file-meta { font-size: 12px; color: #64748b; }");
     html.push_str(".btn-group { display: flex; gap: 8px; margin-top: 4px; }");
     html.push_str(".btn { color: white; border: none; padding: 8px 14px; border-radius: 8px; text-align: center; font-weight: 600; flex: 1; cursor: pointer; font-size: 13px; text-decoration: none; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }");
-    html.push_str(".btn-primary { background: #3b82f6; } .btn-primary:hover { background: #2563eb; }");
-    html.push_str(".btn-secondary { background: #10b981; } .btn-secondary:hover { background: #059669; }");
+    html.push_str(
+        ".btn-primary { background: #3b82f6; } .btn-primary:hover { background: #2563eb; }",
+    );
+    html.push_str(
+        ".btn-secondary { background: #10b981; } .btn-secondary:hover { background: #059669; }",
+    );
     html.push_str("</style>");
     html.push_str("<script>");
     html.push_str("function toggleGroup(id) {");
@@ -357,8 +423,14 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
                     let file_display_name = rel_path.split('/').last().unwrap_or(rel_path);
 
                     html.push_str("<div class=\"file-card\">");
-                    html.push_str(&format!("<div class=\"file-name\"><span>{}</span></div>", file_display_name));
-                    html.push_str(&format!("<div class=\"file-meta\">檔案大小: {} MB</div>", size_mb));
+                    html.push_str(&format!(
+                        "<div class=\"file-name\"><span>{}</span></div>",
+                        file_display_name
+                    ));
+                    html.push_str(&format!(
+                        "<div class=\"file-meta\">檔案大小: {} MB</div>",
+                        size_mb
+                    ));
                     html.push_str("<div class=\"btn-group\">");
                     html.push_str(&format!("<a class=\"btn btn-primary\" href=\"/files/{}\" download=\"{}\">⬇ 下載檔案</a>", encoded_rel_path, file_display_name));
                     html.push_str(&format!("<a class=\"btn btn-secondary\" href=\"/play/{}\" target=\"_blank\">▶ 線上播放</a>", encoded_rel_path));
@@ -373,7 +445,13 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
     html
 }
 
-fn serve_media(request: tiny_http::Request, downloads_dir: &PathBuf, filename: &str, is_download: bool, client_ip: String) {
+fn serve_media(
+    request: tiny_http::Request,
+    downloads_dir: &PathBuf,
+    filename: &str,
+    is_download: bool,
+    client_ip: String,
+) {
     let mut target_file_path = downloads_dir.join(filename);
     if !target_file_path.exists() || !target_file_path.is_file() {
         if let Ok(raw_decoded) = urlencoding::decode(filename) {
@@ -385,14 +463,17 @@ fn serve_media(request: tiny_http::Request, downloads_dir: &PathBuf, filename: &
     }
 
     if !target_file_path.exists() || !target_file_path.is_file() {
-        let _ = request.respond(Response::from_string("404 File Not Found").with_status_code(StatusCode(404)));
+        let _ = request
+            .respond(Response::from_string("404 File Not Found").with_status_code(StatusCode(404)));
         return;
     }
 
     let mut file = match File::open(&target_file_path) {
         Ok(f) => f,
         Err(_) => {
-            let _ = request.respond(Response::from_string("500 File Read Error").with_status_code(StatusCode(500)));
+            let _ = request.respond(
+                Response::from_string("500 File Read Error").with_status_code(StatusCode(500)),
+            );
             return;
         }
     };
@@ -409,7 +490,11 @@ fn serve_media(request: tiny_http::Request, downloads_dir: &PathBuf, filename: &
     };
 
     // 檢查 Range 請求標頭
-    let range_header = request.headers().iter().find(|h| h.field.equiv("Range")).map(|h| h.value.as_str());
+    let range_header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Range"))
+        .map(|h| h.value.as_str());
 
     if let Some(range_val) = range_header {
         if range_val.starts_with("bytes=") {
@@ -430,14 +515,28 @@ fn serve_media(request: tiny_http::Request, downloads_dir: &PathBuf, filename: &
                 let mut headers = vec![
                     Header::from_bytes(&b"Content-Type"[..], mime_type.as_bytes()).unwrap(),
                     Header::from_bytes(&b"Accept-Ranges"[..], &b"bytes"[..]).unwrap(),
-                    Header::from_bytes(&b"Content-Range"[..], format!("bytes {}-{}/{}", start, end, file_len).as_bytes()).unwrap(),
+                    Header::from_bytes(
+                        &b"Content-Range"[..],
+                        format!("bytes {}-{}/{}", start, end, file_len).as_bytes(),
+                    )
+                    .unwrap(),
                 ];
 
                 if is_download {
                     let encoded = urlencoding::encode(filename);
-                    let fallback_name = if filename.to_lowercase().ends_with(".mp3") { "download.mp3" } else { "download.mp4" };
-                    let header_val = format!("attachment; filename=\"{}\"; filename*=UTF-8''{}", fallback_name, encoded);
-                    headers.push(Header::from_bytes(&b"Content-Disposition"[..], header_val.as_bytes()).unwrap());
+                    let fallback_name = if filename.to_lowercase().ends_with(".mp3") {
+                        "download.mp3"
+                    } else {
+                        "download.mp4"
+                    };
+                    let header_val = format!(
+                        "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+                        fallback_name, encoded
+                    );
+                    headers.push(
+                        Header::from_bytes(&b"Content-Disposition"[..], header_val.as_bytes())
+                            .unwrap(),
+                    );
                 }
 
                 let response = Response::new(
@@ -464,9 +563,17 @@ fn serve_media(request: tiny_http::Request, downloads_dir: &PathBuf, filename: &
 
     if is_download {
         let encoded = urlencoding::encode(filename);
-        let fallback_name = if filename.to_lowercase().ends_with(".mp3") { "download.mp3" } else { "download.mp4" };
-        let header_val = format!("attachment; filename=\"{}\"; filename*=UTF-8''{}", fallback_name, encoded);
-        headers.push(Header::from_bytes(&b"Content-Disposition"[..], header_val.as_bytes()).unwrap());
+        let fallback_name = if filename.to_lowercase().ends_with(".mp3") {
+            "download.mp3"
+        } else {
+            "download.mp4"
+        };
+        let header_val = format!(
+            "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+            fallback_name, encoded
+        );
+        headers
+            .push(Header::from_bytes(&b"Content-Disposition"[..], header_val.as_bytes()).unwrap());
     }
 
     let response = Response::new(
