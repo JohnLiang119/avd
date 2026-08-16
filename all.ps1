@@ -106,7 +106,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Gradle Build Failed!"; exit 1 }
 cd ..
 
 Write-Host "複製 APK 檔案..." -ForegroundColor Cyan
-$apkPath = "android\app\build\outputs\apk\debug\app-debug.apk"
+$apkDir = "android\app\build\outputs\apk\debug"
 $appVersion = "1.0.0"
 try {
     if (Test-Path "package.json") {
@@ -114,14 +114,22 @@ try {
         if ($pkg.version) { $appVersion = $pkg.version }
     }
 } catch {}
-$destApkName = "AVD_${appVersion}.apk"
 
-if (Test-Path $apkPath) {
-    Copy-Item -Path $apkPath -Destination $destApkName -Force
-    Write-Host "打包成功！APK 已匯出至: $pwd\$destApkName" -ForegroundColor Green
-
+if (Test-Path $apkDir) {
+    # 支援 ABI Splits: 將所有產出的 app-*-debug.apk 重新命名
+    $apks = Get-ChildItem -Path $apkDir -Filter "app-*-debug.apk"
+    foreach ($apk in $apks) {
+        $arch = $apk.Name.Replace("app-", "").Replace("-debug.apk", "")
+        if ($arch -eq "debug") {
+            $destApkName = "AVD_${appVersion}.apk"
+        } else {
+            $destApkName = "AVD_${appVersion}_${arch}.apk"
+        }
+        Copy-Item -Path $apk.FullName -Destination $destApkName -Force
+        Write-Host "成功複製 APK: $destApkName" -ForegroundColor Green
+    }
 } else {
-    Write-Error "找不到編譯出的 APK 檔案。"
+    Write-Warning "未找到編譯出的 APK 目錄 ($apkDir)"
 }
 
 Write-Host ""
@@ -157,6 +165,20 @@ try {
     }
 } catch {
     Write-Warning "自動檢測 Rust target 失敗，將使用現有二進制檔。"
+}
+
+Write-Host "執行 UPX 壓縮執行檔..." -ForegroundColor Cyan
+$upxCmd = Get-Command upx.exe -ErrorAction SilentlyContinue
+if ($upxCmd -or (Test-Path "upx.exe")) {
+    $upxPath = if ($upxCmd) { "upx" } else { ".\upx.exe" }
+    # 只針對 ffmpeg 和 rclone 壓縮，yt-dlp 已達極限且可能觸發誤判
+    $filesToPack = Get-ChildItem -Path "src-tauri\bin" -Include "ffmpeg-*.exe", "rclone-*.exe" -Recurse
+    foreach ($file in $filesToPack) {
+        Write-Host ">>> 正在壓縮 $($file.Name) ..." -ForegroundColor Yellow
+        & $upxPath -9 $file.FullName | Out-Null
+    }
+} else {
+    Write-Warning "未找到 UPX (upx.exe)，將略過執行檔壓縮步驟。"
 }
 
 Write-Host "開始編譯 Windows 版 (Tauri)..." -ForegroundColor Cyan
