@@ -72,7 +72,12 @@ export const UpdateService = {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-      const resp = await fetch('https://api.github.com/repos/JohnLiang119/avd/releases/latest', {
+      const isTestMode = localStorage.getItem('avd_test_mode_enabled') === 'true';
+      const apiUrl = isTestMode 
+        ? 'https://api.github.com/repos/JohnLiang119/avd/releases'
+        : 'https://api.github.com/repos/JohnLiang119/avd/releases/latest';
+
+      const resp = await fetch(apiUrl, {
         signal: controller.signal,
         headers: {
           'Accept': 'application/vnd.github.v3+json'
@@ -84,7 +89,13 @@ export const UpdateService = {
         return defaultResult;
       }
 
-      const release = await resp.json();
+      const data = await resp.json();
+      const release = isTestMode ? (Array.isArray(data) && data.length > 0 ? data[0] : null) : data;
+
+      if (!release) {
+        return defaultResult;
+      }
+
       const tagName = release.tag_name || '';
       const remoteVersion = tagName.replace(/^[^\d]*/, '');
 

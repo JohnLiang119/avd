@@ -613,6 +613,11 @@
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
           <van-cell title="目前版本" :value="`v${version}`" />
           <van-cell title="檢查新版本" is-link @click="handleManualCheckUpdate" />
+          <van-cell title="接收測試版更新" center label="開發與測試用途 (Pre-release)">
+            <template #right-icon>
+              <van-switch v-model="testModeEnabled" size="20px" />
+            </template>
+          </van-cell>
         </van-cell-group>
       </div>
     </van-dialog>
@@ -1411,11 +1416,13 @@ const confirmDeleteAll = ref(getStoredBool('avd_confirm_delete_all', true));
 const confirmDeleteSingle = ref(getStoredBool('avd_confirm_delete_single', true));
 const confirmClearAll = ref(getStoredBool('avd_confirm_clear_all', true));
 const confirmClearSingle = ref(getStoredBool('avd_confirm_clear_single', true));
+const testModeEnabled = ref(getStoredBool('avd_test_mode_enabled', false));
 
 watch(confirmDeleteAll, (val) => localStorage.setItem('avd_confirm_delete_all', String(val)));
 watch(confirmDeleteSingle, (val) => localStorage.setItem('avd_confirm_delete_single', String(val)));
 watch(confirmClearAll, (val) => localStorage.setItem('avd_confirm_clear_all', String(val)));
 watch(confirmClearSingle, (val) => localStorage.setItem('avd_confirm_clear_single', String(val)));
+watch(testModeEnabled, (val) => localStorage.setItem('avd_test_mode_enabled', String(val)));
 
 const saveWifiConfig = () => {
   localStorage.setItem('avd_wifi_ssid', wifiSsid.value);
