@@ -582,25 +582,25 @@
     <van-dialog v-model:show="showSettingsModal" title="⚙️ 偏好設定" confirm-button-text="關閉">
       <div style="padding: 16px;">
         <p style="font-size: 13px; color: #4b5563; margin-bottom: 12px; font-weight: bold;">
-          操作確認視窗設定
+          操作前顯示確認視窗 (防呆機制)
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
-          <van-cell title="1. 全部刪除，是否要視窗詢問" center>
+          <van-cell icon="delete-o" title="全部刪除檔案" center>
             <template #right-icon>
               <van-switch v-model="confirmDeleteAll" size="20px" />
             </template>
           </van-cell>
-          <van-cell title="2. 單一刪除，是否要視窗詢問" center>
+          <van-cell icon="delete-o" title="單一刪除檔案" center>
             <template #right-icon>
               <van-switch v-model="confirmDeleteSingle" size="20px" />
             </template>
           </van-cell>
-          <van-cell title="3. 全部清除，是否要視窗詢問" center>
+          <van-cell icon="clear" title="全部清除列表" center>
             <template #right-icon>
               <van-switch v-model="confirmClearAll" size="20px" />
             </template>
           </van-cell>
-          <van-cell title="4. 單一清除，是否要視窗詢問" center>
+          <van-cell icon="clear" title="單一清除列表" center>
             <template #right-icon>
               <van-switch v-model="confirmClearSingle" size="20px" />
             </template>
