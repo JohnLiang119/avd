@@ -585,22 +585,34 @@
           操作前顯示確認視窗 (防呆機制)
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
-          <van-cell icon="delete-o" title="全部刪除檔案" center>
+          <van-cell title="全部刪除檔案" center>
+            <template #icon>
+              <van-button size="mini" round type="danger" plain icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
+            </template>
             <template #right-icon>
               <van-switch v-model="confirmDeleteAll" size="20px" />
             </template>
           </van-cell>
-          <van-cell icon="delete-o" title="單一刪除檔案" center>
+          <van-cell title="單一刪除檔案" center>
+            <template #icon>
+              <van-button size="mini" round type="danger" plain icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
+            </template>
             <template #right-icon>
               <van-switch v-model="confirmDeleteSingle" size="20px" />
             </template>
           </van-cell>
-          <van-cell icon="clear" title="全部清除列表" center>
+          <van-cell title="全部清除列表" center>
+            <template #icon>
+              <van-button size="mini" round type="default" icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
+            </template>
             <template #right-icon>
               <van-switch v-model="confirmClearAll" size="20px" />
             </template>
           </van-cell>
-          <van-cell icon="clear" title="單一清除列表" center>
+          <van-cell title="單一清除列表" center>
+            <template #icon>
+              <van-button size="mini" round type="default" icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
+            </template>
             <template #right-icon>
               <van-switch v-model="confirmClearSingle" size="20px" />
             </template>
