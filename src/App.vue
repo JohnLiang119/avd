@@ -778,7 +778,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onUnmounted, onMounted, computed } from 'vue';
-import { showToast, showLoadingToast, closeToast, showDialog } from 'vant';
+import { showToast, showLoadingToast, closeToast, showDialog, showConfirmDialog } from 'vant';
 import QrcodeVue from 'qrcode.vue';
 import YouTubeBatchModal from './components/YouTubeBatchModal.vue';
 import pkg from '../package.json';
@@ -1930,6 +1930,50 @@ const addTask = async (urlToAdd: string) => {
   if (!urlToAdd.startsWith('http://') && !urlToAdd.startsWith('https://')) {
     showToast('請輸入正確的影音網址');
     return;
+  }
+
+  const isStrictChannelUrl = 
+    (urlToAdd.includes('/channel/') || urlToAdd.includes('/c/') || urlToAdd.includes('youtube.com/@')) 
+    && !urlToAdd.includes('/watch') 
+    && !urlToAdd.includes('/playlist');
+
+  if (isStrictChannelUrl) {
+    try {
+      showLoadingToast({
+        message: '正在檢查頻道資訊...',
+        forbidClick: true,
+        duration: 0
+      });
+      const channelInfo = await DownloadService.resolveYouTubeChannel(urlToAdd);
+      closeToast();
+      
+      if (!monitoredChannels.value.some(c => c.channelId === channelInfo.channelId)) {
+        try {
+          await showConfirmDialog({
+            title: '發現新頻道',
+            message: `您輸入的是頻道網址。是否要將「${channelInfo.title || urlToAdd}」加入自動追蹤清單？\n\n加入後系統將每小時自動為您檢查並下載新影片。`,
+            confirmButtonText: '加入追蹤並下載',
+            cancelButtonText: '僅下載這一次',
+            confirmButtonColor: '#1989fa'
+          });
+          // Confirm
+          monitoredChannels.value.push({
+            channelId: channelInfo.channelId,
+            title: channelInfo.title || urlToAdd,
+            thumbnail: channelInfo.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+            enabled: true,
+            lastCheckTime: Date.now()
+          });
+          // watch 已經負責 saveConfig，無需手動儲存
+          showToast('已加入自動追蹤清單');
+        } catch {
+          // Cancelled - proceed to download only
+        }
+      }
+    } catch (e) {
+      closeToast();
+      console.warn('Failed to resolve channel info for tracking prompt:', e);
+    }
   }
 
   const isPlaylistUrl = urlToAdd.includes('list=') ||
