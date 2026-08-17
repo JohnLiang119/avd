@@ -1,9 +1,9 @@
 import { registerPlugin } from '@capacitor/core';
 import { Command, open } from '@tauri-apps/plugin-shell';
-import { downloadDir } from '@tauri-apps/api/path';
+import { downloadDir, tempDir, join } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { readTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
+import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
 import * as OpenCC from 'opencc-js';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -586,6 +586,118 @@ export const DownloadService = {
       return { success: true };
     } catch (e: any) {
       throw new Error(`Rclone 同步錯誤: ${e.message || String(e)}`);
+    }
+  },
+
+  async backupChannelsToDrive(channelsJsonStr: string, tokenOrPath: string): Promise<void> {
+    if (!tokenOrPath) throw new Error('尚未設定雲端硬碟 (Google Drive / Rclone)');
+
+    if (isTauri()) {
+      const cleanDest = tokenOrPath.replace(/\/$/, '');
+      const targetPath = `${cleanDest}/avd_channels_backup.json`;
+      const tempPath = await join(await tempDir(), 'avd_channels_backup.json');
+      await writeTextFile(tempPath, channelsJsonStr);
+      
+      const cmd = Command.sidecar('bin/rclone', ['copyto', tempPath, targetPath]);
+      const out = await cmd.execute();
+      if (out.code !== 0) {
+        throw new Error(`Rclone 上傳失敗 (代碼 ${out.code}): ${out.stderr || out.stdout}`);
+      }
+    } else {
+      const boundary = '-------314159265358979323846';
+      const delimiter = '\r\n--' + boundary + '\r\n';
+      const closeDelim = '\r\n--' + boundary + '--';
+
+      const metadata = {
+        name: 'avd_channels_backup.json',
+        mimeType: 'application/json'
+      };
+
+      const multipartRequestBody =
+        delimiter +
+        'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+        JSON.stringify(metadata) +
+        delimiter +
+        'Content-Type: application/json\r\n\r\n' +
+        channelsJsonStr +
+        closeDelim;
+
+      const searchRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files?q=name%3D'avd_channels_backup.json'+and+trashed%3Dfalse&fields=files(id)",
+        {
+          headers: { Authorization: `Bearer ${tokenOrPath}` }
+        }
+      );
+
+      if (!searchRes.ok) {
+        throw new Error(`搜尋雲端備份失敗: HTTP ${searchRes.status}`);
+      }
+
+      const searchData = await searchRes.json();
+      const existingFileId = searchData.files && searchData.files.length > 0 ? searchData.files[0].id : null;
+
+      let uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+      let uploadMethod = 'POST';
+
+      if (existingFileId) {
+        uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`;
+        uploadMethod = 'PATCH';
+      }
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: uploadMethod,
+        headers: {
+          Authorization: `Bearer ${tokenOrPath}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`
+        },
+        body: multipartRequestBody
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error(`雲端備份上傳失敗: HTTP ${uploadRes.status}`);
+      }
+    }
+  },
+
+  async restoreChannelsFromDrive(tokenOrPath: string): Promise<string> {
+    if (!tokenOrPath) throw new Error('尚未設定雲端硬碟 (Google Drive / Rclone)');
+
+    if (isTauri()) {
+      const cleanDest = tokenOrPath.replace(/\/$/, '');
+      const targetPath = `${cleanDest}/avd_channels_backup.json`;
+      const cmd = Command.sidecar('bin/rclone', ['cat', targetPath]);
+      const out = await cmd.execute();
+      if (out.code !== 0 || !out.stdout.trim()) {
+        throw new Error(`雲端未找到備份檔案或 Rclone 讀取失敗: ${out.stderr || out.stdout}`);
+      }
+      return out.stdout.trim();
+    } else {
+      const searchRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files?q=name%3D'avd_channels_backup.json'+and+trashed%3Dfalse&fields=files(id)",
+        {
+          headers: { Authorization: `Bearer ${tokenOrPath}` }
+        }
+      );
+
+      if (!searchRes.ok) {
+        throw new Error(`搜尋雲端備份失敗: HTTP ${searchRes.status}`);
+      }
+
+      const searchData = await searchRes.json();
+      if (!searchData.files || searchData.files.length === 0) {
+        throw new Error('雲端硬碟中尚未有頻道備份檔 (avd_channels_backup.json)');
+      }
+
+      const fileId = searchData.files[0].id;
+      const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${tokenOrPath}` }
+      });
+
+      if (!downloadRes.ok) {
+        throw new Error(`下載雲端備份失敗: HTTP ${downloadRes.status}`);
+      }
+
+      return await downloadRes.text();
     }
   },
 
