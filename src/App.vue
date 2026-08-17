@@ -670,28 +670,18 @@
         <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
           <div style="font-size: 12px; font-weight: 600; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
             <span>💾 頻道備份與回復</span>
-            <span style="font-size: 10px; color: #94a3b8; font-weight: normal;">(本地 / 雲端雙軌)</span>
           </div>
 
-          <!-- 第一排：本地匯出與匯入 -->
           <div style="display: flex; gap: 8px; margin-bottom: 8px;">
             <van-button size="small" type="default" plain block icon="down" @click="exportChannelsJson" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              📁 匯出本地備份
+              📁 備份
             </van-button>
             <van-button size="small" type="default" plain block icon="upgrade" @click="triggerImportChannels" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              📥 匯入本地檔案
+              📥 匯入
             </van-button>
           </div>
 
-          <!-- 第二排：雲端備份與還原 -->
-          <div style="display: flex; gap: 8px;">
-            <van-button size="small" type="primary" plain block icon="cloud-upload" :loading="isCloudBackingUp" @click="backupChannelsToCloud" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              ☁️ 備份至雲端
-            </van-button>
-            <van-button size="small" type="primary" plain block icon="revoke" :loading="isCloudRestoring" @click="restoreChannelsFromCloud" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              🔄 從雲端還原
-            </van-button>
-          </div>
+
 
           <!-- 隱藏的本地 JSON 檔案選取 input -->
           <input ref="channelFileInputRef" type="file" accept=".json" style="display: none;" @change="handleChannelFileChange" />
@@ -1333,8 +1323,7 @@ const clearAllChannels = () => {
 
 // 頻道本地與雲端備份/還原功能
 const channelFileInputRef = ref<HTMLInputElement | null>(null);
-const isCloudBackingUp = ref(false);
-const isCloudRestoring = ref(false);
+
 
 const exportChannelsJson = async () => {
   if (monitoredChannels.value.length === 0) {
@@ -1361,9 +1350,9 @@ const exportChannelsJson = async () => {
         encoding: Encoding.UTF8
       });
       await Share.share({
-        title: '匯出 AVD 頻道備份',
+        title: `匯出 AVD 頻道備份 (${dateStr})`,
         url: result.uri,
-        dialogTitle: '儲存或分享頻道備份'
+        dialogTitle: `儲存或分享頻道備份 (${dateStr})`
       });
       showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
     } catch (e: any) {
@@ -1459,55 +1448,6 @@ const handleChannelFileChange = (e: Event) => {
   reader.readAsText(file);
 };
 
-const backupChannelsToCloud = async () => {
-  if (monitoredChannels.value.length === 0) {
-    showToast('目前沒有已追蹤的頻道可備份');
-    return;
-  }
-  if (!driveToken.value) {
-    showToast(isTauri() ? '請先點擊主畫面「連結 Drive」設定 Rclone 路徑' : '請先點擊主畫面「連結 Drive」登入 Google 帳號');
-    return;
-  }
-
-  isCloudBackingUp.value = true;
-  try {
-    const backupData = {
-      version: version,
-      backupTime: Date.now(),
-      channels: monitoredChannels.value
-    };
-    const jsonStr = JSON.stringify(backupData, null, 2);
-    await DownloadService.backupChannelsToDrive(jsonStr, driveToken.value);
-    showToast(`☁️ 成功備份 ${monitoredChannels.value.length} 個頻道至雲端！`);
-  } catch (e: any) {
-    showToast(`雲端備份失敗: ${e.message || String(e)}`);
-  } finally {
-    isCloudBackingUp.value = false;
-  }
-};
-
-const restoreChannelsFromCloud = async () => {
-  if (!driveToken.value) {
-    showToast(isTauri() ? '請先點擊主畫面「連結 Drive」設定 Rclone 路徑' : '請先點擊主畫面「連結 Drive」登入 Google 帳號');
-    return;
-  }
-
-  isCloudRestoring.value = true;
-  try {
-    const jsonStr = await DownloadService.restoreChannelsFromDrive(driveToken.value);
-    const parsed = JSON.parse(jsonStr);
-    const incoming = Array.isArray(parsed) ? parsed : (parsed.channels || []);
-    if (!Array.isArray(incoming) || incoming.length === 0) {
-      showToast('雲端備份檔中無頻道資料');
-      return;
-    }
-    confirmRestoreChannels(incoming, '雲端硬碟');
-  } catch (e: any) {
-    showToast(`雲端還原失敗: ${e.message || String(e)}`);
-  } finally {
-    isCloudRestoring.value = false;
-  }
-};
 
 const checkAllMonitoredChannels = async (isManual = false) => {
   if (isCheckingChannels.value) return;
