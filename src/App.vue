@@ -2121,13 +2121,15 @@ const addTask = async (urlToAdd: string) => {
       const channelInfo = await DownloadService.resolveYouTubeChannel(urlToAdd);
       closeToast();
       
-      if (!monitoredChannels.value.some(c => c.channelId === channelInfo.channelId)) {
+      const isMonitored = monitoredChannels.value.some(c => c.channelId === channelInfo.channelId);
+      
+      if (!isMonitored) {
         try {
           await showConfirmDialog({
             title: '發現新頻道',
             message: `您輸入的是頻道網址。是否要將「${channelInfo.title || urlToAdd}」加入自動追蹤清單？\n\n加入後系統將每小時自動為您檢查並下載新影片。`,
-            confirmButtonText: '加入追蹤並下載',
-            cancelButtonText: '僅下載這一次',
+            confirmButtonText: '加入追蹤',
+            cancelButtonText: '不加入',
             confirmButtonColor: '#1989fa'
           });
           // Confirm
@@ -2141,8 +2143,22 @@ const addTask = async (urlToAdd: string) => {
           // watch 已經負責 saveConfig，無需手動儲存
           showToast('已加入自動追蹤清單');
         } catch {
-          // Cancelled - proceed to download only
+          // Cancelled - do nothing, just proceed
         }
+      }
+      
+      try {
+        await showConfirmDialog({
+          title: '掃描歷史明細',
+          message: `是否要掃描「${channelInfo.title || urlToAdd}」的歷史影片明細？\n\n(若頻道影片較多，可能需要較長時間)`,
+          confirmButtonText: '掃描並選擇下載',
+          cancelButtonText: '略過',
+          confirmButtonColor: '#1989fa'
+        });
+        // Confirm - fall through to playlist scanning
+      } catch {
+        // Cancelled - abort parsing
+        return;
       }
     } catch (e) {
       closeToast();

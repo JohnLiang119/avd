@@ -1,0 +1,4 @@
+- [x] Update `addTask` in `src/App.vue` to check if a channel is already monitored before showing the "add to tracking" prompt.
+- [x] Modify the "add to tracking" prompt buttons to "加入追蹤" and "不加入".
+- [x] Add a second prompt to `addTask` for "掃描歷史明細" with buttons "掃描並選擇下載" and "略過".
+- [x] Ensure that if the user selects "略過" on the scanning prompt, the function returns early and does not proceed to `parsePlaylist`.
