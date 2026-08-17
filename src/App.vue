@@ -1252,7 +1252,11 @@ const addManualChannel = async () => {
       return;
     }
 
-    let channelTitle = res.title || manualChannelInput.value.trim();
+    let channelTitle = res.title || '';
+    // 防護：如果 title 是頻道 ID (UC 開頭 24 字元)，視為無效
+    if (channelTitle.startsWith('UC') && channelTitle.length === 24) {
+      channelTitle = '';
+    }
     let latestVid = '';
     let latestTitle = '';
     try {
@@ -1261,8 +1265,16 @@ const addManualChannel = async () => {
         latestVid = rss[0].videoId;
         latestTitle = rss[0].title;
       }
+      // 如果 title 仍為空，嘗試從 RSS feed 取得頻道名稱
+      if (!channelTitle) {
+        channelTitle = await DownloadService.fetchChannelTitleFromRss(res.channelId);
+      }
     } catch (e) {
       console.warn('Initial RSS fetch for title skipped', e);
+    }
+    // 最終 fallback：使用原始輸入
+    if (!channelTitle) {
+      channelTitle = manualChannelInput.value.trim();
     }
 
     monitoredChannels.value.push({
