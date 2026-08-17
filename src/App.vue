@@ -1193,6 +1193,23 @@ onMounted(async () => {
       checkAllMonitoredChannels(false);
     }
   }, 60000);
+
+  // 啟動時自動修復：如果有頻道的 title 是 UC 開頭的 Channel ID，嘗試取得真實名稱
+  setTimeout(async () => {
+    for (const channel of monitoredChannels.value) {
+      if (channel.title && channel.title.startsWith('UC') && channel.title.length === 24) {
+        try {
+          const realTitle = await DownloadService.fetchChannelTitleFromRss(channel.channelId);
+          if (realTitle) {
+            channel.title = realTitle;
+            console.log(`自動修復頻道標題: ${channel.channelId} -> ${realTitle}`);
+          }
+        } catch (e) {
+          console.warn(`修復頻道標題失敗 (${channel.channelId}):`, e);
+        }
+      }
+    }
+  }, 5000);
 });
 
 interface MonitoredChannel {

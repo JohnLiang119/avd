@@ -825,9 +825,14 @@ export const DownloadService = {
       try {
         const res = await YoutubeDlPlugin.resolveChannel({ input: raw });
         if (res && res.channelId) {
+          let resolvedTitle = res.title ? convertCnToTw(res.title) : undefined;
+          // 防護：如果原生外掛回傳的 title 其實是頻道 ID，視為無效
+          if (resolvedTitle && resolvedTitle.startsWith('UC') && resolvedTitle.length === 24) {
+            resolvedTitle = undefined;
+          }
           return {
             channelId: res.channelId,
-            title: res.title ? convertCnToTw(res.title) : undefined,
+            title: resolvedTitle,
             thumbnail: res.thumbnail || undefined
           };
         }
