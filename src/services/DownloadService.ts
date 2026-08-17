@@ -790,6 +790,32 @@ export const DownloadService = {
     }
   },
 
+  // 從 YouTube RSS feed 的 <title> 取得頻道名稱
+  async fetchChannelTitleFromRss(channelId: string): Promise<string> {
+    try {
+      let xmlText = '';
+      const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
+      if (!isTauri()) {
+        const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
+        xmlText = res.xml || '';
+      } else {
+        xmlText = await invoke<string>('fetch_http_text', { url: rssUrl });
+      }
+      if (xmlText) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'application/xml');
+        // RSS feed 根層的 <title> 就是頻道名稱
+        const feedTitleEl = doc.querySelector('feed > title');
+        if (feedTitleEl && feedTitleEl.textContent) {
+          return convertCnToTw(feedTitleEl.textContent);
+        }
+      }
+    } catch (e) {
+      console.warn('fetchChannelTitleFromRss failed:', e);
+    }
+    return '';
+  },
+
   async resolveYouTubeChannel(input: string): Promise<{ channelId: string; title?: string; thumbnail?: string }> {
     const raw = input.trim();
     if (!raw) throw new Error('請輸入頻道網址或 ID');
