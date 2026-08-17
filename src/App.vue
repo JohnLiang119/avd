@@ -788,6 +788,8 @@ import pkg from '../package.json';
 const version = pkg.version;
 
 import { App } from '@capacitor/app';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { open as openShell } from '@tauri-apps/plugin-shell';
 import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
@@ -1334,7 +1336,7 @@ const channelFileInputRef = ref<HTMLInputElement | null>(null);
 const isCloudBackingUp = ref(false);
 const isCloudRestoring = ref(false);
 
-const exportChannelsJson = () => {
+const exportChannelsJson = async () => {
   if (monitoredChannels.value.length === 0) {
     showToast('目前沒有已追蹤的頻道可備份');
     return;
@@ -1345,18 +1347,41 @@ const exportChannelsJson = () => {
     channels: monitoredChannels.value
   };
   const jsonStr = JSON.stringify(backupData, null, 2);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const now = new Date();
   const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  a.href = url;
-  a.download = `avd_channels_${dateStr}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
+  const fileName = `avd_channels_${dateStr}.json`;
+
+  if (!isTauri()) {
+    // Android (Capacitor) 環境：使用 Filesystem 與 Share
+    try {
+      const result = await Filesystem.writeFile({
+        path: fileName,
+        data: jsonStr,
+        directory: Directory.Cache,
+        encoding: Encoding.UTF8
+      });
+      await Share.share({
+        title: '匯出 AVD 頻道備份',
+        url: result.uri,
+        dialogTitle: '儲存或分享頻道備份'
+      });
+      showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
+    } catch (e: any) {
+      showToast(`匯出失敗: ${e.message || String(e)}`);
+    }
+  } else {
+    // Windows (Tauri) 環境：使用 Blob 下載
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
+  }
 };
 
 const triggerImportChannels = () => {

@@ -35,6 +35,13 @@ subprojects {
                 }
             }
         }
+        project.plugins.withId("kotlin-android") {
+            project.android {
+                kotlinOptions {
+                    jvmTarget = "17"
+                }
+            }
+        }
     }
 }
 
