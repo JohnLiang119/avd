@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -97,47 +97,44 @@
       </van-form>
 
       <div class="control-panel-wrapper" style="padding: 0 10px 10px; margin-bottom: 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
-        <!-- 第一排：版本號 + 重整、清除、刪除、設定 (4 顆按鈕) -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span class="nav-version-text" style="font-size: 11px; color: #9ca3af; font-family: monospace; font-weight: 500;">v{{ version }}</span>
-          <div style="display: flex; gap: 8px;">
-            <van-button 
-              size="small" 
-              round 
-              type="default"
-              icon="replay" 
-              @click="batchRetryDownloads" 
-              class="top-ctrl-btn"
-              title="批次重新下載失敗/中止的任務"
-            >重整</van-button>
-            <van-button 
-              size="small" 
-              round 
-              type="default" 
-              icon="delete-o" 
-              @click="clearCompleted" 
-              class="top-ctrl-btn"
-              title="清除已完成紀錄"
-            >清除</van-button>
-            <van-button 
-              size="small" 
-              round 
-              type="default" 
-              icon="delete" 
-              @click="deleteAllFiles" 
-              class="top-ctrl-btn"
-              title="刪除全部實體檔案"
-            >刪除</van-button>
-            <van-button 
-              size="small" 
-              round 
-              type="default" 
-              icon="setting-o" 
-              @click="showSettingsModal = true" 
-              class="top-ctrl-btn"
-              title="偏好設定"
-            >設定</van-button>
-          </div>
+        <!-- 第一排：重整、清除、刪除、設定 (4 顆按鈕) -->
+        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 8px;">
+          <van-button 
+            size="small" 
+            round 
+            type="default"
+            icon="replay" 
+            @click="batchRetryDownloads" 
+            class="top-ctrl-btn"
+            title="批次重新下載失敗/中止的任務"
+          >重整</van-button>
+          <van-button 
+            size="small" 
+            round 
+            type="default" 
+            icon="delete-o" 
+            @click="clearCompleted" 
+            class="top-ctrl-btn"
+            title="清除已完成紀錄"
+          >清除</van-button>
+          <van-button 
+            size="small" 
+            round 
+            type="default" 
+            icon="delete" 
+            @click="deleteAllFiles" 
+            class="top-ctrl-btn"
+            title="刪除全部實體檔案"
+          >刪除</van-button>
+          <van-button 
+            size="small" 
+            round 
+            type="default" 
+            icon="setting-o" 
+            @click="showSettingsModal = true" 
+            class="top-ctrl-btn"
+            title="偏好設定"
+          >設定</van-button>
         </div>
 
         <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->
