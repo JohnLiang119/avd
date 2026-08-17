@@ -96,112 +96,93 @@
         </div>
       </van-form>
 
-      <div class="queue-header" style="margin-bottom: 5px;">
-        <div style="display: flex; gap: 8px; align-items: center;">
+      <div class="control-panel-wrapper" style="padding: 0 10px 10px; margin-bottom: 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
+        <!-- 第一排：版本號 + 重整、清除、刪除、設定 (4 顆按鈕) -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <span class="nav-version-text" style="font-size: 11px; color: #9ca3af; font-family: monospace; font-weight: 500;">v{{ version }}</span>
+          <div style="display: flex; gap: 8px;">
+            <van-button 
+              size="small" 
+              round 
+              type="default"
+              icon="replay" 
+              @click="batchRetryDownloads" 
+              class="top-ctrl-btn"
+              title="批次重新下載失敗/中止的任務"
+            >重整</van-button>
+            <van-button 
+              size="small" 
+              round 
+              type="default" 
+              icon="delete-o" 
+              @click="clearCompleted" 
+              class="top-ctrl-btn"
+              title="清除已完成紀錄"
+            >清除</van-button>
+            <van-button 
+              size="small" 
+              round 
+              type="default" 
+              icon="delete" 
+              @click="deleteAllFiles" 
+              class="top-ctrl-btn"
+              title="刪除全部實體檔案"
+            >刪除</van-button>
+            <van-button 
+              size="small" 
+              round 
+              type="default" 
+              icon="setting-o" 
+              @click="showSettingsModal = true" 
+              class="top-ctrl-btn"
+              title="偏好設定"
+            >設定</van-button>
+          </div>
         </div>
-        <div style="display: flex; gap: 8px;" v-show="!isTvMode">
-          <van-button 
-            size="small" 
-            round 
-            type="warning"
-            plain
-            icon="replay" 
-            @click="batchRetryDownloads" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
-            title="批次重新下載失敗/中止的任務"
-          >重整</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="delete-o" 
-            @click="clearCompleted" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
-            title="清除已完成紀錄"
-          >清除</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="danger" 
-            plain 
-            icon="delete" 
-            @click="deleteAllFiles" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
-            title="刪除全部實體檔案"
-          >刪除</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="setting-o" 
-            @click="showSettingsModal = true" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
-            title="偏好設定"
-          >設定</van-button>
-        </div>
-      </div>
 
-      <div class="toolbar-row" style="display: flex; gap: 8px; justify-content: flex-end; overflow-x: auto; padding: 0 5px 10px; margin: 0 5px 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
+        <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->
+        <div style="display: flex; gap: 8px; justify-content: flex-end;">
           <van-button 
             size="small" 
             round 
-            :type="mp3Mode ? 'success' : 'default'" 
-            :plain="!mp3Mode" 
+            type="default"
+            :class="['top-ctrl-btn', { 'btn-active': mp3Mode }]"
             :icon="mp3Mode ? 'music' : 'music-o'" 
             @click="mp3Mode = !mp3Mode" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
           >音訊</van-button>
           
           <van-button 
             size="small" 
             round 
-            :type="monitoredChannels.length > 0 ? 'primary' : 'default'" 
-            :plain="monitoredChannels.length === 0"
+            type="default"
+            :class="['top-ctrl-btn', { 'btn-active': monitoredChannels.length > 0 }]"
             icon="bullhorn-o" 
             @click="showChannelModal = true" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
           >頻道</van-button>
 
           <van-button 
             size="small" 
             round 
-            :type="serverStatus.isActive ? 'danger' : 'primary'" 
-            plain 
+            type="default"
+            :class="['top-ctrl-btn', { 'btn-active': serverStatus.isActive }]"
             :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'" 
             @click="toggleLocalServer" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
             title="開啟/關閉 快傳伺服器"
           >快傳</van-button>
 
           <van-button 
             size="small" 
             round 
-            type="primary"
-            plain
+            type="default"
             :icon="isAllExpanded ? 'arrow-up' : 'arrow-down'" 
             @click="toggleExpandAll" 
-            style="padding: 0 10px; height: 30px; flex-shrink: 0;"
+            class="top-ctrl-btn"
             :title="isAllExpanded ? '全部收合' : '全部展開'"
           >{{ isAllExpanded ? '收合' : '展開' }}</van-button>
-
-          <!-- TV 開關 (暫時隱藏，保留程式碼) -->
-          <van-button 
-            v-show="false"
-            size="small" 
-            round 
-            :type="isTvMode ? 'warning' : 'default'" 
-            plain 
-            icon="tv-o" 
-            @click="toggleTvMode" 
-            style="padding: 0 8px; height: 32px; font-size: 11px;"
-            :title="isTvMode ? '切換為 手機模式' : '切換為 TV 遙控器模式'"
-          >
-            {{ isTvMode ? 'TV 模式' : 'TV 關' }}
-          </van-button>
         </div>
+      </div>
 
       <!-- TV 模式專屬大字體接收端畫面 (未推播時) -->
       <div v-if="isTvMode && remoteTasks.length === 0" class="tv-receiver-screen" style="display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 60vh; padding: 20px; text-align: center;">
@@ -942,6 +923,7 @@ const toggleTvMode = () => {
     startLocalServer();
   }
 };
+void toggleTvMode;
 
 const targetTvIp = ref(localStorage.getItem('avd_target_tv_ip') || '');
 
@@ -2825,5 +2807,44 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   transform: scale(1.04);
   transition: all 0.15s ease-in-out;
   z-index: 10;
+}
+
+/* 頂部 8 顆操作按鈕統一等寬等高置中樣式 */
+.top-ctrl-btn {
+  width: 70px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  font-size: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  border-radius: 999px !important;
+  border: 1px solid #dcdfe6 !important;
+  color: #323233 !important;
+  background-color: #ffffff !important;
+  transition: all 0.2s ease !important;
+}
+.top-ctrl-btn .van-button__content {
+  justify-content: center !important;
+  width: 100% !important;
+}
+.top-ctrl-btn .van-icon {
+  font-size: 13px !important;
+  margin-right: 2px !important;
+}
+.top-ctrl-btn:hover {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+.top-ctrl-btn:active {
+  background-color: #f1f5f9 !important;
+}
+/* 當功能處於啟用狀態時的精緻主色高亮 (如: 音訊模式開啟、頻道有追蹤、快傳中) */
+.top-ctrl-btn.btn-active {
+  border-color: #1989fa !important;
+  color: #1989fa !important;
+  background-color: #eff6ff !important;
+  font-weight: 500 !important;
 }
 </style>
