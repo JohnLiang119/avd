@@ -838,11 +838,17 @@ export const DownloadService = {
         if (out.code === 0 && out.stdout.trim()) {
           const data = JSON.parse(out.stdout.trim());
           const cid = data.channel_id || (data.uploader_id?.startsWith('UC') ? data.uploader_id : '') || '';
-          const title = data.uploader || data.channel || data.title || '';
-          if (cid.startsWith('UC')) {
+          let title = data.uploader || data.channel || data.title || '';
+          
+          // 如果 yt-dlp 抓到的 title 剛好是 ID，將其清空，由後方網頁爬蟲取得真實名稱
+          if (title === cid || title === data.uploader_id || (title.startsWith('UC') && title.length === 24)) {
+            title = '';
+          }
+
+          if (cid.startsWith('UC') && title) {
             return {
               channelId: cid,
-              title: title ? convertCnToTw(title) : undefined
+              title: convertCnToTw(title)
             };
           }
         }
@@ -851,7 +857,7 @@ export const DownloadService = {
       }
     }
 
-    // Fallback 嘗試讀取網頁內容擷取 channelId
+    // Fallback 嘗試讀取網頁內容擷取 channelId 與 title
     try {
       let text = '';
       if (isTauri()) {
@@ -864,9 +870,22 @@ export const DownloadService = {
       }
       if (text) {
         const m1 = text.match(/"channelId":\s*"(UC[a-zA-Z0-9_-]{22})"/);
-        if (m1 && m1[1]) return { channelId: m1[1] };
         const m2 = text.match(/<meta\s+itemprop="channelId"\s+content="(UC[a-zA-Z0-9_-]{22})"/);
-        if (m2 && m2[1]) return { channelId: m2[1] };
+        const cid = (m1 && m1[1]) ? m1[1] : (m2 && m2[1] ? m2[1] : '');
+        
+        if (cid) {
+          let title = '';
+          const tMatch = text.match(/<meta\s+property="og:title"\s+content="(.*?)"/);
+          if (tMatch && tMatch[1]) {
+            title = tMatch[1];
+          } else {
+            const titleMatch = text.match(/<title>(.*?) - YouTube<\/title>/);
+            if (titleMatch && titleMatch[1]) {
+              title = titleMatch[1];
+            }
+          }
+          return { channelId: cid, title: title ? convertCnToTw(title) : undefined };
+        }
       }
     } catch (e) {
       console.warn('Fetch web page failed', e);
