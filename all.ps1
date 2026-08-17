@@ -116,8 +116,12 @@ try {
 } catch {}
 
 if (Test-Path $apkDir) {
+    # 複製前清理專案根目錄舊的 APK 產物
+    Remove-Item "AVD_*.apk" -Force -ErrorAction SilentlyContinue
+
     # 支援 ABI Splits: 將所有產出的 app-*-debug.apk 重新命名
     $apks = Get-ChildItem -Path $apkDir -Filter "app-*-debug.apk"
+    $primaryApk = $null
     foreach ($apk in $apks) {
         $arch = $apk.Name.Replace("app-", "").Replace("-debug.apk", "")
         if ($arch -eq "debug") {
@@ -127,6 +131,40 @@ if (Test-Path $apkDir) {
         }
         Copy-Item -Path $apk.FullName -Destination $destApkName -Force
         Write-Host "成功複製 APK: $destApkName" -ForegroundColor Green
+        if (-not $primaryApk -or $arch -eq "arm64-v8a") {
+            $primaryApk = $destApkName
+        }
+    }
+
+    # 嘗試安裝主要 APK 到連接的手機 (安全偵測，無裝置時自動略過)
+    if ($primaryApk -and (Test-Path $primaryApk)) {
+        try {
+            $devices = & adb devices 2>$null | Where-Object { $_ -match "\bdevice\b" -and $_ -notmatch "List of" }
+            if ($devices) {
+                Write-Host "偵測到已連接手機，正在嘗試安裝 APK ($primaryApk)..." -ForegroundColor Cyan
+                $prevEAP = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                $installOutput = & adb install -r $primaryApk 2>&1
+                $adbCode = $LASTEXITCODE
+                $ErrorActionPreference = $prevEAP
+
+                if ($adbCode -eq 0) {
+                    Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
+                } else {
+                    if ("$installOutput" -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+                        Write-Warning "偵測到手機上已有不同簽名之舊版 AVD，正在嘗試卸載舊版並重新安裝..."
+                        & adb uninstall com.mattpocock.avd 2>$null
+                        & adb install -r $primaryApk 2>$null
+                    } else {
+                        Write-Warning "自動安裝未成功，可稍後手動傳送至手機安裝。"
+                    }
+                }
+            } else {
+                Write-Host "ℹ️ 目前未連接 Android 手機/模擬器，已自動略過安裝步驟。" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "ℹ️ 略過手機自動安裝。" -ForegroundColor DarkGray
+        }
     }
 } else {
     Write-Warning "未找到編譯出的 APK 目錄 ($apkDir)"
@@ -216,8 +254,9 @@ if ($installer) {
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Magenta
 Write-Host "   🎉 全平台任務順利完成！" -ForegroundColor Magenta
-if ($destApkName -and (Test-Path $destApkName)) {
-    Write-Host "   APK: $pwd\$destApkName" -ForegroundColor Green
+$apkResults = Get-ChildItem -Path . -Filter "AVD_${appVersion}*.apk" -ErrorAction SilentlyContinue
+foreach ($apk in $apkResults) {
+    Write-Host "   APK: $pwd\$($apk.Name)" -ForegroundColor Green
 }
 if ($destMsiName -and (Test-Path $destMsiName)) {
     Write-Host "   WIN: $pwd\$destMsiName" -ForegroundColor Green
