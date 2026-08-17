@@ -151,12 +151,15 @@ if (Test-Path $apkDir) {
                 if ($adbCode -eq 0) {
                     Write-Host "安裝成功！你現在可以打開手機查看 App 了。" -ForegroundColor Green
                 } else {
+                    Write-Host ($installOutput -join "`n") -ForegroundColor DarkGray
                     if ("$installOutput" -match "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
                         Write-Warning "偵測到手機上已有不同簽名之舊版 AVD，正在嘗試卸載舊版並重新安裝..."
                         & adb uninstall com.mattpocock.avd 2>$null
                         & adb install -r $primaryApk 2>$null
+                    } elseif ("$installOutput" -match "INSTALL_FAILED_USER_RESTRICTED") {
+                        Write-Warning "手機端攔截安裝！請解鎖手機螢幕並在跳出的提示點擊「允許安裝」，或至『開發人員選項』開啟『USB 安裝』。"
                     } else {
-                        Write-Warning "自動安裝未成功，可稍後手動傳送至手機安裝。"
+                        Write-Warning "自動安裝未成功，可手動傳送至手機或確認螢幕是否允許安裝。"
                     }
                 }
             } else {
