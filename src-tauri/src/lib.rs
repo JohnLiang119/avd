@@ -116,6 +116,31 @@ fn install_win_msi(msi_path: String) -> Result<(), String> {
     std::process::exit(0);
 }
 
+#[tauri::command]
+fn fetch_http_text(url: String) -> Result<String, String> {
+    use std::time::Duration;
+
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(10))
+        .build();
+
+    let response = agent
+        .get(&url)
+        .set(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        .call()
+        .map_err(|e| format!("HTTP 請求失敗: {}", e))?;
+
+    let text = response
+        .into_string()
+        .map_err(|e| format!("讀取回應內容失敗: {}", e))?;
+
+    Ok(text)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -128,7 +153,8 @@ pub fn run() {
             start_win_local_server,
             stop_win_local_server,
             download_win_update_file,
-            install_win_msi
+            install_win_msi,
+            fetch_http_text
         ])
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())

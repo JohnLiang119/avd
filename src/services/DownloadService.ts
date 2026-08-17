@@ -643,13 +643,9 @@ export const DownloadService = {
         const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
         xmlText = res.xml || '';
       } else {
-        // Windows/桌面端直接 fetch
+        // Windows/桌面端調用 Rust 原生 HTTP 請求通道，繞過 WebView CORS 限制
         const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
-        const response = await fetch(rssUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: 無法讀取頻道 RSS`);
-        }
-        xmlText = await response.text();
+        xmlText = await invoke<string>('fetch_http_text', { url: rssUrl });
       }
 
       if (!xmlText) throw new Error('頻道 RSS 內容為空');
@@ -745,9 +741,16 @@ export const DownloadService = {
 
     // Fallback 嘗試讀取網頁內容擷取 channelId
     try {
-      const resp = await fetch(targetUrl);
-      if (resp.ok) {
-        const text = await resp.text();
+      let text = '';
+      if (isTauri()) {
+        text = await invoke<string>('fetch_http_text', { url: targetUrl });
+      } else {
+        const resp = await fetch(targetUrl);
+        if (resp.ok) {
+          text = await resp.text();
+        }
+      }
+      if (text) {
         const m1 = text.match(/"channelId":\s*"(UC[a-zA-Z0-9_-]{22})"/);
         if (m1 && m1[1]) return { channelId: m1[1] };
         const m2 = text.match(/<meta\s+itemprop="channelId"\s+content="(UC[a-zA-Z0-9_-]{22})"/);
