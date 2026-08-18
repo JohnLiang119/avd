@@ -483,7 +483,7 @@ public class YoutubeDlPlugin extends Plugin {
                         initObj.put("line", "正在檢查並更新核心引擎 (每日首次)...");
                         notifyListeners("downloadProgress", initObj);
                         
-                        YoutubeDL.getInstance().updateYoutubeDL(getContext(), YoutubeDL.UpdateChannel.STABLE.INSTANCE);
+                        YoutubeDL.getInstance().updateYoutubeDL(getContext(), YoutubeDL.UpdateChannel.NIGHTLY.INSTANCE);
                         
                         prefs.edit().putString("last_engine_update_check", today).apply();
                         Log.d(TAG, "YoutubeDL engine update checked and updated for today: " + today);
