@@ -781,6 +781,8 @@ import { App } from '@capacitor/app';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { open as openShell } from '@tauri-apps/plugin-shell';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { LazyStore } from '@tauri-apps/plugin-store';
@@ -1359,17 +1361,22 @@ const exportChannelsJson = async () => {
       showToast(`匯出失敗: ${e.message || String(e)}`);
     }
   } else {
-    // Windows (Tauri) 環境：使用 Blob 下載
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
+    // Windows (Tauri) 環境：使用原生存檔對話框
+    try {
+      const filePath = await save({
+        filters: [{
+          name: 'JSON',
+          extensions: ['json']
+        }],
+        defaultPath: fileName,
+      });
+      if (filePath) {
+        await writeTextFile(filePath, jsonStr);
+        showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
+      }
+    } catch (e: any) {
+      showToast(`匯出失敗: ${e.message || String(e)}`);
+    }
   }
 };
 
