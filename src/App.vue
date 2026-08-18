@@ -765,6 +765,15 @@
       :items="parsedPlaylistItems"
       @confirm="onBatchModalConfirm"
     />
+    <van-action-sheet
+      v-model:show="showRestoreSheet"
+      :actions="restoreActions"
+      cancel-text="取消"
+      :title="`還原頻道清單 (${restoreSourceName})`"
+      :description="`偵測到備份中共有 ${restoreIncomingChannels.length} 個頻道。\n請選擇還原模式：`"
+      close-on-click-action
+      @select="onRestoreActionSelect"
+    />
   </div>
 </template>
 
@@ -1387,20 +1396,17 @@ const triggerImportChannels = () => {
   }
 };
 
-const confirmRestoreChannels = (incomingChannels: any[], sourceName: string) => {
-  const validChannels = incomingChannels.filter(c => c && c.channelId && typeof c.channelId === 'string');
-  if (validChannels.length === 0) {
-    showToast('備份檔案中無有效的頻道資料');
-    return;
-  }
+const showRestoreSheet = ref(false);
+const restoreIncomingChannels = ref<any[]>([]);
+const restoreSourceName = ref('');
+const restoreActions = [
+  { name: '合併現有', subname: '保留現有頻道並自動去重加入' },
+  { name: '覆蓋現有', subname: '以備份檔完全取代現有清單', color: '#ee0a24' }
+];
 
-  showDialog({
-    title: `還原頻道清單 (${sourceName})`,
-    message: `偵測到備份中共有 ${validChannels.length} 個頻道。\n\n請選擇還原模式：\n• 覆蓋現有：以備份檔完全取代現有清單\n• 合併現有：保留現有頻道並自動去重加入`,
-    confirmButtonText: '覆蓋現有',
-    cancelButtonText: '合併加入',
-    showCancelButton: true
-  }).then(() => {
+const onRestoreActionSelect = (action: any) => {
+  const validChannels = restoreIncomingChannels.value;
+  if (action.name === '覆蓋現有') {
     // 覆蓋
     monitoredChannels.value = validChannels.map(c => ({
       channelId: c.channelId,
@@ -1412,7 +1418,7 @@ const confirmRestoreChannels = (incomingChannels: any[], sourceName: string) => 
       lastVideoTitle: c.lastVideoTitle || ''
     }));
     showToast(`已覆蓋還原 ${monitoredChannels.value.length} 個頻道！`);
-  }).catch(() => {
+  } else if (action.name === '合併現有') {
     // 合併
     let added = 0;
     validChannels.forEach(c => {
@@ -1430,7 +1436,19 @@ const confirmRestoreChannels = (incomingChannels: any[], sourceName: string) => 
       }
     });
     showToast(`合併完成！新增了 ${added} 個頻道 (現共 ${monitoredChannels.value.length} 個)`);
-  });
+  }
+  showRestoreSheet.value = false;
+};
+
+const confirmRestoreChannels = (incomingChannels: any[], sourceName: string) => {
+  const validChannels = incomingChannels.filter(c => c && c.channelId && typeof c.channelId === 'string');
+  if (validChannels.length === 0) {
+    showToast('備份檔案中無有效的頻道資料');
+    return;
+  }
+  restoreIncomingChannels.value = validChannels;
+  restoreSourceName.value = sourceName;
+  showRestoreSheet.value = true;
 };
 
 const handleChannelFileChange = (e: Event) => {
