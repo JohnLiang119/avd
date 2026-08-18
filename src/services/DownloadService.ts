@@ -877,9 +877,17 @@ export const DownloadService = {
           }
 
           if (cid.startsWith('UC') && title) {
+            let thumbnail: string | undefined = data.thumbnail || undefined;
+            if (!thumbnail && data.thumbnails && Array.isArray(data.thumbnails)) {
+              const avatar = data.thumbnails.find((t: any) => t.id === 'avatar_uncropped') 
+                || data.thumbnails.filter((t: any) => t.id && !String(t.id).includes('banner')).pop()
+                || data.thumbnails[data.thumbnails.length - 1];
+              if (avatar && avatar.url) thumbnail = avatar.url;
+            }
             return {
               channelId: cid,
-              title: convertCnToTw(title)
+              title: convertCnToTw(title),
+              thumbnail
             };
           }
         }
@@ -915,7 +923,13 @@ export const DownloadService = {
               title = titleMatch[1];
             }
           }
-          return { channelId: cid, title: title ? convertCnToTw(title) : undefined };
+          let thumbnail: string | undefined = undefined;
+          const imgMatch = text.match(/<meta\s+property="og:image"\s+content="(.*?)"/);
+          if (imgMatch && imgMatch[1]) {
+            thumbnail = imgMatch[1];
+          }
+
+          return { channelId: cid, title: title ? convertCnToTw(title) : undefined, thumbnail };
         }
       }
     } catch (e) {
