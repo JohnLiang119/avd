@@ -720,9 +720,9 @@
             <div style="display: flex; align-items: center; justify-content: space-between;">
               <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1; margin-right: 8px;">
                 <img
-                  :src="channel.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png'"
+                  :src="channel.thumbnail || 'https://www.youtube.com/favicon.ico'"
                   style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
-                  @error="($event.target as HTMLImageElement).src='https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png'"
+                  @error="($event.target as HTMLImageElement).src='https://www.youtube.com/favicon.ico'"
                 />
                 <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   {{ channel.title }}
@@ -773,6 +773,7 @@
       :description="`偵測到備份中共有 ${restoreIncomingChannels.length} 個頻道。\n請選擇還原模式：`"
       close-on-click-action
       @select="onRestoreActionSelect"
+      style="max-width: 400px; margin: 0 auto; left: 0; right: 0;"
     />
   </div>
 </template>
@@ -1300,7 +1301,7 @@ const addManualChannel = async () => {
     monitoredChannels.value.push({
       channelId: res.channelId,
       title: channelTitle,
-      thumbnail: 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+      thumbnail: res.thumbnail || 'https://www.youtube.com/favicon.ico',
       enabled: true,
       lastCheckTime: Date.now(),
       lastKnownVideoId: latestVid,
@@ -1411,7 +1412,7 @@ const onRestoreActionSelect = (action: any) => {
     monitoredChannels.value = validChannels.map(c => ({
       channelId: c.channelId,
       title: c.title || c.channelId,
-      thumbnail: c.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+      thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
       enabled: c.enabled !== false,
       lastCheckTime: c.lastCheckTime || Date.now(),
       lastKnownVideoId: c.lastKnownVideoId || '',
@@ -1426,7 +1427,7 @@ const onRestoreActionSelect = (action: any) => {
         monitoredChannels.value.push({
           channelId: c.channelId,
           title: c.title || c.channelId,
-          thumbnail: c.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+          thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
           enabled: c.enabled !== false,
           lastCheckTime: c.lastCheckTime || Date.now(),
           lastKnownVideoId: c.lastKnownVideoId || '',
@@ -2155,7 +2156,7 @@ const addTask = async (urlToAdd: string) => {
           monitoredChannels.value.push({
             channelId: channelInfo.channelId,
             title: channelInfo.title || urlToAdd,
-            thumbnail: channelInfo.thumbnail || 'https://www.youtube.com/s/desktop/9d31bfd1/img/favicon_144x144.png',
+            thumbnail: channelInfo.thumbnail || 'https://www.youtube.com/favicon.ico',
             enabled: true,
             lastCheckTime: Date.now()
           });
