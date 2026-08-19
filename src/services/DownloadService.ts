@@ -798,8 +798,39 @@ export const DownloadService = {
         };
       });
     } catch (e: any) {
-      console.error(`獲取頻道 RSS 失敗 (${channelId}):`, e);
-      throw e;
+      console.warn(`官方 RSS 失敗 (${channelId})，嘗試啟動 yt-dlp 備援機制...`, e);
+      if (isTauri()) {
+        try {
+          const jsonString = await invoke<string>('fetch_channel_videos_fallback', { channelId });
+          const lines = jsonString.trim().split('\n');
+          const entries = lines.map(line => {
+             try { return JSON.parse(line.trim()); } catch(err) { return null; }
+          }).filter(Boolean);
+
+          if (entries.length === 0) {
+             throw new Error('yt-dlp 未回傳任何有效影片資料');
+          }
+
+          // 取出前兩筆作為最新影片
+          const topEntries = entries.slice(0, 2);
+          return topEntries.map((entry: any) => {
+            const url = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
+            return {
+              videoId: entry.id || '',
+              title: convertCnToTw(entry.title || ''),
+              published: '',
+              publishedTime: Date.now(), // fallback 時我們只要確保能抓到，時間戳記用當下時間即可
+              url
+            };
+          });
+        } catch (fallbackError: any) {
+          console.error(`yt-dlp 備援也失敗 (${channelId}):`, fallbackError);
+          throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 yt-dlp 備援均失敗. 原錯誤: ${e.message}`);
+        }
+      } else {
+        console.error(`獲取頻道 RSS 失敗 (${channelId}):`, e);
+        throw e;
+      }
     }
   },
 
