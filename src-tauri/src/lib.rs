@@ -142,6 +142,25 @@ fn fetch_http_text(url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn fetch_channel_videos_fallback(app: tauri::AppHandle, channel_id: String) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
+    
+    let url = format!("https://www.youtube.com/channel/{}", channel_id);
+    let output = sidecar_command
+        .args(["--dump-json", "--flat-playlist", "--playlist-end", "2", &url])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
+#[tauri::command]
 async fn update_yt_dlp(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_shell::ShellExt;
     let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
@@ -189,6 +208,7 @@ pub fn run() {
             download_win_update_file,
             install_win_msi,
             fetch_http_text,
+            fetch_channel_videos_fallback,
             update_yt_dlp,
             get_yt_dlp_version
         ])
