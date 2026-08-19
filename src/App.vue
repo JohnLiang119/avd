@@ -539,64 +539,44 @@
     </van-dialog>
 
     <van-dialog v-model:show="showSettingsModal" title="⚙️ 偏好設定" confirm-button-text="關閉">
-      <div style="padding: 16px;">
-        <p style="font-size: 13px; color: #4b5563; margin-bottom: 12px; font-weight: bold;">
-          操作前顯示確認視窗 (防呆機制)
+      <div style="padding: 12px 16px;">
+        <p style="font-size: 13px; color: #4b5563; margin-bottom: 8px; font-weight: bold;">
+          確認視窗 (防呆)
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
-          <van-cell title="全部刪除檔案" center>
-            <template #icon>
-              <van-button size="mini" round type="danger" plain icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
-            </template>
+          <van-cell title="刪除檔案" center>
             <template #right-icon>
-              <van-switch v-model="confirmDeleteAll" size="20px" />
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #999;">全部</span>
+                <van-switch v-model="confirmDeleteAll" size="18px" />
+                <span style="font-size: 11px; color: #999; margin-left: 4px;">單一</span>
+                <van-switch v-model="confirmDeleteSingle" size="18px" />
+              </div>
             </template>
           </van-cell>
-          <van-cell title="單一刪除檔案" center>
-            <template #icon>
-              <van-button size="mini" round type="danger" plain icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
-            </template>
+          <van-cell title="清除列表" center>
             <template #right-icon>
-              <van-switch v-model="confirmDeleteSingle" size="20px" />
-            </template>
-          </van-cell>
-          <van-cell title="全部清除列表" center>
-            <template #icon>
-              <van-button size="mini" round type="default" icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
-            </template>
-            <template #right-icon>
-              <van-switch v-model="confirmClearAll" size="20px" />
-            </template>
-          </van-cell>
-          <van-cell title="單一清除列表" center>
-            <template #icon>
-              <van-button size="mini" round type="default" icon="delete-o" style="margin-right: 8px; pointer-events: none; width: 22px; height: 22px; padding: 0;" />
-            </template>
-            <template #right-icon>
-              <van-switch v-model="confirmClearSingle" size="20px" />
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #999;">全部</span>
+                <van-switch v-model="confirmClearAll" size="18px" />
+                <span style="font-size: 11px; color: #999; margin-left: 4px;">單一</span>
+                <van-switch v-model="confirmClearSingle" size="18px" />
+              </div>
             </template>
           </van-cell>
         </van-cell-group>
 
-        <p style="font-size: 13px; color: #4b5563; margin-top: 16px; margin-bottom: 12px; font-weight: bold;">
-          系統版本與更新
+        <p style="font-size: 13px; color: #4b5563; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+          版本與更新
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
-          <van-cell title="目前版本" :value="`v${version}`" />
-          <van-cell title="檢查新版本" is-link @click="handleManualCheckUpdate" />
-          <van-cell title="接收測試版更新" center label="開發與測試用途 (Pre-release)">
+          <van-cell title="App 版本" :value="`v${version}`" is-link @click="handleManualCheckUpdate" />
+          <van-cell title="yt-dlp" :value="ytDlpVersion" :label="`更新: ${ytDlpLastUpdate}`" is-link @click="handleManualUpdateYtDlp" />
+          <van-cell title="測試版更新" center label="Pre-release">
             <template #right-icon>
-              <van-switch v-model="testModeEnabled" size="20px" />
+              <van-switch v-model="testModeEnabled" size="18px" />
             </template>
           </van-cell>
-        </van-cell-group>
-        <p style="font-size: 13px; color: #4b5563; margin-top: 16px; margin-bottom: 12px; font-weight: bold;">
-          yt-dlp 引擎狀態
-        </p>
-        <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
-          <van-cell title="版本號碼" :value="ytDlpVersion" />
-          <van-cell title="最後更新日期" :value="ytDlpLastUpdate" />
-          <van-cell title="手動更新 yt-dlp" is-link @click="handleManualUpdateYtDlp" />
         </van-cell-group>
       </div>
     </van-dialog>
