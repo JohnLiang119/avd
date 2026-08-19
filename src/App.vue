@@ -1477,6 +1477,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
   let newVideoCount = 0;
+  let failedCount = 0;
   const now = Date.now();
 
   for (const channel of enabledChannels) {
@@ -1542,6 +1543,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       channel.lastKnownVideoId = latestVideo.videoId;
       channel.lastVideoTitle = latestVideo.title;
     } catch (err) {
+      failedCount++;
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
     }
   }
@@ -1549,10 +1551,22 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   monitorConfig.value.lastGlobalCheckTime = now;
   isCheckingChannels.value = false;
 
-  if (newVideoCount > 0) {
+  if (failedCount > 0 && failedCount >= enabledChannels.length) {
+    // 全部失敗
+    if (isManual) showToast('❌ 無法連線至 YouTube，請稍後再試');
+  } else if (newVideoCount > 0 && failedCount > 0) {
+    // 有新影片但部分失敗
+    showToast(`🔔 發現 ${newVideoCount} 部新影片，已加入佇列！（⚠️ ${failedCount} 個頻道無法連線）`);
+    processQueue();
+  } else if (newVideoCount > 0) {
+    // 全部成功且有新影片
     showToast(`🔔 發現 ${newVideoCount} 部新影片，已優先加入下載佇列！`);
     processQueue();
+  } else if (isManual && failedCount > 0) {
+    // 沒新影片但部分失敗
+    showToast(`已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道無法連線）`);
   } else if (isManual) {
+    // 全部成功且沒新片
     showToast('已檢查完成，目前沒有新影片');
   }
 };
