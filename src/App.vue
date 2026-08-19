@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -571,7 +571,7 @@
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
           <van-cell title="App 版本" :value="`v${version}`" is-link @click="handleManualCheckUpdate" />
-          <van-cell title="yt-dlp" :value="ytDlpVersion" :label="`更新: ${ytDlpLastUpdate}`" is-link @click="handleManualUpdateYtDlp" />
+          <van-cell title="yt-dlp" :value="ytDlpVersion" :label="`更新: ${ytDlpLastUpdate}`" is-link @click="handleManualUpdateYtDlp" title-style="flex: none; margin-right: 16px;" />
           <van-cell title="測試版更新" center label="Pre-release">
             <template #right-icon>
               <van-switch v-model="testModeEnabled" size="18px" />
