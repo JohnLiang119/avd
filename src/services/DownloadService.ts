@@ -828,8 +828,30 @@ export const DownloadService = {
           throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 yt-dlp 備援均失敗. 原錯誤: ${e.message}`);
         }
       } else {
-        console.error(`獲取頻道 RSS 失敗 (${channelId}):`, e);
-        throw e;
+        try {
+          // Android 端 fallback: 呼叫現有的 parsePlaylist 解析頻道首頁
+          const res = await this.parsePlaylist(`https://www.youtube.com/channel/${channelId}`);
+          if (!res || !res.items || res.items.length === 0) {
+            throw new Error('Android parsePlaylist 未回傳任何有效影片資料');
+          }
+          
+          // 取出前兩筆作為最新影片
+          const topEntries = res.items.slice(0, 2);
+          return topEntries.map((entry: any) => {
+            const videoId = entry.id || entry.videoId || '';
+            const url = entry.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
+            return {
+              videoId,
+              title: convertCnToTw(entry.title || ''),
+              published: '',
+              publishedTime: Date.now(),
+              url
+            };
+          });
+        } catch (fallbackError: any) {
+          console.error(`Android 備援也失敗 (${channelId}):`, fallbackError);
+          throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 Android 備援均失敗. 原錯誤: ${e.message}`);
+        }
       }
     }
   },
