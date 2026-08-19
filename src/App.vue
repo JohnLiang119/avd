@@ -590,6 +590,14 @@
             </template>
           </van-cell>
         </van-cell-group>
+        <p style="font-size: 13px; color: #4b5563; margin-top: 16px; margin-bottom: 12px; font-weight: bold;">
+          yt-dlp 引擎狀態
+        </p>
+        <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
+          <van-cell title="版本號碼" :value="ytDlpVersion" />
+          <van-cell title="最後更新日期" :value="ytDlpLastUpdate" />
+          <van-cell title="手動更新 yt-dlp" is-link @click="handleManualUpdateYtDlp" />
+        </van-cell-group>
       </div>
     </van-dialog>
 
@@ -1673,6 +1681,39 @@ const wifiSsid = ref(localStorage.getItem('avd_wifi_ssid') || '');
 const wifiPassword = ref(localStorage.getItem('avd_wifi_pwd') || '');
 const showWifiModal = ref(false);
 const showSettingsModal = ref(false);
+
+const ytDlpVersion = ref('讀取中...');
+const ytDlpLastUpdate = ref(localStorage.getItem('yt_dlp_last_update_check') || '尚未更新');
+
+const fetchYtDlpInfo = async () => {
+  ytDlpVersion.value = await DownloadService.getYtDlpVersion();
+  ytDlpLastUpdate.value = localStorage.getItem('yt_dlp_last_update_check') || '尚未更新';
+};
+
+watch(showSettingsModal, async (val) => {
+  if (val) {
+    await fetchYtDlpInfo();
+  }
+});
+
+const handleManualUpdateYtDlp = async () => {
+  showLoadingToast({
+    message: '正在更新 yt-dlp...',
+    forbidClick: true,
+    duration: 0
+  });
+  try {
+    await DownloadService.updateYtDlp();
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem('yt_dlp_last_update_check', today);
+    await fetchYtDlpInfo();
+    closeToast();
+    showToast('yt-dlp 更新成功');
+  } catch (err: any) {
+    closeToast();
+    showToast(`yt-dlp 更新失敗: ${err.message || String(err)}`);
+  }
+};
 
 const getStoredBool = (key: string, defaultValue = true) => {
   const val = localStorage.getItem(key);

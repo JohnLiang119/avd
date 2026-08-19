@@ -227,6 +227,19 @@ export const DownloadService = {
     }
 
     try {
+      // 每日自動更新檢查
+      const today = new Date().toISOString().split('T')[0];
+      const lastCheck = localStorage.getItem('yt_dlp_last_update_check');
+      if (today !== lastCheck) {
+        emitEvent('downloadProgress', { line: '檢查並更新核心引擎 (每日首次)...' });
+        try {
+          await this.updateYtDlp();
+          localStorage.setItem('yt_dlp_last_update_check', today);
+        } catch (updateErr) {
+          console.warn('yt-dlp auto update failed, continuing with current version', updateErr);
+        }
+      }
+
       const rawDownDir = await downloadDir();
       const downDir = rawDownDir.replace(/[/\\]+$/, '');
       const avdDir = `${downDir}/AVD`;
@@ -937,5 +950,25 @@ export const DownloadService = {
     }
 
     throw new Error('無法識別 YouTube 頻道 ID，請確認頻道網址或直接提供 channel/UC... 連結');
+  },
+
+  async updateYtDlp(): Promise<string> {
+    if (!isTauri()) return 'Android 會自動維護 yt-dlp';
+    try {
+      return await invoke<string>('update_yt_dlp');
+    } catch (e: any) {
+      throw new Error(`yt-dlp 更新失敗: ${e.message || String(e)}`);
+    }
+  },
+
+  async getYtDlpVersion(): Promise<string> {
+    if (!isTauri()) return 'Nightly (Android)';
+    try {
+      return await invoke<string>('get_yt_dlp_version');
+    } catch (e: any) {
+      console.warn('獲取 yt-dlp 版本失敗', e);
+      return 'Unknown';
+    }
   }
 };
+

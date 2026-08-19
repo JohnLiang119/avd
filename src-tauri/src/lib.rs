@@ -141,6 +141,40 @@ fn fetch_http_text(url: String) -> Result<String, String> {
     Ok(text)
 }
 
+#[tauri::command]
+async fn update_yt_dlp(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
+    let output = sidecar_command
+        .args(["--update-to", "nightly"])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
+#[tauri::command]
+async fn get_yt_dlp_version(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
+    let output = sidecar_command
+        .args(["--version"])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -154,7 +188,9 @@ pub fn run() {
             stop_win_local_server,
             download_win_update_file,
             install_win_msi,
-            fetch_http_text
+            fetch_http_text,
+            update_yt_dlp,
+            get_yt_dlp_version
         ])
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())
