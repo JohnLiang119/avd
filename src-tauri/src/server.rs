@@ -370,12 +370,15 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
     html.push_str(".group-header:hover { background: #e2e8f0; }");
     html.push_str(".group-title { display: flex; align-items: center; gap: 8px; }");
     html.push_str(".badge-count { background: #3b82f6; color: white; border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 600; }");
-    html.push_str(".file-card { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; display: flex; flex-direction: column; gap: 8px; }");
-    html.push_str(".file-card:last-child { border-bottom: none; }");
-    html.push_str(".file-name { font-weight: 600; font-size: 15px; word-break: break-all; color: #1e293b; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }");
-    html.push_str(".file-meta { font-size: 12px; color: #64748b; }");
-    html.push_str(".btn-group { display: flex; gap: 8px; margin-top: 4px; }");
-    html.push_str(".btn { color: white; border: none; padding: 8px 14px; border-radius: 8px; text-align: center; font-weight: 600; flex: 1; cursor: pointer; font-size: 13px; text-decoration: none; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }");
+    html.push_str(".layout-3 { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 32px; row-gap: 8px; margin-bottom: 40px; }");
+    html.push_str("@media (max-width: 768px) { .layout-3 { grid-template-columns: 1fr; } }");
+    html.push_str(".card-3 { display: flex; flex-direction: column; gap: 12px; padding: 16px 16px; border-bottom: 1px dashed #e2e8f0; transition: background-color 0.2s; }");
+    html.push_str(".card-3:hover { background-color: #f1f5f9; border-radius: 8px; border-bottom-color: transparent; }");
+    html.push_str(".card-3 .info { width: 100%; overflow: hidden; }");
+    html.push_str(".file-name { font-weight: 600; font-size: 15px; margin: 0 0 8px 0; line-height: 1.4; display: flex; align-items: flex-start; gap: 6px; color: #0f172a; word-break: break-word; }");
+    html.push_str(".file-meta { font-size: 13px; color: #64748b; }");
+    html.push_str(".actions { display: flex; gap: 12px; width: 100%; }");
+    html.push_str(".btn { color: white; border: none; padding: 12px 20px; border-radius: 24px; text-align: center; font-weight: 600; cursor: pointer; font-size: 13px; text-decoration: none; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; flex: 1; }");
     html.push_str(
         ".btn-primary { background: #3b82f6; } .btn-primary:hover { background: #2563eb; }",
     );
@@ -416,27 +419,29 @@ fn serve_index(downloads_dir: &PathBuf) -> String {
                     ));
                 }
 
-                html.push_str(&format!("<div id=\"{}\">", group_id));
+                html.push_str(&format!("<div id=\"{}\" style=\"padding: 0 16px 16px 16px;\"><div class=\"layout-3\">", group_id));
                 for (rel_path, size, _, _) in files {
                     let size_mb = size / (1024 * 1024);
                     let encoded_rel_path = urlencoding::encode(rel_path).replace("%2F", "/");
                     let file_display_name = rel_path.split('/').last().unwrap_or(rel_path);
 
-                    html.push_str("<div class=\"file-card\">");
+                    html.push_str("<div class=\"card-3\">");
+                    html.push_str("<div class=\"info\">");
                     html.push_str(&format!(
                         "<div class=\"file-name\"><span>{}</span></div>",
                         file_display_name
                     ));
                     html.push_str(&format!(
-                        "<div class=\"file-meta\">檔案大小: {} MB</div>",
+                        "<div class=\"file-meta\">{} MB</div>",
                         size_mb
                     ));
-                    html.push_str("<div class=\"btn-group\">");
+                    html.push_str("</div>");
+                    html.push_str("<div class=\"actions\">");
                     html.push_str(&format!("<a class=\"btn btn-primary\" href=\"/files/{}\" download=\"{}\">⬇ 下載檔案</a>", encoded_rel_path, file_display_name));
                     html.push_str(&format!("<a class=\"btn btn-secondary\" href=\"/play/{}\" target=\"_blank\">▶ 線上播放</a>", encoded_rel_path));
                     html.push_str("</div></div>");
                 }
-                html.push_str("</div></div>");
+                html.push_str("</div></div></div>");
             }
         }
     }
