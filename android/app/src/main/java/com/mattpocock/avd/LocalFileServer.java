@@ -281,21 +281,24 @@ public class LocalFileServer extends NanoHTTPD {
         html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
         html.append("<title>AVD 影音快傳</title>");
         html.append("<style>");
-        html.append("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 16px; background-color: #f8fafc; color: #0f172a; }");
-        html.append(".header { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; padding: 20px 16px; border-radius: 16px; margin-bottom: 20px; text-align: center; box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3); }");
-        html.append(".header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 700; }");
-        html.append(".header p { margin: 0; font-size: 13px; opacity: 0.9; }");
-        html.append(".group-card { background: white; border-radius: 12px; margin-bottom: 16px; border: 1px solid #e2e8f0; box-shadow: 0 2px 4px rgba(0,0,0,0.04); overflow: hidden; }");
-        html.append(".group-header { background: #f1f5f9; padding: 12px 16px; font-weight: 700; font-size: 15px; color: #334155; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }");
-        html.append(".group-header:hover { background: #e2e8f0; }");
+        html.append("body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 24px; background-color: #f8fafc; color: #1e293b; max-width: 1200px; margin: 0 auto; }");
+        html.append(".header { text-align: center; font-weight: 600; margin-bottom: 40px; color: #0f172a; padding: 20px 0; }");
+        html.append(".header h1 { margin: 0 0 10px 0; font-size: 24px; font-weight: 700; }");
+        html.append(".header p { margin: 0; font-size: 14px; color: #64748b; }");
+        html.append(".layout-3 { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 32px; row-gap: 8px; margin-bottom: 40px; }");
+        html.append("@media (max-width: 768px) { .layout-3 { grid-template-columns: 1fr; } }");
+        html.append(".group-card { margin-bottom: 30px; }");
+        html.append(".group-header { background: transparent; border-bottom: 2px solid #e2e8f0; padding: 12px 0 8px 0; font-weight: 700; font-size: 16px; color: #334155; display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; margin-bottom: 12px; transition: border-color 0.2s; }");
+        html.append(".group-header:hover { border-color: #cbd5e1; }");
         html.append(".group-title { display: flex; align-items: center; gap: 8px; }");
-        html.append(".badge-count { background: #8b5cf6; color: white; border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 600; }");
-        html.append(".file-card { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; display: flex; flex-direction: column; gap: 8px; }");
-        html.append(".file-card:last-child { border-bottom: none; }");
-        html.append(".file-name { font-weight: 600; font-size: 15px; word-break: break-all; color: #1e293b; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }");
-        html.append(".file-meta { font-size: 12px; color: #64748b; }");
-        html.append(".btn-group { display: flex; gap: 8px; margin-top: 4px; }");
-        html.append(".btn { color: white; border: none; padding: 8px 14px; border-radius: 8px; text-align: center; font-weight: 600; flex: 1; cursor: pointer; font-size: 13px; text-decoration: none; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }");
+        html.append(".badge-count { background: #3b82f6; color: white; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 500; margin-left: 4px; }");
+        html.append(".card-3 { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed #e2e8f0; transition: background-color 0.2s; }");
+        html.append(".card-3:hover { background-color: #f1f5f9; border-radius: 8px; padding: 12px; margin: 0 -12px; border-bottom-color: transparent; }");
+        html.append(".card-3 .info { flex: 1; padding-right: 20px; overflow: hidden; }");
+        html.append(".file-name { font-weight: 500; font-size: 15px; margin: 0 0 6px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; color: #0f172a; }");
+        html.append(".file-meta { font-size: 13px; color: #64748b; }");
+        html.append(".actions { display: flex; gap: 12px; }");
+        html.append(".btn { color: white; border: none; padding: 12px 20px; border-radius: 24px; text-align: center; font-weight: 600; cursor: pointer; font-size: 13px; text-decoration: none; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }");
         html.append(".btn-primary { background: #3b82f6; } .btn-primary:hover { background: #2563eb; }");
         html.append(".btn-secondary { background: #10b981; } .btn-secondary:hover { background: #059669; }");
         html.append("</style>");
@@ -333,7 +336,7 @@ public class LocalFileServer extends NanoHTTPD {
                     html.append("</div>");
                 }
                 
-                html.append("<div id=\"").append(groupId).append("\">");
+                html.append("<div id=\"").append(groupId).append("\" class=\"layout-3\">");
                 for (File f : files) {
                     String quality = "";
                     String lowerName = f.getName().toLowerCase();
@@ -385,15 +388,18 @@ public class LocalFileServer extends NanoHTTPD {
                         relPath = folderName + "/" + f.getName();
                     }
 
-                    html.append("<div class=\"file-card\">");
-                    html.append("<div class=\"file-name\">");
+                    html.append("<div class=\"card-3\">");
+                    html.append("<div class=\"info\">");
+                    String safeTitle = f.getName().replace("\"", "&quot;");
+                    html.append("<div class=\"file-name\" title=\"").append(safeTitle).append("\">");
                     html.append("<span>").append(f.getName()).append("</span>").append(quality).append("</div>");
                     long sizeMb = f.length() / (1024 * 1024);
                     html.append("<div class=\"file-meta\">檔案大小: ").append(sizeMb).append(" MB</div>");
+                    html.append("</div>");
                     try {
                         String encodedPath = java.net.URLEncoder.encode(relPath, "UTF-8").replaceAll("\\+", "%20").replace("%2F", "/");
                         String safeFilename = f.getName().replace("'", "\\'").replace("\"", "&quot;");
-                        html.append("<div class=\"btn-group\">");
+                        html.append("<div class=\"actions\">");
                         html.append("<a class=\"btn btn-primary\" href=\"/files/").append(encodedPath).append("\" download=\"").append(safeFilename).append("\">⬇ 下載檔案</a>");
                         html.append("<a class=\"btn btn-secondary\" href=\"/play/").append(encodedPath).append("\" target=\"_blank\">▶ 線上播放</a>");
                         html.append("</div>");
