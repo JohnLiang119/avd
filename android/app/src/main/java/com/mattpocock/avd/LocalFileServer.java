@@ -338,51 +338,6 @@ public class LocalFileServer extends NanoHTTPD {
                 
                 html.append("<div id=\"").append(groupId).append("\" class=\"layout-3\">");
                 for (File f : files) {
-                    String quality = "";
-                    String lowerName = f.getName().toLowerCase();
-                    try {
-                        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-                        retriever.setDataSource(f.getAbsolutePath());
-                        
-                        if (lowerName.endsWith(".mp3") || lowerName.endsWith(".m4a")) {
-                            String bitrateStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE);
-                            if (bitrateStr != null) {
-                                int kbps = Integer.parseInt(bitrateStr) / 1000;
-                                quality = " <span style=\"background:#8b5cf6;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">" + kbps + "kbps</span>";
-                            }
-                        } else if (lowerName.endsWith(".mp4") || lowerName.endsWith(".webm") || lowerName.endsWith(".mkv")) {
-                            String heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
-                            if (heightStr != null) {
-                                int height = Integer.parseInt(heightStr);
-                                if (height >= 2160) quality = " <span style=\"background:#ef4444;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">4K</span>";
-                                else if (height >= 1080) quality = " <span style=\"background:#f59e0b;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">1080p</span>";
-                                else if (height >= 720) quality = " <span style=\"background:#3b82f6;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">720p</span>";
-                                else if (height >= 480) quality = " <span style=\"background:#10b981;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">480p</span>";
-                                else quality = " <span style=\"background:#6b7280;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">" + height + "p</span>";
-                            }
-                            
-                            android.media.MediaExtractor extractor = new android.media.MediaExtractor();
-                            extractor.setDataSource(f.getAbsolutePath());
-                            for (int i = 0; i < extractor.getTrackCount(); i++) {
-                                android.media.MediaFormat format = extractor.getTrackFormat(i);
-                                String mime = format.getString(android.media.MediaFormat.KEY_MIME);
-                                if (mime != null && mime.startsWith("video/")) {
-                                    String codecName = mime.replace("video/", "").toUpperCase();
-                                    if (mime.contains("avc")) codecName = "H.264";
-                                    else if (mime.contains("hevc")) codecName = "H.265";
-                                    else if (mime.contains("vp9")) codecName = "VP9";
-                                    else if (mime.contains("av01")) codecName = "AV1";
-                                    quality += " <span style=\"background:#8b5cf6;color:white;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:bold;margin-left:6px;vertical-align:middle;\">" + codecName + "</span>";
-                                    break;
-                                }
-                            }
-                            extractor.release();
-                        }
-                        retriever.release();
-                    } catch (Throwable e) {
-                        // fallback quietly if metadata probing fails
-                    }
-                    
                     String relPath = f.getName();
                     if (!folderName.isEmpty()) {
                         relPath = folderName + "/" + f.getName();
@@ -392,7 +347,7 @@ public class LocalFileServer extends NanoHTTPD {
                     html.append("<div class=\"info\">");
                     String safeTitle = f.getName().replace("\"", "&quot;");
                     html.append("<div class=\"file-name\" title=\"").append(safeTitle).append("\">");
-                    html.append("<span>").append(f.getName()).append("</span>").append(quality).append("</div>");
+                    html.append("<span>").append(f.getName()).append("</span></div>");
                     long sizeMb = f.length() / (1024 * 1024);
                     html.append("<div class=\"file-meta\">檔案大小: ").append(sizeMb).append(" MB</div>");
                     html.append("</div>");
