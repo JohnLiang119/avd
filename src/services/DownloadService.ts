@@ -29,8 +29,21 @@ export const isTauri = () => {
 
 export const formatPublishTime = (timestamp?: number | string | Date): string => {
   if (!timestamp) return '';
-  const date = typeof timestamp === 'object' ? timestamp : new Date(timestamp);
-  if (isNaN(date.getTime())) return '';
+  let date: Date;
+  if (typeof timestamp === 'number') {
+    date = timestamp < 1e11 ? new Date(timestamp * 1000) : new Date(timestamp);
+  } else if (typeof timestamp === 'string') {
+    if (/^\d+$/.test(timestamp)) {
+      const num = parseInt(timestamp, 10);
+      date = num < 1e11 ? new Date(num * 1000) : new Date(num);
+    } else {
+      date = new Date(timestamp);
+    }
+  } else {
+    date = timestamp;
+  }
+
+  if (!date || isNaN(date.getTime())) return '';
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
@@ -261,7 +274,11 @@ export const DownloadService = {
   async download(options: { url: string; mp3: boolean; subFolder?: string }) {
     if (!isTauri()) {
       currentAndroidProcessId = 'process_' + Date.now() + Math.random().toString().slice(2, 8);
-      return YoutubeDlPlugin.download({ ...options, processId: currentAndroidProcessId });
+      const res = await YoutubeDlPlugin.download({ ...options, processId: currentAndroidProcessId });
+      if (res && res.title) {
+        res.title = convertCnToTw(res.title);
+      }
+      return res;
     }
 
     try {
@@ -841,20 +858,42 @@ export const DownloadService = {
       const entries = Array.from(doc.querySelectorAll('entry'));
       
       return entries.map(entry => {
-        const videoIdEl = entry.getElementsByTagName('yt:videoId')[0] || entry.getElementsByTagName('videoId')[0];
-        const videoId = videoIdEl ? videoIdEl.textContent || '' : '';
-        const titleEl = entry.getElementsByTagName('title')[0];
-        const rawTitle = titleEl ? titleEl.textContent || '' : '';
-        const publishedEl = entry.getElementsByTagName('published')[0];
-        const published = publishedEl ? publishedEl.textContent || '' : '';
-        const linkEl = entry.getElementsByTagName('link')[0];
-        const url = linkEl?.getAttribute('href') || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
+        const outer = entry.outerHTML || '';
         
+        let videoId = (entry.getElementsByTagName('yt:videoId')[0] || entry.getElementsByTagName('videoId')[0] || entry.querySelector('videoId'))?.textContent || '';
+        if (!videoId && outer) {
+          const match = outer.match(/<(?:yt:)?videoId>([^<]+)<\/(?:yt:)?videoId>/i);
+          if (match) videoId = match[1];
+        }
+
+        let rawTitle = (entry.getElementsByTagName('title')[0] || entry.querySelector('title'))?.textContent || '';
+        if (!rawTitle && outer) {
+          const match = outer.match(/<title>([^<]+)<\/title>/i);
+          if (match) rawTitle = match[1];
+        }
+
+        let published = (entry.getElementsByTagName('published')[0] || entry.querySelector('published') || entry.getElementsByTagName('updated')[0])?.textContent || '';
+        if (!published && outer) {
+          const match = outer.match(/<published>([^<]+)<\/published>/i) || outer.match(/<updated>([^<]+)<\/updated>/i);
+          if (match) published = match[1];
+        }
+
+        const linkEl = entry.getElementsByTagName('link')[0] || entry.querySelector('link');
+        let url = linkEl?.getAttribute('href') || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
+
+        let pubTime = 0;
+        if (published) {
+          pubTime = new Date(published).getTime();
+        }
+        if (!pubTime || isNaN(pubTime)) {
+          pubTime = Date.now();
+        }
+
         return {
           videoId,
           title: convertCnToTw(rawTitle),
-          published,
-          publishedTime: published ? new Date(published).getTime() : 0,
+          published: published || new Date(pubTime).toISOString(),
+          publishedTime: pubTime,
           url,
           source: 'rss' as const
         };

@@ -1557,10 +1557,8 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             continue;
           }
 
-          const pubTimeStr = formatPublishTime(vid.publishedTime);
-          const taskTitle = pubTimeStr 
-            ? `[${channel.title}] ${vid.title} (${pubTimeStr})` 
-            : `[${channel.title}] ${vid.title}`;
+          const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
+          const taskTitle = `[${channel.title}] ${vid.title} (${pubTimeStr})`;
 
           const lineText = vid.source === 'fallback' 
             ? '【自動追蹤 (yt-dlp 備援)】排隊優先下載中...' 
@@ -1648,11 +1646,9 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     }
 
     const latestVideo = videos[0];
-    const pubTimeStr = formatPublishTime(latestVideo.publishedTime);
+    const pubTimeStr = formatPublishTime(latestVideo.publishedTime) || formatPublishTime(Date.now());
     const sourceLabel = latestVideo.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
-    const testTitle = pubTimeStr 
-      ? `[測試模擬] [${channel.title}] ${latestVideo.title} (${pubTimeStr})` 
-      : `[測試模擬] [${channel.title}] ${latestVideo.title}`;
+    const testTitle = `[測試模擬] [${channel.title}] ${latestVideo.title} (${pubTimeStr})`;
 
     const testTask: DownloadTask = {
       id: taskIdCounter++,
@@ -1694,23 +1690,31 @@ const simulateGlobalNewVideo = async () => {
   try {
     for (const channel of enabledChannels) {
       try {
-        const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+        const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
+          enableFallback: monitorConfig.value.enableYtDlpFallback
+        });
         if (!videos || videos.length === 0) continue;
 
         // 取得最新 2 集影片
         const topVideos = videos.slice(0, 2);
         // 按時間正序反轉插入，讓最新的在最頂部
         for (const vid of topVideos.reverse()) {
+          const pubTimeStr = formatPublishTime(vid.publishedTime);
+          const taskTitle = pubTimeStr 
+            ? `[測試模擬] [${channel.title}] ${vid.title} (${pubTimeStr})` 
+            : `[測試模擬] [${channel.title}] ${vid.title}`;
+          const sourceLabel = vid.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
+
           const testTask: DownloadTask = {
             id: taskIdCounter++,
             type: 'file',
             isGroup: false,
             url: vid.url,
-            title: `[測試模擬] [${channel.title}] ${vid.title}`,
+            title: taskTitle,
             status: 'pending',
             progress: 0,
             eta: '',
-            line: '【測試模式】優先排隊下載中...',
+            line: `${sourceLabel}優先排隊下載中...`,
             path: '',
             errorMsg: '',
             mediaUri: '',
@@ -2432,7 +2436,19 @@ const processQueue = async () => {
       nextTask.status = 'success';
       nextTask.progress = 100;
       nextTask.path = result.path;
-      if (!nextTask.title && result.title) nextTask.title = result.title;
+      if (result.title) {
+        const timeMatch = (nextTask.title && nextTask.title.match(/(\(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\))/)) || null;
+        const channelPrefixMatch = (nextTask.title && nextTask.title.match(/^(\[[^\]]+\]\s*)/)) || null;
+        
+        let finalTitle = result.title;
+        if (timeMatch && !finalTitle.includes(timeMatch[1])) {
+          finalTitle = `${finalTitle} ${timeMatch[1]}`;
+        }
+        if (channelPrefixMatch && !finalTitle.startsWith(channelPrefixMatch[1])) {
+          finalTitle = `${channelPrefixMatch[1]}${finalTitle}`;
+        }
+        nextTask.title = finalTitle;
+      }
       if (result.quality) nextTask.quality = result.quality;
       if (result.fileSizeBytes) nextTask.fileSizeBytes = result.fileSizeBytes;
       nextTask.mediaUri = result.mediaUri || '';
