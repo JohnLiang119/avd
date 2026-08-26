@@ -704,19 +704,21 @@
             :key="channel.channelId"
             style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);"
           >
-            <!-- 第一行：頭像 + 頻道名稱 + Switch開關 + 刪除按鈕 -->
+            <!-- 第一行：頭像 + (頻道名稱 + 時間) + Switch開關 + 刪除按鈕 -->
             <div style="display: flex; align-items: center; justify-content: space-between;">
-              <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1; margin-right: 8px;">
+              <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; margin-right: 8px;">
                 <img
                   :src="channel.thumbnail || 'https://www.youtube.com/favicon.ico'"
-                  style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
+                  style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
                   @error="($event.target as HTMLImageElement).src='https://www.youtube.com/favicon.ico'"
                 />
-                <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px;">
-                  <span style="overflow: hidden; text-overflow: ellipsis;">{{ channel.title }}</span>
-                  <span v-if="channel.lastPublishedTime" style="font-size: 10px; font-weight: normal; color: #64748b; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;" title="最新影片發布時間">
-                    {{ formatPublishTime(channel.lastPublishedTime) }}
-                  </span>
+                <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; min-width: 0;">
+                  <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
+                    {{ channel.title }}
+                  </div>
+                  <div v-if="channel.lastPublishedTime" style="font-size: 10.5px; color: #64748b; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="最新影片發布時間">
+                    🕒 {{ formatPublishTime(channel.lastPublishedTime) }}
+                  </div>
                 </div>
               </div>
 
