@@ -644,6 +644,16 @@
           <div style="font-size: 11px; color: #64748b; margin-bottom: 10px;">
             上次檢查: {{ monitorConfig.lastGlobalCheckTime ? new Date(monitorConfig.lastGlobalCheckTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '尚未檢查' }}
           </div>
+
+          <!-- 備援機制開關 (預設關閉) -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+            <div>
+              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">啟用 yt-dlp 備援機制</div>
+              <div style="font-size: 10px; color: #94a3b8;">官方 RSS 連線異常時切換首頁解析備援（預設關閉）</div>
+            </div>
+            <van-switch v-model="monitorConfig.enableYtDlpFallback" size="18px" />
+          </div>
+
           <div style="display: flex; gap: 8px;">
             <van-button size="small" type="primary" plain block icon="replay" :loading="isCheckingChannels" @click="checkAllMonitoredChannels(true)">
               立即檢查
@@ -1224,6 +1234,7 @@ interface ChannelMonitorConfig {
   autoCheckEnabled: boolean;
   checkIntervalMinutes: number;
   lastGlobalCheckTime: number;
+  enableYtDlpFallback?: boolean;
 }
 
 const monitoredChannels = ref<MonitoredChannel[]>(
@@ -1234,11 +1245,20 @@ const monitoredChannels = ref<MonitoredChannel[]>(
 );
 
 const monitorConfig = ref<ChannelMonitorConfig>(
-  JSON.parse(localStorage.getItem('avd_monitor_config') || JSON.stringify({
-    autoCheckEnabled: true,
-    checkIntervalMinutes: 60,
-    lastGlobalCheckTime: 0
-  }))
+  (() => {
+    const defaultCfg = {
+      autoCheckEnabled: true,
+      checkIntervalMinutes: 60,
+      lastGlobalCheckTime: 0,
+      enableYtDlpFallback: false
+    };
+    try {
+      const parsed = JSON.parse(localStorage.getItem('avd_monitor_config') || '{}');
+      return { ...defaultCfg, ...parsed };
+    } catch (e) {
+      return defaultCfg;
+    }
+  })()
 );
 
 watch(monitoredChannels, (val) => {
@@ -1279,7 +1299,9 @@ const addManualChannel = async () => {
     let latestTitle = '';
     let latestPubTime = 0;
     try {
-      const rss = await DownloadService.fetchYouTubeRss(res.channelId);
+      const rss = await DownloadService.fetchYouTubeRss(res.channelId, {
+        enableFallback: monitorConfig.value.enableYtDlpFallback
+      });
       if (rss && rss.length > 0) {
         latestVid = rss[0].videoId;
         latestTitle = rss[0].title;
@@ -1491,12 +1513,15 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
   let newVideoCount = 0;
+  let fallbackVideoCount = 0;
   let failedCount = 0;
   const now = Date.now();
 
   for (const channel of enabledChannels) {
     try {
-      const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+      const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
+        enableFallback: monitorConfig.value.enableYtDlpFallback
+      });
       if (!videos || videos.length === 0) continue;
 
       const latestVideo = videos[0];
@@ -1537,6 +1562,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             ? `[${channel.title}] ${vid.title} (${pubTimeStr})` 
             : `[${channel.title}] ${vid.title}`;
 
+          const lineText = vid.source === 'fallback' 
+            ? '【自動追蹤 (yt-dlp 備援)】排隊優先下載中...' 
+            : '【自動追蹤 (RSS)】排隊優先下載中...';
+
+          if (vid.source === 'fallback') {
+            fallbackVideoCount++;
+          }
+
           const newTask: DownloadTask = {
             id: taskIdCounter++,
             type: 'file',
@@ -1546,7 +1579,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             status: 'pending',
             progress: 0,
             eta: '',
-            line: '【自動追蹤】排隊優先下載中...',
+            line: lineText,
             path: '',
             errorMsg: '',
             mediaUri: '',
@@ -1571,30 +1604,43 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   monitorConfig.value.lastGlobalCheckTime = now;
   isCheckingChannels.value = false;
 
+  const isFallbackEnabled = !!monitorConfig.value.enableYtDlpFallback;
+
   if (failedCount > 0 && failedCount >= enabledChannels.length) {
     // 全部失敗
-    if (isManual) showToast('❌ 無法連線至 YouTube，請稍後再試');
+    if (isManual) {
+      showToast(isFallbackEnabled 
+        ? '❌ 無法連線至 YouTube 頻道 (官方 RSS 與備援均失敗)' 
+        : '❌ 官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)');
+    }
   } else if (newVideoCount > 0 && failedCount > 0) {
     // 有新影片但部分失敗
-    showToast(`🔔 發現 ${newVideoCount} 部新影片，已加入佇列！（⚠️ ${failedCount} 個頻道無法連線）`);
+    const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
+    const failHint = isFallbackEnabled ? `⚠️ ${failedCount} 個頻道無法連線` : `⚠️ ${failedCount} 個頻道 RSS 異常`;
+    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！（${failHint}）`);
     processQueue();
   } else if (newVideoCount > 0) {
     // 全部成功且有新影片
-    showToast(`🔔 發現 ${newVideoCount} 部新影片，已優先加入下載佇列！`);
+    const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 包含 ${fallbackVideoCount} 部 yt-dlp 備援抓取)` : ' [官方 RSS]';
+    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！`);
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
-    showToast(`已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道無法連線）`);
+    showToast(isFallbackEnabled 
+      ? `已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道連線失敗）` 
+      : `已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道 RSS 異常，可於設定開啟備援）`);
   } else if (isManual) {
     // 全部成功且沒新片
-    showToast('已檢查完成，目前沒有新影片');
+    showToast('已檢查完成 [官方 RSS]，目前沒有新影片');
   }
 };
 
 const simulateNewVideo = async (channel: MonitoredChannel) => {
   showLoadingToast({ message: '正在模擬抓取最新影片...', forbidClick: true });
   try {
-    const videos = await DownloadService.fetchYouTubeRss(channel.channelId);
+    const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
+      enableFallback: monitorConfig.value.enableYtDlpFallback
+    });
     closeToast();
     if (!videos || videos.length === 0) {
       showToast('無法取得該頻道影片清單');
@@ -1603,6 +1649,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
 
     const latestVideo = videos[0];
     const pubTimeStr = formatPublishTime(latestVideo.publishedTime);
+    const sourceLabel = latestVideo.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
     const testTitle = pubTimeStr 
       ? `[測試模擬] [${channel.title}] ${latestVideo.title} (${pubTimeStr})` 
       : `[測試模擬] [${channel.title}] ${latestVideo.title}`;
@@ -1616,7 +1663,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
       status: 'pending',
       progress: 0,
       eta: '',
-      line: '【測試模式】優先排隊下載中...',
+      line: `${sourceLabel}優先排隊下載中...`,
       path: '',
       errorMsg: '',
       mediaUri: '',

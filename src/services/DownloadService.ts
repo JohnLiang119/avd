@@ -82,6 +82,15 @@ export interface PlaylistResult {
   items: PlaylistItem[];
 }
 
+export interface MonitoredVideoResult {
+  videoId: string;
+  title: string;
+  published: string;
+  publishedTime: number;
+  url: string;
+  source: 'rss' | 'fallback';
+}
+
 export const DownloadService = {
   addListener(eventName: string, callback: Listener) {
     if (isTauri()) {
@@ -809,7 +818,10 @@ export const DownloadService = {
     }
   },
 
-  async fetchYouTubeRss(channelId: string): Promise<Array<{ videoId: string; title: string; published: string; publishedTime: number; url: string }>> {
+  async fetchYouTubeRss(
+    channelId: string,
+    options?: { enableFallback?: boolean }
+  ): Promise<MonitoredVideoResult[]> {
     try {
       let xmlText = '';
       if (!isTauri()) {
@@ -843,11 +855,16 @@ export const DownloadService = {
           title: convertCnToTw(rawTitle),
           published,
           publishedTime: published ? new Date(published).getTime() : 0,
-          url
+          url,
+          source: 'rss' as const
         };
       });
     } catch (e: any) {
-      console.warn(`官方 RSS 失敗 (${channelId})，嘗試啟動 yt-dlp 備援機制...`, e);
+      if (!options?.enableFallback) {
+        throw new Error(`官方 RSS 連線失敗: ${e.message || String(e)}`);
+      }
+
+      console.warn(`官方 RSS 失敗 (${channelId})，已啟用備援機制，嘗試啟動 yt-dlp 備援...`, e);
       if (isTauri()) {
         try {
           const jsonString = await invoke<string>('fetch_channel_videos_fallback', { channelId });
@@ -879,7 +896,8 @@ export const DownloadService = {
               title: convertCnToTw(entry.title || ''),
               published: pubTime ? new Date(pubTime).toISOString() : '',
               publishedTime: pubTime || Date.now(),
-              url
+              url,
+              source: 'fallback' as const
             };
           });
         } catch (fallbackError: any) {
@@ -904,7 +922,8 @@ export const DownloadService = {
               title: convertCnToTw(entry.title || ''),
               published: '',
               publishedTime: Date.now(),
-              url
+              url,
+              source: 'fallback' as const
             };
           });
         } catch (fallbackError: any) {
