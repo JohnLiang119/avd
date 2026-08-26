@@ -27,6 +27,19 @@ export const isTauri = () => {
   return window.hasOwnProperty('__TAURI_INTERNALS__');
 };
 
+export const formatPublishTime = (timestamp?: number | string | Date): string => {
+  if (!timestamp) return '';
+  const date = typeof timestamp === 'object' ? timestamp : new Date(timestamp);
+  if (isNaN(date.getTime())) return '';
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
+};
+
 let activeChildProcess: any = null;
 let activeRcloneChildProcess: any = null;
 let isManualCancelling = false;
@@ -193,10 +206,26 @@ export const DownloadService = {
             durationStr = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
           }
 
+          let entryPubTimeStr = '';
+          if (entry.timestamp) {
+            entryPubTimeStr = formatPublishTime(entry.timestamp * 1000);
+          } else if (entry.upload_date && String(entry.upload_date).length === 8) {
+            const str = String(entry.upload_date);
+            const y = str.slice(0, 4);
+            const m = str.slice(4, 6);
+            const d = str.slice(6, 8);
+            entryPubTimeStr = `${y}/${m}/${d} 00:00:00`;
+          }
+
+          let finalItemTitle = itemTitle;
+          if (entryPubTimeStr && !finalItemTitle.includes(entryPubTimeStr)) {
+            finalItemTitle = `${finalItemTitle} (${entryPubTimeStr})`;
+          }
+
           result.push({
             id: String(videoId),
             url: itemUrl,
-            title: itemTitle,
+            title: finalItemTitle,
             durationStr
           });
         }
@@ -330,6 +359,8 @@ export const DownloadService = {
       const ext = options.mp3 ? 'mp3' : 'mp4';
       let logs: string[] = [];
       let rawTitle = '';
+      let uploadDate = '';
+      let timestampNum = 0;
       const tempFilePath = `${targetDirPath}/${uniqueId}.${ext}`;
       const infoPath = `${targetDirPath}/${uniqueId}.info.json`;
 
@@ -337,6 +368,8 @@ export const DownloadService = {
         const jsonStr = await readTextFile(infoPath);
         const info = JSON.parse(jsonStr);
         rawTitle = info.title || info.fulltitle || '';
+        uploadDate = info.upload_date || '';
+        timestampNum = info.timestamp || info.release_timestamp || 0;
       } catch (e: any) {
         logs.push('Failed to read info.json: ' + (e.message || String(e)));
         console.warn('Failed to read info.json for title', e);
@@ -344,6 +377,18 @@ export const DownloadService = {
 
       // 1. 完整繁體標題 (用於 UI 展示)
       const fullTitle = rawTitle ? convertCnToTw(rawTitle) : '';
+
+      // 格式化發布時間
+      let pubTimeStr = '';
+      if (timestampNum) {
+        pubTimeStr = formatPublishTime(timestampNum * 1000);
+      } else if (uploadDate && String(uploadDate).length === 8) {
+        const str = String(uploadDate);
+        const y = str.slice(0, 4);
+        const m = str.slice(4, 6);
+        const d = str.slice(6, 8);
+        pubTimeStr = `${y}/${m}/${d} 00:00:00`;
+      }
 
       // 2. 檔名化 (去除非法衝突字元 \ / : * ? " < > | 且限制前 30 字)
       let cleanFileName = fullTitle.replace(/[\\/:*?"<>|]/g, '_');
@@ -445,7 +490,11 @@ export const DownloadService = {
         }
       }
 
-      const displayTitle = fullTitle || cleanFileName;
+      let displayTitle = fullTitle || cleanFileName;
+      if (displayTitle && pubTimeStr && !displayTitle.includes(pubTimeStr)) {
+        displayTitle = `${displayTitle} (${pubTimeStr})`;
+      }
+
       if (!displayTitle) {
         throw new Error('影片下載可能已完成，但無法解析標題與檔案資訊。\n日誌:\n' + logs.join('\n'));
       }
@@ -815,11 +864,21 @@ export const DownloadService = {
           const topEntries = entries.slice(0, 2);
           return topEntries.map((entry: any) => {
             const url = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
+            let pubTime = 0;
+            if (entry.timestamp) {
+              pubTime = entry.timestamp * 1000;
+            } else if (entry.upload_date && String(entry.upload_date).length === 8) {
+              const str = String(entry.upload_date);
+              const y = str.slice(0, 4);
+              const m = str.slice(4, 6);
+              const d = str.slice(6, 8);
+              pubTime = new Date(`${y}-${m}-${d}T00:00:00Z`).getTime();
+            }
             return {
               videoId: entry.id || '',
               title: convertCnToTw(entry.title || ''),
-              published: '',
-              publishedTime: Date.now(), // fallback 時我們只要確保能抓到，時間戳記用當下時間即可
+              published: pubTime ? new Date(pubTime).toISOString() : '',
+              publishedTime: pubTime || Date.now(),
               url
             };
           });

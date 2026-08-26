@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="app-container" :class="{ 'tv-mode': isTvMode }">
     <div class="content">
 
@@ -712,8 +712,11 @@
                   style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
                   @error="($event.target as HTMLImageElement).src='https://www.youtube.com/favicon.ico'"
                 />
-                <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  {{ channel.title }}
+                <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px;">
+                  <span style="overflow: hidden; text-overflow: ellipsis;">{{ channel.title }}</span>
+                  <span v-if="channel.lastPublishedTime" style="font-size: 10px; font-weight: normal; color: #64748b; background: #f1f5f9; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;" title="最新影片發布時間">
+                    {{ formatPublishTime(channel.lastPublishedTime) }}
+                  </span>
                 </div>
               </div>
 
@@ -781,7 +784,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { open as openShell } from '@tauri-apps/plugin-shell';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { DownloadService, isTauri, type PlaylistItem } from './services/DownloadService';
+import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { LazyStore } from '@tauri-apps/plugin-store';
 
@@ -1209,7 +1212,8 @@ interface MonitoredChannel {
   title: string;
   thumbnail: string;
   enabled: boolean;
-  lastCheckTime: number;
+  lastPublishedTime?: number;
+  lastCheckTime?: number;
   lastKnownVideoId?: string;
   lastVideoTitle?: string;
 }
@@ -1221,7 +1225,10 @@ interface ChannelMonitorConfig {
 }
 
 const monitoredChannels = ref<MonitoredChannel[]>(
-  JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]')
+  (JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]') as any[]).map(c => ({
+    ...c,
+    lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0
+  }))
 );
 
 const monitorConfig = ref<ChannelMonitorConfig>(
@@ -1268,11 +1275,13 @@ const addManualChannel = async () => {
     }
     let latestVid = '';
     let latestTitle = '';
+    let latestPubTime = 0;
     try {
       const rss = await DownloadService.fetchYouTubeRss(res.channelId);
       if (rss && rss.length > 0) {
         latestVid = rss[0].videoId;
         latestTitle = rss[0].title;
+        latestPubTime = rss[0].publishedTime || 0;
       }
       // 如果 title 仍為空，嘗試從 RSS feed 取得頻道名稱
       if (!channelTitle) {
@@ -1291,6 +1300,7 @@ const addManualChannel = async () => {
       title: channelTitle,
       thumbnail: res.thumbnail || 'https://www.youtube.com/favicon.ico',
       enabled: true,
+      lastPublishedTime: latestPubTime || Date.now(),
       lastCheckTime: Date.now(),
       lastKnownVideoId: latestVid,
       lastVideoTitle: latestTitle
@@ -1402,6 +1412,7 @@ const onRestoreActionSelect = (action: any) => {
       title: c.title || c.channelId,
       thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
       enabled: c.enabled !== false,
+      lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || Date.now(),
       lastCheckTime: c.lastCheckTime || Date.now(),
       lastKnownVideoId: c.lastKnownVideoId || '',
       lastVideoTitle: c.lastVideoTitle || ''
@@ -1417,6 +1428,7 @@ const onRestoreActionSelect = (action: any) => {
           title: c.title || c.channelId,
           thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
           enabled: c.enabled !== false,
+          lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || Date.now(),
           lastCheckTime: c.lastCheckTime || Date.now(),
           lastKnownVideoId: c.lastKnownVideoId || '',
           lastVideoTitle: c.lastVideoTitle || ''
@@ -1486,9 +1498,10 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       if (!videos || videos.length === 0) continue;
 
       const latestVideo = videos[0];
-      const channelLastCheck = channel.lastCheckTime || 0;
+      const channelLastPub = channel.lastPublishedTime || channel.lastCheckTime || 0;
 
-      if (channelLastCheck === 0) {
+      if (channelLastPub === 0) {
+        channel.lastPublishedTime = latestVideo.publishedTime || now;
         channel.lastCheckTime = now;
         channel.lastKnownVideoId = latestVideo.videoId;
         channel.lastVideoTitle = latestVideo.title;
@@ -1496,8 +1509,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       }
 
       const newVideos = videos.filter(v => {
-        const isTimeNewer = v.publishedTime > channelLastCheck;
-        const isDifferentId = v.videoId !== channel.lastKnownVideoId;
+        const isTimeNewer = v.publishedTime > channelLastPub;
         const alreadyInTasks = tasks.value.some((t: any) => {
           if (t.url && typeof t.url === 'string' && t.url.includes(v.videoId)) return true;
           if (t.playlists && Array.isArray(t.playlists)) {
@@ -1507,7 +1519,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           }
           return false;
         });
-        return isTimeNewer && isDifferentId && !alreadyInTasks;
+        return isTimeNewer && !alreadyInTasks;
       });
 
       if (newVideos.length > 0) {
@@ -1518,12 +1530,17 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             continue;
           }
 
+          const pubTimeStr = formatPublishTime(vid.publishedTime);
+          const taskTitle = pubTimeStr 
+            ? `[${channel.title}] ${vid.title} (${pubTimeStr})` 
+            : `[${channel.title}] ${vid.title}`;
+
           const newTask: DownloadTask = {
             id: taskIdCounter++,
             type: 'file',
             isGroup: false,
             url: vid.url,
-            title: `[${channel.title}] ${vid.title}`,
+            title: taskTitle,
             status: 'pending',
             progress: 0,
             eta: '',
@@ -1539,6 +1556,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         }
       }
 
+      channel.lastPublishedTime = latestVideo.publishedTime || now;
       channel.lastCheckTime = now;
       channel.lastKnownVideoId = latestVideo.videoId;
       channel.lastVideoTitle = latestVideo.title;
@@ -1582,12 +1600,17 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     }
 
     const latestVideo = videos[0];
+    const pubTimeStr = formatPublishTime(latestVideo.publishedTime);
+    const testTitle = pubTimeStr 
+      ? `[測試模擬] [${channel.title}] ${latestVideo.title} (${pubTimeStr})` 
+      : `[測試模擬] [${channel.title}] ${latestVideo.title}`;
+
     const testTask: DownloadTask = {
       id: taskIdCounter++,
       type: 'file',
       isGroup: false,
       url: latestVideo.url,
-      title: `[測試模擬] [${channel.title}] ${latestVideo.title}`,
+      title: testTitle,
       status: 'pending',
       progress: 0,
       eta: '',
