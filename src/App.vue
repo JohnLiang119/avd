@@ -1558,7 +1558,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           }
 
           const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
-          const taskTitle = `[${channel.title}] ${vid.title} (${pubTimeStr})`;
+          const taskTitle = buildTaskDisplayTitle(vid.title, channel.title, pubTimeStr);
 
           const lineText = vid.source === 'fallback' 
             ? '【自動追蹤 (yt-dlp 備援)】排隊優先下載中...' 
@@ -1574,6 +1574,9 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             isGroup: false,
             url: vid.url,
             title: taskTitle,
+            rawTitle: vid.title,
+            publishTimeStr: pubTimeStr,
+            channelPrefix: channel.title,
             status: 'pending',
             progress: 0,
             eta: '',
@@ -1584,6 +1587,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
             isAudio: false,
             subFolder: channel.title ? channel.title.replace(/[\/\\:*?"<>|]/g, '_') : ''
           };
+
           tasks.value.unshift(newTask); // 優先插隊至佇列最前面第一位！
           newVideoCount++;
         }
@@ -1648,7 +1652,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     const latestVideo = videos[0];
     const pubTimeStr = formatPublishTime(latestVideo.publishedTime) || formatPublishTime(Date.now());
     const sourceLabel = latestVideo.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
-    const testTitle = `[測試模擬] [${channel.title}] ${latestVideo.title} (${pubTimeStr})`;
+    const testTitle = `[測試模擬] ${buildTaskDisplayTitle(latestVideo.title, channel.title, pubTimeStr)}`;
 
     const testTask: DownloadTask = {
       id: taskIdCounter++,
@@ -1656,6 +1660,9 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
       isGroup: false,
       url: latestVideo.url,
       title: testTitle,
+      rawTitle: `[測試模擬] ${latestVideo.title}`,
+      publishTimeStr: pubTimeStr,
+      channelPrefix: channel.title,
       status: 'pending',
       progress: 0,
       eta: '',
@@ -1699,10 +1706,8 @@ const simulateGlobalNewVideo = async () => {
         const topVideos = videos.slice(0, 2);
         // 按時間正序反轉插入，讓最新的在最頂部
         for (const vid of topVideos.reverse()) {
-          const pubTimeStr = formatPublishTime(vid.publishedTime);
-          const taskTitle = pubTimeStr 
-            ? `[測試模擬] [${channel.title}] ${vid.title} (${pubTimeStr})` 
-            : `[測試模擬] [${channel.title}] ${vid.title}`;
+          const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
+          const taskTitle = `[測試模擬] ${buildTaskDisplayTitle(vid.title, channel.title, pubTimeStr)}`;
           const sourceLabel = vid.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
 
           const testTask: DownloadTask = {
@@ -1711,6 +1716,9 @@ const simulateGlobalNewVideo = async () => {
             isGroup: false,
             url: vid.url,
             title: taskTitle,
+            rawTitle: `[測試模擬] ${vid.title}`,
+            publishTimeStr: pubTimeStr,
+            channelPrefix: channel.title,
             status: 'pending',
             progress: 0,
             eta: '',
@@ -1728,6 +1736,7 @@ const simulateGlobalNewVideo = async () => {
         console.warn(`模擬抓取頻道 ${channel.title} 失敗:`, err);
       }
     }
+
 
     closeToast();
     if (totalAdded > 0) {
@@ -1865,6 +1874,9 @@ interface DownloadTask {
   isGroup?: false;
   url: string;
   title?: string;
+  rawTitle?: string;
+  publishTimeStr?: string;
+  channelPrefix?: string;
   status: 'pending' | 'downloading' | 'success' | 'error';
   progress: number;
   eta: string;
@@ -1881,6 +1893,42 @@ interface DownloadTask {
   fileSizeBytes?: number;
   subFolder?: string;
 }
+
+const buildTaskDisplayTitle = (rawTitle?: string, channelPrefix?: string, publishTimeStr?: string): string => {
+  let title = (rawTitle || '').trim();
+  
+  if (title) {
+    // 檢查並提取前綴 [頻道名]
+    const prefixMatch = title.match(/^\[([^\]]+)\]\s*/);
+    if (prefixMatch) {
+      if (!channelPrefix) channelPrefix = prefixMatch[1];
+      title = title.replace(/^\[[^\]]+\]\s*/, '').trim();
+    }
+    // 檢查並提取發布時間標記
+    const timeMatch = title.match(/\s*(\(\d{4}\/\d{2}\/\d{2}[^\)]*\))$/);
+    if (timeMatch) {
+      if (!publishTimeStr) publishTimeStr = timeMatch[1].replace(/[()]/g, '').trim();
+      title = title.replace(/\s*\(\d{4}\/\d{2}\/\d{2}[^\)]*\)$/, '').trim();
+    }
+  }
+
+  let finalTitle = title;
+  if (channelPrefix && channelPrefix.trim()) {
+    const cleanPrefix = channelPrefix.trim();
+    if (!finalTitle.startsWith(`[${cleanPrefix}]`)) {
+      finalTitle = `[${cleanPrefix}] ${finalTitle}`;
+    }
+  }
+  if (publishTimeStr && publishTimeStr.trim()) {
+    const cleanTime = publishTimeStr.trim().replace(/[()]/g, '');
+    if (!finalTitle.includes(`(${cleanTime})`)) {
+      finalTitle = `${finalTitle} (${cleanTime})`;
+    }
+  }
+
+  return finalTitle.trim();
+};
+
 
 interface PlaylistGroupTask {
   id: number;
@@ -1970,22 +2018,33 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
   const cleanPlaylist = parsedPlaylistTitle.value.replace(/[\/\\:*?"<>|]/g, '_').trim();
   const subFolderPath = `${cleanChannel}/${cleanPlaylist}`;
 
-  const newSubTasks: DownloadTask[] = selectedItems.map(item => ({
-    id: taskIdCounter++,
-    type: 'file',
-    isGroup: false,
-    url: item.url,
-    title: item.title,
-    status: 'pending',
-    progress: 0,
-    eta: '',
-    line: '排隊等待中...',
-    path: '',
-    errorMsg: '',
-    mediaUri: '',
-    isAudio: mp3Mode.value,
-    subFolder: subFolderPath
-  }));
+  const newSubTasks: DownloadTask[] = selectedItems.map(item => {
+    const timeMatch = item.title ? item.title.match(/\s*(\(\d{4}\/\d{2}\/\d{2}[^\)]*\))$/) : null;
+    const pubTime = timeMatch ? timeMatch[1].replace(/[()]/g, '').trim() : '';
+    const raw = item.title ? item.title.replace(/\s*\(\d{4}\/\d{2}\/\d{2}[^\)]*\)$/, '').trim() : '';
+    const finalTitle = buildTaskDisplayTitle(raw || item.title, '', pubTime);
+
+    return {
+      id: taskIdCounter++,
+      type: 'file',
+      isGroup: false,
+      url: item.url,
+      title: finalTitle || item.title,
+      rawTitle: raw || item.title,
+      publishTimeStr: pubTime,
+      channelPrefix: parsedChannelTitle.value,
+      status: 'pending',
+      progress: 0,
+      eta: '',
+      line: '排隊等待中...',
+      path: '',
+      errorMsg: '',
+      mediaUri: '',
+      isAudio: mp3Mode.value,
+      subFolder: subFolderPath
+    };
+  });
+
 
   let channelGroup = tasks.value.find(t => t.type === 'channel' && t.channelTitle === parsedChannelTitle.value) as ChannelGroupTask | undefined;
 
@@ -2365,6 +2424,10 @@ const addTask = async (urlToAdd: string) => {
     type: 'file',
     isGroup: false,
     url: urlToAdd,
+    title: '',
+    rawTitle: '',
+    publishTimeStr: '',
+    channelPrefix: '',
     status: 'pending',
     progress: 0,
     eta: '',
@@ -2374,6 +2437,7 @@ const addTask = async (urlToAdd: string) => {
     mediaUri: '',
     isAudio: mp3Mode.value
   });
+
   
   url.value = ''; // 清空輸入框
   showToast('已加入下載佇列');
@@ -2436,23 +2500,43 @@ const processQueue = async () => {
       nextTask.status = 'success';
       nextTask.progress = 100;
       nextTask.path = result.path;
-      if (result.title) {
-        const timeMatch = (nextTask.title && nextTask.title.match(/(\(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2}\))/)) || null;
-        const channelPrefixMatch = (nextTask.title && nextTask.title.match(/^(\[[^\]]+\]\s*)/)) || null;
-        
-        let finalTitle = result.title;
-        if (timeMatch && !finalTitle.includes(timeMatch[1])) {
-          finalTitle = `${finalTitle} ${timeMatch[1]}`;
-        }
-        if (channelPrefixMatch && !finalTitle.startsWith(channelPrefixMatch[1])) {
-          finalTitle = `${channelPrefixMatch[1]}${finalTitle}`;
-        }
-        nextTask.title = finalTitle;
+      
+      // 結構化屬性更新
+      if (result.rawTitle) {
+        nextTask.rawTitle = result.rawTitle;
+      } else if (result.title) {
+        nextTask.rawTitle = result.title;
       }
+
+      if (result.publishTimeStr) {
+        nextTask.publishTimeStr = result.publishTimeStr;
+      }
+      if (result.channelPrefix && !nextTask.channelPrefix) {
+        nextTask.channelPrefix = result.channelPrefix;
+      }
+
+      // 若結構化欄位尚未填入，嘗試從原 title 反向解析
+      if (!nextTask.publishTimeStr && nextTask.title) {
+        const timeMatch = nextTask.title.match(/\s*(\(\d{4}\/\d{2}\/\d{2}[^\)]*\))$/);
+        if (timeMatch) nextTask.publishTimeStr = timeMatch[1].replace(/[()]/g, '').trim();
+      }
+      if (!nextTask.channelPrefix && nextTask.title) {
+        const prefixMatch = nextTask.title.match(/^\[([^\]]+)\]/);
+        if (prefixMatch) nextTask.channelPrefix = prefixMatch[1].trim();
+      }
+
+      // 統一合成最終標題，確保時間標記與頻道前綴完整保留
+      nextTask.title = buildTaskDisplayTitle(
+        nextTask.rawTitle || result.title || nextTask.title || '',
+        nextTask.channelPrefix,
+        nextTask.publishTimeStr
+      );
+
       if (result.quality) nextTask.quality = result.quality;
       if (result.fileSizeBytes) nextTask.fileSizeBytes = result.fileSizeBytes;
       nextTask.mediaUri = result.mediaUri || '';
       nextTask.line = nextTask.isAudio ? '音樂已轉換完成 (MP3)' : '影片已處理完畢並合併成功';
+
       break;
     } catch (error: any) {
       const errorMsgStr = String(error.message || error);
@@ -2889,7 +2973,27 @@ DownloadService.addListener('downloadProgress', (info: any) => {
     if (info.eta) currentTask.eta = info.eta;
     if (info.speed) currentTask.speed = info.speed;
     if (info.line) currentTask.line = info.line;
-    if (info.title) currentTask.title = info.title;
+    if (info.title || info.publishTimeStr || info.channelPrefix) {
+      if (info.title) currentTask.rawTitle = info.title;
+      if (info.publishTimeStr && !currentTask.publishTimeStr) currentTask.publishTimeStr = info.publishTimeStr;
+      if (info.channelPrefix && !currentTask.channelPrefix) currentTask.channelPrefix = info.channelPrefix;
+
+      if (!currentTask.publishTimeStr && currentTask.title) {
+        const timeMatch = currentTask.title.match(/\s*(\(\d{4}\/\d{2}\/\d{2}[^\)]*\))$/);
+        if (timeMatch) currentTask.publishTimeStr = timeMatch[1].replace(/[()]/g, '').trim();
+      }
+      if (!currentTask.channelPrefix && currentTask.title) {
+        const prefixMatch = currentTask.title.match(/^\[([^\]]+)\]/);
+        if (prefixMatch) currentTask.channelPrefix = prefixMatch[1].trim();
+      }
+
+      currentTask.title = buildTaskDisplayTitle(
+        currentTask.rawTitle || currentTask.title || '',
+        currentTask.channelPrefix,
+        currentTask.publishTimeStr
+      );
+    }
+
   }
 });
 

@@ -496,6 +496,8 @@ public class YoutubeDlPlugin extends Plugin {
 
                 Log.d(TAG, "Starting download for: " + url);
                 String videoTitle = "";
+                String pubTimeStr = "";
+                String channelPrefix = "";
                 
                 String tiktokDownloadUrl = null;
                 boolean isTiktok = url.contains("tiktok.com");
@@ -527,6 +529,18 @@ public class YoutubeDlPlugin extends Plugin {
                     org.json.JSONObject tikData = tikJson.getJSONObject("data");
                     
                     videoTitle = tikData.optString("title", "");
+                    long createTime = tikData.optLong("create_time", 0);
+                    if (createTime > 0) {
+                        try {
+                            SimpleDateFormat sdf = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss", Locale.US);
+                            pubTimeStr = sdf.format(new Date(createTime * 1000L));
+                        } catch (Exception ignored) {}
+                    }
+                    org.json.JSONObject author = tikData.optJSONObject("author");
+                    if (author != null) {
+                        channelPrefix = author.optString("nickname", author.optString("unique_id", ""));
+                    }
+
                     if (isMp3 != null && isMp3) {
                         tiktokDownloadUrl = tikData.getString("music");
                     } else {
@@ -543,19 +557,36 @@ public class YoutubeDlPlugin extends Plugin {
                     if (!videoTitle.isEmpty()) {
                         JSObject titleObj = new JSObject();
                         titleObj.put("title", videoTitle);
+                        if (!pubTimeStr.isEmpty()) titleObj.put("publishTimeStr", pubTimeStr);
+                        if (!channelPrefix.isEmpty()) titleObj.put("channelPrefix", channelPrefix);
                         notifyListeners("downloadProgress", titleObj);
                     }
                 } else {
                     try {
                         com.yausername.youtubedl_android.mapper.VideoInfo info = YoutubeDL.getInstance().getInfo(url);
-                        if (info != null && info.getTitle() != null) {
-                            videoTitle = info.getTitle();
+                        if (info != null) {
+                            if (info.getTitle() != null && !info.getTitle().isEmpty()) {
+                                videoTitle = info.getTitle();
+                            }
+                            if (info.getUploader() != null && !info.getUploader().isEmpty()) {
+                                channelPrefix = info.getUploader();
+                            }
+                            String uploadDate = info.getUploadDate();
+                            if (uploadDate != null && uploadDate.length() == 8) {
+                                String y = uploadDate.substring(0, 4);
+                                String m = uploadDate.substring(4, 6);
+                                String d = uploadDate.substring(6, 8);
+                                pubTimeStr = y + "/" + m + "/" + d + " 00:00:00";
+                            }
+
                             JSObject titleObj = new JSObject();
-                            titleObj.put("title", videoTitle);
+                            if (!videoTitle.isEmpty()) titleObj.put("title", videoTitle);
+                            if (!pubTimeStr.isEmpty()) titleObj.put("publishTimeStr", pubTimeStr);
+                            if (!channelPrefix.isEmpty()) titleObj.put("channelPrefix", channelPrefix);
                             notifyListeners("downloadProgress", titleObj);
                         }
                     } catch (Exception e) {
-                        Log.w(TAG, "Could not fetch VideoInfo title", e);
+                        Log.w(TAG, "Could not fetch VideoInfo metadata", e);
                     }
                 }
 
@@ -708,6 +739,12 @@ public class YoutubeDlPlugin extends Plugin {
                 ret.put("success", true);
                 if (!videoTitle.isEmpty()) {
                     ret.put("title", videoTitle);
+                }
+                if (!pubTimeStr.isEmpty()) {
+                    ret.put("publishTimeStr", pubTimeStr);
+                }
+                if (!channelPrefix.isEmpty()) {
+                    ret.put("channelPrefix", channelPrefix);
                 }
 
                 // Move to MediaStore

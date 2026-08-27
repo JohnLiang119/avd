@@ -114,9 +114,11 @@ export const DownloadService = {
           if (info.title) info.title = convertCnToTw(info.title);
           if (info.line) info.line = convertCnToTw(info.line);
           if (info.channel) info.channel = convertCnToTw(info.channel);
+          if (info.channelPrefix) info.channelPrefix = convertCnToTw(info.channelPrefix);
         }
         callback(info);
       });
+
     }
   },
 
@@ -275,11 +277,13 @@ export const DownloadService = {
     if (!isTauri()) {
       currentAndroidProcessId = 'process_' + Date.now() + Math.random().toString().slice(2, 8);
       const res = await YoutubeDlPlugin.download({ ...options, processId: currentAndroidProcessId });
-      if (res && res.title) {
-        res.title = convertCnToTw(res.title);
+      if (res) {
+        if (res.title) res.title = convertCnToTw(res.title);
+        if (res.channelPrefix) res.channelPrefix = convertCnToTw(res.channelPrefix);
       }
       return res;
     }
+
 
     try {
       // 每日自動更新檢查
@@ -387,6 +391,7 @@ export const DownloadService = {
       let rawTitle = '';
       let uploadDate = '';
       let timestampNum = 0;
+      let uploader = '';
       const tempFilePath = `${targetDirPath}/${uniqueId}.${ext}`;
       const infoPath = `${targetDirPath}/${uniqueId}.info.json`;
 
@@ -396,7 +401,9 @@ export const DownloadService = {
         rawTitle = info.title || info.fulltitle || '';
         uploadDate = info.upload_date || '';
         timestampNum = info.timestamp || info.release_timestamp || 0;
+        uploader = info.uploader || info.channel || '';
       } catch (e: any) {
+
         logs.push('Failed to read info.json: ' + (e.message || String(e)));
         console.warn('Failed to read info.json for title', e);
       }
@@ -529,10 +536,14 @@ export const DownloadService = {
         path: downloadedFilePath || downDir,
         mediaUri: downloadedFilePath || downDir,
         title: displayTitle,
+        rawTitle: fullTitle || cleanFileName,
+        publishTimeStr: pubTimeStr,
+        channelPrefix: uploader ? convertCnToTw(uploader) : '',
         quality: quality,
         fileSizeBytes: fileSizeBytes,
         isAudio: options.mp3
       };
+
     } catch (e: any) {
       activeChildProcess = null;
       let msg = e.message || String(e);

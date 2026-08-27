@@ -19,7 +19,11 @@
 
 ## Impact
 
-- **前端狀態 (`src/App.vue`)**：
+- **前端狀態與任務模型 (`src/App.vue`)**：
   - 更新 `MonitoredChannel` 型別定義與預設值。
-  - 重構 `checkAllMonitoredChannels`、`addManualChannel`、`exportChannelsJson` 與備份還原邏輯中的時間欄位處理。
-- **資料儲存 (`localStorage`)**：相容現有 `avd_monitored_channels` 快取資料。
+  - 擴充 `DownloadTask` 結構化欄位（`publishTimeStr`、`channelPrefix`、`rawTitle`）並實作防覆蓋標題合成機制。
+  - 重構 `checkAllMonitoredChannels`、`addManualChannel`、`exportChannelsJson`、`downloadProgress`、`processQueue` 與備份還原邏輯中的時間欄位處理。
+- **Android 原生端 (`android/.../YoutubeDlPlugin.java`)**：
+  - 在 `download()` 流程中新增 YouTube（`upload_date`/`timestamp`/`uploader`）與 TikTok（`create_time`）的發布時間及頻道資訊提取與回傳。
+- **資料儲存 (`localStorage`)**：相容現有 `avd_monitored_channels` 快取資料與 `avd_tasks` 任務快取。
+

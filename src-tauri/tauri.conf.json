@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AVD",
-  "version": "1.0.60",
+  "version": "1.0.61",
   "identifier": "com.mattpocock.avd",
+
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
