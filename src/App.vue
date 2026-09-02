@@ -798,20 +798,28 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
-import { LazyStore } from '@tauri-apps/plugin-store';
+import { createStorage } from './composables/useStorage';
+import { LocalStorageAdapter, TauriStoreAdapter, localStorageLegacyFallback } from './composables/storageAdapters';
+import {
+  createTaskStore,
+  projectTasks,
+  isPlaylistCompleted,
+  getPlaylistCompletedCount,
+  getPlaylistProgress,
+  getChannelCompletedCount,
+  type DownloadTask,
+  type PlaylistGroupTask,
+  type ChannelGroupTask,
+} from './composables/useTaskStore';
 
-const store = new LazyStore('config.json');
-const isStoreInitialized = ref(false);
-
-const saveConfig = (key: string, value: any) => {
-  const strVal = typeof value === 'string' ? value : JSON.stringify(value);
-  localStorage.setItem(key, strVal);
-  if (isTauri() && isStoreInitialized.value) {
-    store.set(key, value).then(() => {
-      store.save().catch((e: any) => console.error('Store save error:', e));
-    }).catch((e: any) => console.error('Store set error:', e));
-  }
-};
+// 單一權威來源：Windows 使用 Tauri Store，Android / Web 使用 localStorage。
+// 舊版雙寫時期遺留於 localStorage 的資料，僅在權威來源無值時作為一次性遷移來源讀取。
+const storage = createStorage(
+  isTauri() ? new TauriStoreAdapter('config.json') : new LocalStorageAdapter(),
+  localStorageLegacyFallback
+);
+const taskStore = createTaskStore(storage);
+const { tasks } = taskStore;
 
 // ===== 🚀 自動更新狀態與邏輯 =====
 const showUpdateModal = ref(false);
@@ -948,11 +956,10 @@ const openBrowserRelease = () => {
 // 啟動時觸發背景靜默檢查
 checkUpdateOnStartup();
 
-const isTvMode = ref(localStorage.getItem('avd_tv_mode') === 'true');
+const isTvMode = storage.defineSetting('avd_tv_mode', false);
 
 const toggleTvMode = () => {
   isTvMode.value = !isTvMode.value;
-  saveConfig('avd_tv_mode', isTvMode.value);
   showToast(isTvMode.value ? '已開啟 TV 遙控器模式' : '已恢復 手機模式');
   if (isTvMode.value && !isTauri() && !serverStatus.value.isActive) {
     startLocalServer();
@@ -960,7 +967,7 @@ const toggleTvMode = () => {
 };
 void toggleTvMode;
 
-const targetTvIp = ref(localStorage.getItem('avd_target_tv_ip') || '');
+const targetTvIp = storage.defineSetting('avd_target_tv_ip', '');
 
 const showCastListModal = ref(false);
 const remoteTasks = ref<any[]>([]);
@@ -971,7 +978,6 @@ const pushListToTv = async () => {
     return;
   }
   
-  saveConfig('avd_target_tv_ip', targetTvIp.value);
   let targetIp = targetTvIp.value.trim();
   if (targetIp.startsWith('http://')) targetIp = targetIp.replace('http://', '');
   if (targetIp.includes(':')) targetIp = targetIp.split(':')[0];
@@ -990,7 +996,8 @@ const pushListToTv = async () => {
     }
     
     // Convert tasks into remote tasks
-    const pushedTasks = JSON.parse(JSON.stringify(tasks.value));
+    // 與持久化共用同一份投影：不把單機的展開狀態與瞬時進度推送到其他裝置
+    const pushedTasks = JSON.parse(JSON.stringify(projectTasks(tasks.value)));
     
     // 將 Windows 絕對路徑轉為相對路徑（與 /api/list 的 playUrl 格式一致）
     const rewriteUri = (task: any) => {
@@ -1072,80 +1079,20 @@ const fetchRemoteTasks = async () => {
 
 
 
-const initStore = async () => {
-  if (!isTauri()) {
-    monitoredChannels.value = JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]');
-    monitorConfig.value = JSON.parse(localStorage.getItem('avd_monitor_config') || JSON.stringify({
-      autoCheckEnabled: true,
-      checkIntervalMinutes: 60,
-      lastGlobalCheckTime: 0
-    }));
-    isStoreInitialized.value = true;
-    return;
-  }
-
-  try {
-    const loadStoreItem = async (key: string, refVar: any, isJson = false) => {
-      const stored = await store.get(key);
-      if (stored !== undefined && stored !== null) {
-        if (isJson && typeof stored === 'string') {
-          refVar.value = JSON.parse(stored);
-        } else if (['avd_tv_mode', 'avd_mp3_mode', 'avd_confirm_delete_all', 'avd_confirm_delete_single', 'avd_confirm_clear_all', 'avd_confirm_clear_single', 'avd_test_mode_enabled'].includes(key)) {
-          refVar.value = typeof stored === 'string' ? stored === 'true' : !!stored;
-        } else {
-          refVar.value = stored;
-        }
-        const strVal = typeof refVar.value === 'string' ? refVar.value : JSON.stringify(refVar.value);
-        localStorage.setItem(key, strVal);
-      } else {
-        const local = localStorage.getItem(key);
-        if (local !== null) {
-          if (isJson) {
-            const parsed = JSON.parse(local);
-            refVar.value = parsed;
-            await store.set(key, parsed);
-          } else if (['avd_tv_mode', 'avd_mp3_mode', 'avd_confirm_delete_all', 'avd_confirm_delete_single', 'avd_confirm_clear_all', 'avd_confirm_clear_single', 'avd_test_mode_enabled'].includes(key)) {
-            refVar.value = local === 'true';
-            await store.set(key, refVar.value);
-          } else {
-            refVar.value = local;
-            await store.set(key, local);
-          }
-          await store.save();
-        }
-      }
-    };
-
-    await loadStoreItem('avd_monitored_channels', monitoredChannels, true);
-    await loadStoreItem('avd_monitor_config', monitorConfig, true);
-    await loadStoreItem('avd_tv_mode', isTvMode, false);
-    await loadStoreItem('avd_target_tv_ip', targetTvIp, false);
-    await loadStoreItem('avd_mp3_mode', mp3Mode, false);
-    await loadStoreItem('avd_wifi_ssid', wifiSsid, false);
-    await loadStoreItem('avd_wifi_pwd', wifiPassword, false);
-    await loadStoreItem('avd_confirm_delete_all', confirmDeleteAll, false);
-    await loadStoreItem('avd_confirm_delete_single', confirmDeleteSingle, false);
-    await loadStoreItem('avd_confirm_clear_all', confirmClearAll, false);
-    await loadStoreItem('avd_confirm_clear_single', confirmClearSingle, false);
-    await loadStoreItem('avd_test_mode_enabled', testModeEnabled, false);
-    await loadStoreItem('avd_tasks', tasks, true);
-    await loadStoreItem('avd_drive_token', driveToken, false);
-
-  } catch (e) {
-    console.error('Failed to init store', e);
-  }
-  isStoreInitialized.value = true;
-};
 
 onMounted(async () => {
-  await initStore();
+  await storage.hydrate();
 
-  if (localStorage.getItem('avd_tv_mode') === null) {
+  if (taskStore.trimmedOnRestore.value > 0) {
+    showToast(`已自動清理 ${taskStore.trimmedOnRestore.value} 筆較舊的任務紀錄`);
+  }
+
+  // 首次啟動（該鍵尚無存值）時自動偵測是否為 TV 裝置
+  if (!storage.wasRestored('avd_tv_mode')) {
     try {
       const res = await DownloadService.isTvDevice();
       if (res && res.isTv) {
         isTvMode.value = true;
-        saveConfig('avd_tv_mode', true);
       }
     } catch (e) {
       console.error('Failed to detect TV device', e);
@@ -1237,39 +1184,30 @@ interface ChannelMonitorConfig {
   enableYtDlpFallback?: boolean;
 }
 
-const monitoredChannels = ref<MonitoredChannel[]>(
-  (JSON.parse(localStorage.getItem('avd_monitored_channels') || '[]') as any[]).map(c => ({
-    ...c,
-    lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0
-  }))
-);
+const monitoredChannels = storage.defineSetting<MonitoredChannel[]>('avd_monitored_channels', [], {
+  deserialize: (raw) => {
+    const list = typeof raw === 'string' ? JSON.parse(raw || '[]') : (raw ?? []);
+    if (!Array.isArray(list)) return [];
+    // 向下相容：舊資料只有 lastCheckTime
+    return list.map((c: any) => ({ ...c, lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0 }));
+  },
+});
 
-const monitorConfig = ref<ChannelMonitorConfig>(
-  (() => {
-    const defaultCfg = {
-      autoCheckEnabled: true,
-      checkIntervalMinutes: 60,
-      lastGlobalCheckTime: 0,
-      enableYtDlpFallback: false
-    };
+const monitorConfig = storage.defineSetting<ChannelMonitorConfig>('avd_monitor_config', {
+  autoCheckEnabled: true,
+  checkIntervalMinutes: 60,
+  lastGlobalCheckTime: 0,
+  enableYtDlpFallback: false,
+}, {
+  deserialize: (raw, defaultValue) => {
     try {
-      const parsed = JSON.parse(localStorage.getItem('avd_monitor_config') || '{}');
-      return { ...defaultCfg, ...parsed };
-    } catch (e) {
-      return defaultCfg;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw ?? {});
+      return { ...defaultValue, ...(parsed as object) };
+    } catch {
+      return defaultValue;
     }
-  })()
-);
-
-watch(monitoredChannels, (val) => {
-  if (!isStoreInitialized.value) return;
-  saveConfig('avd_monitored_channels', val);
-}, { deep: true });
-
-watch(monitorConfig, (val) => {
-  if (!isStoreInitialized.value) return;
-  saveConfig('avd_monitor_config', val);
-}, { deep: true });
+  },
+});
 
 const showChannelModal = ref(false);
 const isAddingManualChannel = ref(false);
@@ -1569,7 +1507,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           }
 
           const newTask: DownloadTask = {
-            id: taskIdCounter++,
+            id: taskStore.nextTaskId(),
             type: 'file',
             isGroup: false,
             url: vid.url,
@@ -1655,7 +1593,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     const testTitle = `[測試模擬] ${buildTaskDisplayTitle(latestVideo.title, channel.title, pubTimeStr)}`;
 
     const testTask: DownloadTask = {
-      id: taskIdCounter++,
+      id: taskStore.nextTaskId(),
       type: 'file',
       isGroup: false,
       url: latestVideo.url,
@@ -1711,7 +1649,7 @@ const simulateGlobalNewVideo = async () => {
           const sourceLabel = vid.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
 
           const testTask: DownloadTask = {
-            id: taskIdCounter++,
+            id: taskStore.nextTaskId(),
             type: 'file',
             isGroup: false,
             url: vid.url,
@@ -1753,11 +1691,10 @@ const simulateGlobalNewVideo = async () => {
 };
 
 const url = ref('');
-const savedMp3Mode = localStorage.getItem('avd_mp3_mode');
-const mp3Mode = ref(savedMp3Mode === 'true');
+const mp3Mode = storage.defineSetting('avd_mp3_mode', false);
 
-const wifiSsid = ref(localStorage.getItem('avd_wifi_ssid') || '');
-const wifiPassword = ref(localStorage.getItem('avd_wifi_pwd') || '');
+const wifiSsid = storage.defineSetting('avd_wifi_ssid', '');
+const wifiPassword = storage.defineSetting('avd_wifi_pwd', '');
 const showWifiModal = ref(false);
 const showSettingsModal = ref(false);
 
@@ -1794,27 +1731,14 @@ const handleManualUpdateYtDlp = async () => {
   }
 };
 
-const getStoredBool = (key: string, defaultValue = true) => {
-  const val = localStorage.getItem(key);
-  if (val === null) return defaultValue;
-  return val === 'true';
-};
+const confirmDeleteAll = storage.defineSetting('avd_confirm_delete_all', true);
+const confirmDeleteSingle = storage.defineSetting('avd_confirm_delete_single', true);
+const confirmClearAll = storage.defineSetting('avd_confirm_clear_all', true);
+const confirmClearSingle = storage.defineSetting('avd_confirm_clear_single', true);
+const testModeEnabled = storage.defineSetting('avd_test_mode_enabled', false);
 
-const confirmDeleteAll = ref(getStoredBool('avd_confirm_delete_all', true));
-const confirmDeleteSingle = ref(getStoredBool('avd_confirm_delete_single', true));
-const confirmClearAll = ref(getStoredBool('avd_confirm_clear_all', true));
-const confirmClearSingle = ref(getStoredBool('avd_confirm_clear_single', true));
-const testModeEnabled = ref(getStoredBool('avd_test_mode_enabled', false));
-
-watch(confirmDeleteAll, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_delete_all', val); });
-watch(confirmDeleteSingle, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_delete_single', val); });
-watch(confirmClearAll, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_clear_all', val); });
-watch(confirmClearSingle, (val) => { if (isStoreInitialized.value) saveConfig('avd_confirm_clear_single', val); });
-watch(testModeEnabled, (val) => { if (isStoreInitialized.value) saveConfig('avd_test_mode_enabled', val); });
-
+// 設定項的變更由 useStorage 自動持久化，此處僅提供使用者回饋
 const saveWifiConfig = () => {
-  saveConfig('avd_wifi_ssid', wifiSsid.value);
-  saveConfig('avd_wifi_pwd', wifiPassword.value);
   showToast('Wi-Fi 設定已儲存');
 };
 
@@ -1864,36 +1788,6 @@ DownloadService.addListener('serverUploadSpeed', (info: any) => {
   }
 });
 
-watch(mp3Mode, (newVal) => {
-  saveConfig('avd_mp3_mode', newVal);
-});
-
-interface DownloadTask {
-  id: number;
-  type?: 'file';
-  isGroup?: false;
-  url: string;
-  title?: string;
-  rawTitle?: string;
-  publishTimeStr?: string;
-  channelPrefix?: string;
-  status: 'pending' | 'downloading' | 'success' | 'error';
-  progress: number;
-  eta: string;
-  speed?: string;
-  line: string;
-  path: string;
-  errorMsg: string;
-  mediaUri: string;
-  isAudio: boolean;
-  uploadStatus?: 'idle' | 'uploading' | 'success' | 'error';
-  uploadProgress?: number;
-  uploadErrorMsg?: string;
-  quality?: string;
-  fileSizeBytes?: number;
-  subFolder?: string;
-}
-
 const buildTaskDisplayTitle = (rawTitle?: string, channelPrefix?: string, publishTimeStr?: string): string => {
   let title = (rawTitle || '').trim();
   
@@ -1930,38 +1824,9 @@ const buildTaskDisplayTitle = (rawTitle?: string, channelPrefix?: string, publis
 };
 
 
-interface PlaylistGroupTask {
-  id: number;
-  type: 'playlist';
-  playlistTitle: string;
-  status: 'pending' | 'downloading' | 'success' | 'error';
-  expanded?: boolean;
-  subTasks: DownloadTask[];
-}
-
-interface ChannelGroupTask {
-  id: number;
-  type: 'channel';
-  isChannelGroup: true;
-  channelTitle: string;
-  status: 'pending' | 'downloading' | 'success' | 'error';
-  expanded?: boolean;
-  playlists: PlaylistGroupTask[];
-}
-
-type TaskItem = DownloadTask | ChannelGroupTask;
-
-const tasks = ref<TaskItem[]>([]);
 
 const expandAll = () => {
-  tasks.value.forEach(task => {
-    if (task.type === 'channel') {
-      task.expanded = true;
-      if (task.playlists) {
-        task.playlists.forEach(p => p.expanded = true);
-      }
-    }
-  });
+  taskStore.setAllExpanded(true);
   remoteTasks.value.forEach(task => {
     if (task.type === 'channel') {
       task.expanded = true;
@@ -1973,14 +1838,7 @@ const expandAll = () => {
 };
 
 const collapseAll = () => {
-  tasks.value.forEach(task => {
-    if (task.type === 'channel') {
-      task.expanded = false;
-      if (task.playlists) {
-        task.playlists.forEach(p => p.expanded = false);
-      }
-    }
-  });
+  taskStore.setAllExpanded(false);
   remoteTasks.value.forEach(task => {
     if (task.type === 'channel') {
       task.expanded = false;
@@ -2001,7 +1859,6 @@ const toggleExpandAll = () => {
   }
 };
 const isProcessingQueue = ref(false);
-let taskIdCounter = 1;
 
 const showPlaylistModal = ref(false);
 const parsedChannelTitle = ref('');
@@ -2025,7 +1882,7 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
     const finalTitle = buildTaskDisplayTitle(raw || item.title, '', pubTime);
 
     return {
-      id: taskIdCounter++,
+      id: taskStore.nextTaskId(),
       type: 'file',
       isGroup: false,
       url: item.url,
@@ -2057,7 +1914,7 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
       existingPlaylist.expanded = true;
     } else {
       channelGroup.playlists.push({
-        id: taskIdCounter++,
+        id: taskStore.nextTaskId(),
         type: 'playlist',
         playlistTitle: parsedPlaylistTitle.value,
         status: 'pending',
@@ -2067,14 +1924,14 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
     }
   } else {
     channelGroup = {
-      id: taskIdCounter++,
+      id: taskStore.nextTaskId(),
       type: 'channel',
       isChannelGroup: true,
       channelTitle: parsedChannelTitle.value,
       status: 'pending',
       expanded: true,
       playlists: [{
-        id: taskIdCounter++,
+        id: taskStore.nextTaskId(),
         type: 'playlist',
         playlistTitle: parsedPlaylistTitle.value,
         status: 'pending',
@@ -2089,36 +1946,9 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
   processQueue();
 };
 
-const isPlaylistCompleted = (playlist: PlaylistGroupTask) => {
-  if (!playlist.subTasks || playlist.subTasks.length === 0) return false;
-  return playlist.status === 'success' || playlist.subTasks.every(s => s.status === 'success');
-};
-
-const getPlaylistCompletedCount = (playlist: PlaylistGroupTask) => {
-  return playlist.subTasks.filter(s => s.status === 'success').length;
-};
-
-const getPlaylistProgress = (playlist: PlaylistGroupTask) => {
-  if (!playlist.subTasks.length) return 0;
-  const totalProg = playlist.subTasks.reduce((acc, cur) => {
-    if (cur.status === 'success') return acc + 100;
-    return acc + (cur.progress || 0);
-  }, 0);
-  return Math.round(totalProg / playlist.subTasks.length);
-};
-
-const getChannelCompletedCount = (channel: ChannelGroupTask) => {
-  return channel.playlists.reduce((acc, pl) => acc + getPlaylistCompletedCount(pl), 0);
-};
-
 const removePlaylistGroup = (channel: ChannelGroupTask, playlistId: number) => {
   const playlist = channel.playlists.find(p => p.id === playlistId);
-  const doRemove = () => {
-    channel.playlists = channel.playlists.filter(p => p.id !== playlistId);
-    if (channel.playlists.length === 0) {
-      tasks.value = tasks.value.filter(t => t.id !== channel.id);
-    }
-  };
+  const doRemove = () => taskStore.removePlaylistFromChannel(channel, playlistId);
 
   if (confirmClearSingle.value) {
     showDialog({
@@ -2135,9 +1965,7 @@ const removePlaylistGroup = (channel: ChannelGroupTask, playlistId: number) => {
 
 const removeChannelGroup = (channelId: number) => {
   const channel = tasks.value.find(t => t.id === channelId) as ChannelGroupTask | undefined;
-  const doRemove = () => {
-    tasks.value = tasks.value.filter(t => t.id !== channelId);
-  };
+  const doRemove = () => taskStore.removeTaskById(channelId);
 
   if (confirmClearSingle.value || confirmClearAll.value) {
     showDialog({
@@ -2228,47 +2056,9 @@ const deleteChannelFiles = async (channel: ChannelGroupTask) => {
 };
 
 const removeSubTask = (playlist: PlaylistGroupTask, subId: number) => {
-  playlist.subTasks = playlist.subTasks.filter(s => s.id !== subId);
+  taskStore.removeSubTask(playlist, subId);
 };
 
-// Load tasks from localStorage
-const savedTasks = localStorage.getItem('avd_tasks');
-if (savedTasks) {
-  try {
-    tasks.value = JSON.parse(savedTasks);
-    tasks.value.forEach(t => {
-      // If app was killed while pending/downloading, mark as error so user can retry
-      if (t.type === 'channel') {
-        t.playlists.forEach(pl => {
-          pl.subTasks.forEach(s => {
-            if (s.status === 'downloading' || s.status === 'pending') {
-              s.status = 'error';
-              s.errorMsg = 'APP已關閉，任務中斷';
-              s.line = '任務被強制中斷';
-              s.progress = 0;
-            }
-          });
-        });
-        t.status = 'error';
-      } else if (t.status === 'downloading' || t.status === 'pending') {
-        t.status = 'error';
-        t.errorMsg = 'APP已關閉，任務中斷';
-        t.line = '任務被強制中斷';
-        t.progress = 0;
-      }
-    });
-    if (tasks.value.length > 0) {
-      taskIdCounter = Math.max(...tasks.value.map(t => t.id)) + 1;
-    }
-  } catch (e) {
-    console.error("Failed to parse saved tasks", e);
-  }
-}
-
-// Watch and save to localStorage
-watch(tasks, (newTasks) => {
-  saveConfig('avd_tasks', newTasks);
-}, { deep: true });
 
 const getStatusType = (status: string) => {
   switch (status) {
@@ -2330,7 +2120,7 @@ const addTask = async (urlToAdd: string) => {
             enabled: true,
             lastCheckTime: Date.now()
           });
-          // watch 已經負責 saveConfig，無需手動儲存
+          // 設定項的變更由 useStorage 自動持久化
           showToast('已加入自動追蹤清單');
         } catch {
           // Cancelled - do nothing, just proceed
@@ -2420,7 +2210,7 @@ const addTask = async (urlToAdd: string) => {
   }
 
   tasks.value.push({
-    id: taskIdCounter++,
+    id: taskStore.nextTaskId(),
     type: 'file',
     isGroup: false,
     url: urlToAdd,
@@ -2743,7 +2533,7 @@ const openDownloadFolder = async () => {
   await DownloadService.openDownloadFolder();
 };
 
-const driveToken = ref(localStorage.getItem('avd_drive_token') || '');
+const driveToken = storage.defineSetting('avd_drive_token', '');
 const driveTokenInput = ref(driveToken.value);
 const showTokenModal = ref(false);
 
@@ -2763,7 +2553,6 @@ const openOAuthPage = async () => {
 
 const saveDriveToken = () => {
   driveToken.value = driveTokenInput.value.trim();
-  saveConfig('avd_drive_token', driveToken.value);
   showToast('Google 雲端帳號連結成功！已開啟進度模式');
 };
 
