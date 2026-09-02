@@ -1466,10 +1466,16 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       const channelLastPub = channel.lastPublishedTime || channel.lastCheckTime || 0;
 
       if (channelLastPub === 0) {
-        channel.lastPublishedTime = latestVideo.publishedTime || now;
-        channel.lastCheckTime = now;
-        channel.lastKnownVideoId = latestVideo.videoId;
-        channel.lastVideoTitle = latestVideo.title;
+        // 首次追蹤：以最新影片的發布時間建立初始防線，不觸發下載。
+        // 若來源未提供精確時間（備援模式的 publishedTime 為 0），則不建立基準 ——
+        // 維持未初始化狀態，待下次能取得精確時間時再錨定。
+        // 切勿以當下時間替代：那會把基準推至未來，使該時點之前發布的影片永久漏抓。
+        if (latestVideo.publishedTime) {
+          channel.lastPublishedTime = latestVideo.publishedTime;
+          channel.lastCheckTime = now;
+          channel.lastKnownVideoId = latestVideo.videoId;
+          channel.lastVideoTitle = latestVideo.title;
+        }
         continue;
       }
 
@@ -1531,10 +1537,16 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         }
       }
 
-      channel.lastPublishedTime = latestVideo.publishedTime || now;
-      channel.lastCheckTime = now;
-      channel.lastKnownVideoId = latestVideo.videoId;
-      channel.lastVideoTitle = latestVideo.title;
+      // 僅在取得精確發布時間時才推進基準。備援模式下若無精確時間，
+      // 保留原基準不動 —— 以當下時間推進會使基準跑到未來，導致 RSS 恢復後永久漏片。
+      // 相關欄位（lastCheckTime / lastKnownVideoId / lastVideoTitle）同步只在推進時更新，
+      // 避免 `lastPublishedTime || lastCheckTime` 的向下相容鏈把當下時間當成基準復活。
+      if (latestVideo.publishedTime) {
+        channel.lastPublishedTime = latestVideo.publishedTime;
+        channel.lastCheckTime = now;
+        channel.lastKnownVideoId = latestVideo.videoId;
+        channel.lastVideoTitle = latestVideo.title;
+      }
     } catch (err) {
       failedCount++;
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);

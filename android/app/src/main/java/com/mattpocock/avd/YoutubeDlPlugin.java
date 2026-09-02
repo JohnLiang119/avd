@@ -354,6 +354,45 @@ public class YoutubeDlPlugin extends Plugin {
         }).start();
     }
 
+    /**
+     * 頻道新片備援抓取（RSS 異常時使用）。
+     *
+     * 刻意不重用 parsePlaylist：後者以 --flat-playlist 執行，該模式下 yt-dlp 不回傳
+     * timestamp 與 upload_date（皆為 null），會迫使前端 fallback 至當下時間而污染
+     * lastPublishedTime 基準。此處改以 --skip-download 逐一解析影片頁面取得精確發布時間。
+     *
+     * 回傳 NDJSON（每行一個 JSON 物件），與 Windows 端 fetch_channel_videos_fallback 對齊。
+     * URL 維持 /channel/{id} 以涵蓋 Videos + Shorts；Live 分頁由前端依 playlist 欄位過濾。
+     */
+    @PluginMethod
+    public void fetchChannelVideosFallback(PluginCall call) {
+        String channelId = call.getString("channelId");
+        if (channelId == null || channelId.isEmpty()) {
+            call.reject("Must provide channelId");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String url = "https://www.youtube.com/channel/" + channelId;
+                YoutubeDLRequest request = new YoutubeDLRequest(url);
+                request.addOption("--dump-json");
+                request.addOption("--skip-download");
+                request.addOption("--playlist-end", "2");
+                request.addOption("--no-warnings");
+
+                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
+
+                JSObject ret = new JSObject();
+                ret.put("ndjson", response.getOut());
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to fetch channel videos fallback", e);
+                call.reject("備援抓取頻道新片失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
     @PluginMethod
     public void startLocalServer(PluginCall call) {
         if (localServer != null && localServer.isAlive()) {

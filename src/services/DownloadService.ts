@@ -99,9 +99,88 @@ export interface MonitoredVideoResult {
   videoId: string;
   title: string;
   published: string;
+  /**
+   * 影片發布時間（毫秒）。
+   * `0` 表示來源未提供精確發布時間 —— 呼叫端不得以當下時間替代，
+   * 否則會將頻道的追蹤基準推進至未來而造成永久漏片。
+   */
   publishedTime: number;
   url: string;
   source: 'rss' | 'fallback';
+}
+
+/**
+ * 判斷一筆 yt-dlp 備援結果是否來自頻道的 Live 分頁。
+ *
+ * yt-dlp 抓取 /channel/{id} 時會遍歷該頻道存在的各分頁，`playlist` 欄位格式為
+ * 「{頻道名} - {分頁名}」（如 `Lofi Girl - Live`）。
+ *
+ * 刻意不使用 `playlist.includes('Live')`：頻道名稱本身含 "Live" 時會誤殺
+ * （例如 `Live Music - Videos`），因此改為比對分頁名後綴。
+ *
+ * 也刻意不採用 `was_live === true` 作為判準，原因有二：
+ *   1. 實測顯示 Live 分頁影片的 `was_live` 為 `false`，該條件對此用途完全無效。
+ *   2. `was_live` 指的是「該影片是否為已結束的直播存檔」；這類影片若出現在
+ *      Videos 分頁，官方 RSS 是會涵蓋的，濾掉反而與 RSS 的範圍不一致。
+ */
+function isLiveTabEntry(entry: any): boolean {
+  const playlist = typeof entry?.playlist === 'string' ? entry.playlist : '';
+  return /\s-\sLive$/.test(playlist.trim());
+}
+
+/**
+ * 將一筆 yt-dlp 備援結果轉為 MonitoredVideoResult。
+ *
+ * 時間解析優先序：`timestamp`（Unix 秒）→ `upload_date`（YYYYMMDD）→ `0`。
+ * 兩者皆無時回傳 `0` 而非當下時間，交由呼叫端判斷是否推進基準。
+ */
+function mapFallbackEntry(entry: any): MonitoredVideoResult {
+  const videoId = entry?.id || '';
+  const url = entry?.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
+
+  let pubTime = 0;
+  if (typeof entry?.timestamp === 'number' && entry.timestamp > 0) {
+    pubTime = entry.timestamp * 1000;
+  } else if (entry?.upload_date && String(entry.upload_date).length === 8) {
+    const str = String(entry.upload_date);
+    const parsed = new Date(`${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}T00:00:00Z`).getTime();
+    if (Number.isFinite(parsed)) pubTime = parsed;
+  }
+
+  return {
+    videoId,
+    title: convertCnToTw(entry?.title || ''),
+    published: pubTime ? new Date(pubTime).toISOString() : '',
+    publishedTime: pubTime,
+    url,
+    source: 'fallback' as const,
+  };
+}
+
+/**
+ * 將備援回傳的 NDJSON（每行一個 JSON 物件）轉為最新影片清單。
+ * 濾除 Live 分頁後依發布時間由新至舊排序，再取前 `limit` 筆。
+ */
+function parseFallbackNdjson(ndjson: string, limit = 2): MonitoredVideoResult[] {
+  const entries = ndjson
+    .trim()
+    .split('\n')
+    .map((line) => {
+      try {
+        return JSON.parse(line.trim());
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .filter((entry: any) => !isLiveTabEntry(entry));
+
+  if (entries.length === 0) return [];
+
+  return entries
+    .map(mapFallbackEntry)
+    .sort((a, b) => b.publishedTime - a.publishedTime)
+    .slice(0, limit);
 }
 
 export const DownloadService = {
@@ -918,64 +997,26 @@ export const DownloadService = {
       if (isTauri()) {
         try {
           const jsonString = await invoke<string>('fetch_channel_videos_fallback', { channelId });
-          const lines = jsonString.trim().split('\n');
-          const entries = lines.map(line => {
-             try { return JSON.parse(line.trim()); } catch(err) { return null; }
-          }).filter(Boolean);
-
-          if (entries.length === 0) {
-             throw new Error('yt-dlp 未回傳任何有效影片資料');
+          const videos = parseFallbackNdjson(jsonString);
+          if (videos.length === 0) {
+            throw new Error('yt-dlp 未回傳任何有效影片資料');
           }
-
-          // 取出前兩筆作為最新影片
-          const topEntries = entries.slice(0, 2);
-          return topEntries.map((entry: any) => {
-            const url = entry.url || `https://www.youtube.com/watch?v=${entry.id}`;
-            let pubTime = 0;
-            if (entry.timestamp) {
-              pubTime = entry.timestamp * 1000;
-            } else if (entry.upload_date && String(entry.upload_date).length === 8) {
-              const str = String(entry.upload_date);
-              const y = str.slice(0, 4);
-              const m = str.slice(4, 6);
-              const d = str.slice(6, 8);
-              pubTime = new Date(`${y}-${m}-${d}T00:00:00Z`).getTime();
-            }
-            return {
-              videoId: entry.id || '',
-              title: convertCnToTw(entry.title || ''),
-              published: pubTime ? new Date(pubTime).toISOString() : '',
-              publishedTime: pubTime || Date.now(),
-              url,
-              source: 'fallback' as const
-            };
-          });
+          return videos;
         } catch (fallbackError: any) {
           console.error(`yt-dlp 備援也失敗 (${channelId}):`, fallbackError);
           throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 yt-dlp 備援均失敗. 原錯誤: ${e.message}`);
         }
       } else {
         try {
-          // Android 端 fallback: 呼叫現有的 parsePlaylist 解析頻道首頁
-          const res = await this.parsePlaylist(`https://www.youtube.com/channel/${channelId}`);
-          if (!res || !res.items || res.items.length === 0) {
-            throw new Error('Android parsePlaylist 未回傳任何有效影片資料');
+          // Android 端備援：改用專用的 fetchChannelVideosFallback。
+          // 先前使用 parsePlaylist，其內部以 --flat-playlist 執行而無法取得發布時間，
+          // 只能一律填入當下時間，正是造成追蹤基準被污染的來源。
+          const res = await YoutubeDlPlugin.fetchChannelVideosFallback({ channelId });
+          const videos = parseFallbackNdjson(res?.ndjson || '');
+          if (videos.length === 0) {
+            throw new Error('Android 備援未回傳任何有效影片資料');
           }
-          
-          // 取出前兩筆作為最新影片
-          const topEntries = res.items.slice(0, 2);
-          return topEntries.map((entry: any) => {
-            const videoId = entry.id || entry.videoId || '';
-            const url = entry.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
-            return {
-              videoId,
-              title: convertCnToTw(entry.title || ''),
-              published: '',
-              publishedTime: Date.now(),
-              url,
-              source: 'fallback' as const
-            };
-          });
+          return videos;
         } catch (fallbackError: any) {
           console.error(`Android 備援也失敗 (${channelId}):`, fallbackError);
           throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 Android 備援均失敗. 原錯誤: ${e.message}`);

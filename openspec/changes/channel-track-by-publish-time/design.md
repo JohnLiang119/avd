@@ -1,4 +1,4 @@
-## Context
+﻿## Context
 
 目前頻道自動追蹤在比對新影片時，依賴 `channel.lastCheckTime`（執行檢查時的系統毫秒戳記）。詳見 `proposal.md`。
 
@@ -48,7 +48,13 @@ const newVideos = videos.filter(v => {
   - 去掉 `--flat-playlist` 後，yt-dlp 會逐一解析影片頁面，回傳精確的 `timestamp`（Unix 秒數）與 `upload_date`（`YYYYMMDD`）。
   - 搭配 `--skip-download --playlist-end 2` 限制只解析前 2 部影片，實測耗時約 5~10 秒，作為備援可接受。
   - 備援取得精確時間後，可與 RSS 模式走完全相同的 `publishedTime > lastPublishedTime` 比對邏輯。
-- **跨分頁問題**：yt-dlp 抓取 `/channel/{id}` 時會遍歷 Videos、Live、Shorts 三個分頁，`--playlist-end N` 為每個分頁各取 N 部。前端需過濾掉 Live 分頁（透過 `playlist` 欄位包含 `"Live"` 或 `was_live === true`），保留 Videos + Shorts 以對齊 RSS 的涵蓋範圍。
+- **跨分頁問題**：yt-dlp 抓取 `/channel/{id}` 時會遍歷該頻道存在的各個分頁（Videos / Live / Shorts），`--playlist-end N` 為每個分頁各取 N 部。前端需過濾掉 Live 分頁，保留 Videos + Shorts 以對齊 RSS 的涵蓋範圍。
+
+  > **實測修正（任務 6.1 期間發現）**：原訂條件為「`playlist` 欄位包含 `"Live"` **或** `was_live === true`」。實測 `--playlist-end 2` 對 `UCSJ4gkVC6NrvII8umztf0Ow` 回傳 4 筆（Videos 2 筆 + Live 2 筆），其中 **Live 分頁影片的 `was_live` 為 `false`** —— 該欄位指的是「這支影片是否為已結束的直播存檔」，與「它出現在哪個分頁」無關。因此 `was_live === true` 對 Live 分頁的過濾**完全無效**，唯一可靠的判準是 `playlist` 欄位。
+  >
+  > `playlist` 的格式為 `"{頻道名} - {分頁名}"`（如 `"Lofi Girl - Live"`）。因此 **不可用 `playlist.includes("Live")`** —— 頻道名稱本身含 "Live" 時（例如 `"Live Music - Videos"`）會誤殺。應改為比對分頁名後綴，例如 `/\s-\sLive$/` 或取最後一個 `" - "` 之後的片段判斷。
+  >
+  > 另：分頁組成因頻道而異（該測試頻道無 Shorts 分頁），過濾邏輯不應假設固定的分頁數量或順序。
 - **雙平台修正**：Windows（Rust `lib.rs`）與 Android（Java `YoutubeDlPlugin.java`）均需同步修正。
 
 ### 5. 頻道卡片 UI 發布時間展示

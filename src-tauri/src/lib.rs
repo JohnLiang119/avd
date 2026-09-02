@@ -146,9 +146,13 @@ async fn fetch_channel_videos_fallback(app: tauri::AppHandle, channel_id: String
     use tauri_plugin_shell::ShellExt;
     let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
     
+    // URL 保持 /channel/{id}（不加 /videos），以同時涵蓋 Videos + Shorts；Live 分頁由前端過濾。
     let url = format!("https://www.youtube.com/channel/{}", channel_id);
+    // 不使用 --flat-playlist：該模式下 yt-dlp 不回傳 timestamp 與 upload_date（皆為 null），
+    // 會迫使前端 fallback 至 Date.now() 而污染 lastPublishedTime 基準。
+    // 改以 --skip-download 逐一解析影片頁面取得精確發布時間，並以 --playlist-end 2 限制解析數量。
     let output = sidecar_command
-        .args(["--dump-json", "--flat-playlist", "--playlist-end", "2", &url])
+        .args(["--dump-json", "--skip-download", "--playlist-end", "2", &url])
         .output()
         .await
         .map_err(|e| e.to_string())?;
