@@ -393,6 +393,43 @@ public class YoutubeDlPlugin extends Plugin {
         }).start();
     }
 
+    /**
+     * 查詢單支影片的直播狀態。
+     *
+     * auto-check-filtering 規格要求直播與排程首播不得加入下載佇列，且該排除須在
+     * 所有平台一致生效。此前 Android 端缺少此能力，前端只能一律當作非直播放行，
+     * 導致排程直播（開播前不存在任何可下載格式）被排入佇列並必然失敗。
+     *
+     * 回傳 yt-dlp 的 live_status 原始字串，由前端統一判定。
+     */
+    @PluginMethod
+    public void checkVideoLiveStatus(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("Must provide an url");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                YoutubeDLRequest request = new YoutubeDLRequest(url);
+                request.addOption("--print", "live_status");
+                request.addOption("--skip-download");
+                request.addOption("--no-warnings");
+
+                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
+                String status = response.getOut() == null ? "" : response.getOut().trim();
+
+                JSObject ret = new JSObject();
+                ret.put("liveStatus", status);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to check live status", e);
+                call.reject("查詢直播狀態失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
     @PluginMethod
     public void startLocalServer(PluginCall call) {
         if (localServer != null && localServer.isAlive()) {

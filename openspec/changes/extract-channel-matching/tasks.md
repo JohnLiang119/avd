@@ -10,7 +10,12 @@
 - [ ] 2.2 實作 `isFirstTimeTracking(channel)`：`lastPublishedTime` 與 `lastCheckTime` 皆無值時為首次追蹤
 - [ ] 2.3 實作 `isVideoAlreadyQueued(tasks, videoId)`：走訪扁平任務與頻道群組 → 播放清單 → 子任務三層，沿用既有的 `url.includes(videoId)` 比對方式（不改為精確比對，理由見 design 決策 2，並於程式碼註解說明避免誤認為疏漏）
 - [ ] 2.4 實作 `selectNewVideos(videos, baseline, tasks)`：篩選發布時間晚於錨點且未在佇列中的影片
-- [ ] 2.5 實作 `nextChannelBaseline(current, latestVideo)`：回傳應採用的錨點值；無精確發布時間時回傳原值
+- [ ] 2.5 實作 `nextChannelBaseline(...)`：回傳應採用的錨點值，需同時滿足兩道守門條件
+  - **範圍已擴充**（由 `fix-live-stream-handling` 任務 5.1 補記）：錨點規則在該變更中新增了第二道守門，抽離時須一併涵蓋：
+    1. 無精確發布時間時不推進（`channel-track-by-publish-time` 任務 6.7）。
+    2. **不得越過本次未被實際處理的影片** —— 因直播（`live`）或狀態查詢失敗（`unknown`）而未處理者。錨點取「已處理影片中發布時間最大者」，而非逕取 `videos[0]`。
+  - 因此函式簽章需能接收「未處理影片集合」，而非僅接收單一 `latestVideo`。
+  - 首次追蹤分支不套用第二道守門（刻意如此，見該變更任務 2.5 的說明），抽離時須保留此差異。
 - [ ] 2.6 實作 `buildChannelVideoTask(video, channel, nextId)`：建構下載任務，涵蓋標題組裝、發布時間字串、來源標記（RSS / yt-dlp 備援）、子資料夾名稱字元清洗
 - [ ] 2.7 逐一比對每個抽出函式與原始程式碼的邏輯等價性，特別確認 `newVideos.reverse()` 的順序語意與 `formatPublishTime` 的 fallback 未失真
 
@@ -30,6 +35,9 @@
 - [ ] 4.5 測試新片篩選：僅回傳發布時間晚於錨點且未在佇列中的影片
 - [ ] 4.6 測試錨點推進：有精確發布時間時錨點更新為該時間
 - [ ] 4.7 測試錨點保留：無精確發布時間時錨點維持原值，不被推進至當下時間
+- [ ] 4.7b 測試錨點不越過未處理影片：最新影片因直播而未處理時，錨點只推進至次新的已處理影片；全數未處理時錨點不變
+- [ ] 4.7c 測試確定性錯誤判定（`matchPermanentError`）：確定性訊息不重試、暫時性訊息照常重試、直播相關訊息給予專屬提示
+  - 此函式由 `fix-live-stream-handling` 新增於 `App.vue`，屬純邏輯但因位置而無法被測試引用。抽離時一併移入可測模組。
 - [ ] 4.8 測試任務建構：標題含頻道前綴與發布時間、來源標記正確區分 RSS 與備援、子資料夾名稱已移除檔案系統不接受的字元
 
 ## 5. 驗證與收尾

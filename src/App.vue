@@ -1479,6 +1479,11 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         continue;
       }
 
+      // 本次未被實際處理的影片（因直播而跳過，或直播狀態查詢失敗而無從判定）。
+      // 時間錨點不得越過這些影片，否則它們日後即使可正常下載也永遠不會再被判定為新片
+      // —— 排程直播的 publishedTime 是「建立時間」，在直播結束轉為存檔後並不會改變。
+      const unhandledVideoIds = new Set<string>();
+
       const newVideos = videos.filter(v => {
         const isTimeNewer = v.publishedTime > channelLastPub;
         const alreadyInTasks = tasks.value.some((t: any) => {
@@ -1495,9 +1500,16 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
       if (newVideos.length > 0) {
         for (const vid of newVideos.reverse()) {
-          const isLive = await DownloadService.checkVideoLiveStatus(vid.url);
-          if (isLive) {
-            console.log(`[自動追蹤] 跳過直播/首播影片: ${vid.title}`);
+          const liveStatus = await DownloadService.checkVideoLiveStatus(vid.url);
+          if (liveStatus !== 'not_live') {
+            // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
+            // 兩者皆未被實際處理，記錄下來以阻止錨點越過它們。
+            unhandledVideoIds.add(vid.videoId);
+            console.log(
+              liveStatus === 'live'
+                ? `[自動追蹤] 跳過直播/首播影片: ${vid.title}`
+                : `[自動追蹤] 直播狀態查詢失敗，暫不處理: ${vid.title}`
+            );
             continue;
           }
 
@@ -1537,15 +1549,27 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         }
       }
 
-      // 僅在取得精確發布時間時才推進基準。備援模式下若無精確時間，
-      // 保留原基準不動 —— 以當下時間推進會使基準跑到未來，導致 RSS 恢復後永久漏片。
-      // 相關欄位（lastCheckTime / lastKnownVideoId / lastVideoTitle）同步只在推進時更新，
-      // 避免 `lastPublishedTime || lastCheckTime` 的向下相容鏈把當下時間當成基準復活。
-      if (latestVideo.publishedTime) {
-        channel.lastPublishedTime = latestVideo.publishedTime;
+      // 錨點推進有兩道獨立的守門條件：
+      //   1. 必須取得精確發布時間 —— 備援模式下若無精確時間則不推進，
+      //      以當下時間推進會使基準跑到未來，導致 RSS 恢復後永久漏片。
+      //   2. 不得越過本次未被實際處理的影片（直播、或狀態查詢失敗者），
+      //      否則它們日後可正常下載時也不會再被判定為新片。
+      //
+      // 因此錨點取「本次已處理影片中發布時間最大者」，而非逕取 videos[0]。
+      // 相關欄位一併只在推進時更新，避免 `lastPublishedTime || lastCheckTime`
+      // 的向下相容鏈把當下時間當成基準復活。
+      const anchorVideo = videos
+        .filter(v => v.publishedTime && !unhandledVideoIds.has(v.videoId))
+        .reduce<typeof videos[number] | null>(
+          (best, v) => (!best || v.publishedTime > best.publishedTime ? v : best),
+          null
+        );
+
+      if (anchorVideo && anchorVideo.publishedTime > channelLastPub) {
+        channel.lastPublishedTime = anchorVideo.publishedTime;
         channel.lastCheckTime = now;
-        channel.lastKnownVideoId = latestVideo.videoId;
-        channel.lastVideoTitle = latestVideo.title;
+        channel.lastKnownVideoId = anchorVideo.videoId;
+        channel.lastVideoTitle = anchorVideo.title;
       }
     } catch (err) {
       failedCount++;
@@ -2252,6 +2276,36 @@ const onSubmit = () => {
   addTask(url.value);
 };
 
+/**
+ * 重試必然再次失敗的確定性錯誤。
+ *
+ * yt-dlp 不提供結構化的錯誤代碼，只能比對訊息文字。此清單刻意只納入語意明確、
+ * 不可能因網路狀況而出現的訊息 —— 誤判會讓使用者失去自動重試，代價高於漏判。
+ * 若日後 yt-dlp 改變措辭導致漏判，行為會退回「照常重試」，即現況，不會產生新故障。
+ */
+const PERMANENT_DOWNLOAD_ERRORS = [
+  'requested format is not available',
+  'video unavailable',
+  'private video',
+  'members-only',
+  'join this channel',
+  'this live event will begin in',
+] as const;
+
+/** 這兩種訊息在本專案的情境中幾乎必然來自直播或尚未開播的影片 */
+const LIVE_RELATED_ERRORS = [
+  'requested format is not available',
+  'this live event will begin in',
+] as const;
+
+const matchPermanentError = (msg: string): { permanent: boolean; liveRelated: boolean } => {
+  const lower = msg.toLowerCase();
+  return {
+    permanent: PERMANENT_DOWNLOAD_ERRORS.some(k => lower.includes(k)),
+    liveRelated: LIVE_RELATED_ERRORS.some(k => lower.includes(k)),
+  };
+};
+
 const getNextPendingTask = (): { task: DownloadTask; parentPlaylist?: PlaylistGroupTask; parentChannel?: ChannelGroupTask } | null => {
   for (const item of tasks.value) {
     if (item.type === 'channel') {
@@ -2346,6 +2400,18 @@ const processQueue = async () => {
         nextTask.status = 'error';
         nextTask.errorMsg = '已手動中止下載';
         nextTask.line = '已手動中止下載';
+        break;
+      }
+
+      // 確定性錯誤重試必然再次失敗，立即結束並如實說明原因，
+      // 不再顯示暗示問題可能是暫時性的「已自動重試 N 次」。
+      const { permanent, liveRelated } = matchPermanentError(errorMsgStr);
+      if (permanent) {
+        nextTask.status = 'error';
+        nextTask.errorMsg = liveRelated
+          ? '此影片為直播或尚未開播，暫時無法下載'
+          : errorMsgStr;
+        nextTask.line = nextTask.errorMsg;
         break;
       }
 

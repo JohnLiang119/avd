@@ -95,6 +95,13 @@ export interface PlaylistResult {
   items: PlaylistItem[];
 }
 
+/**
+ * 直播狀態查詢結果。
+ * `unknown` 表示查詢失敗、無從判定 —— 與「確定不是直播」語意不同，
+ * 呼叫端不得將其視為已處理完畢。
+ */
+export type LiveCheckResult = 'live' | 'not_live' | 'unknown';
+
 export interface MonitoredVideoResult {
   videoId: string;
   title: string;
@@ -905,23 +912,39 @@ export const DownloadService = {
     return { isTv: false };
   },
 
-  async checkVideoLiveStatus(url: string): Promise<boolean> {
+  /**
+   * 查詢影片是否為直播中或排程尚未開播。
+   *
+   * 兩平台的判準一致：`is_live` 與 `is_upcoming` 皆視為直播而應排除。
+   * 尚未開播的排程直播不存在任何可下載格式，放行必然導致下載失敗。
+   *
+   * 刻意回傳三態而非布林：`'unknown'` 代表查詢本身失敗、無從判定。
+   * 呼叫端據此得知該影片並未被實際處理，不應讓頻道的時間錨點越過它，
+   * 以便下次檢查重新評估。
+   */
+  async checkVideoLiveStatus(url: string): Promise<LiveCheckResult> {
     try {
-      if (!isTauri()) {
-        // Android 目前不支援此功能，預設當作非直播
-        return false;
+      let status = '';
+
+      if (isTauri()) {
+        const cmd = Command.sidecar('bin/yt-dlp', [
+          '--print', 'live_status',
+          '--skip-download',
+          url
+        ]);
+        const output = await cmd.execute();
+        status = output.stdout.trim();
+      } else {
+        const res = await YoutubeDlPlugin.checkVideoLiveStatus({ url });
+        status = (res?.liveStatus || '').trim();
       }
-      
-      const cmd = Command.sidecar('bin/yt-dlp', [
-        '--print', 'live_status',
-        url
-      ]);
-      const output = await cmd.execute();
-      const status = output.stdout.trim().toLowerCase();
-      return status === 'is_live' || status === 'is_upcoming';
+
+      const normalized = status.toLowerCase();
+      if (!normalized) return 'unknown';
+      return normalized === 'is_live' || normalized === 'is_upcoming' ? 'live' : 'not_live';
     } catch (e) {
       console.warn(`檢查直播狀態失敗 (${url}):`, e);
-      return false; // 如果檢查失敗，預設加入佇列以免漏掉
+      return 'unknown';
     }
   },
 
