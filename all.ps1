@@ -187,19 +187,25 @@ if ($Clean -and (Test-Path "src-tauri\target")) {
 }
 
 # 自動檢測當前 Rust target triple 並確保 sidecar 二進制檔齊全
+$binDir = "src-tauri\bin"
+$binaries = @("yt-dlp", "ffmpeg", "rclone")
+$rustcHost = $null
+$missingBinaries = @()
 try {
     $rustcHost = (rustc -vV | Select-String "host:\s*(.+)$").Matches.Groups[1].Value.Trim()
     if ($rustcHost) {
         Write-Host "檢測到 Rust 編譯目標平台: $rustcHost" -ForegroundColor Cyan
-        $binDir = "src-tauri\bin"
-        $binaries = @("yt-dlp", "ffmpeg", "rclone")
         foreach ($bin in $binaries) {
             $targetFile = Join-Path $binDir "$bin-$rustcHost.exe"
             if (-not (Test-Path $targetFile)) {
+                # 版控僅保留單一 msvc 副本，此處自既有副本衍生出當前 host triple 所需檔名
                 $sourceFile = Get-ChildItem -Path $binDir -Filter "$bin-*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($sourceFile) {
                     Write-Host "為 $bin 複製適配二進制檔: $($sourceFile.Name) -> $(Split-Path $targetFile -Leaf)" -ForegroundColor Green
                     Copy-Item -Path $sourceFile.FullName -Destination $targetFile -Force
+                } else {
+                    # 完全找不到任何副本，記錄下來於 try 區塊外統一中止，避免產生缺少 sidecar 的安裝包
+                    $missingBinaries += $bin
                 }
             }
         }
@@ -208,15 +214,35 @@ try {
     Write-Warning "自動檢測 Rust target 失敗，將使用現有二進制檔。"
 }
 
+# 缺少任一 sidecar 即中止建置，並明確指出缺少的工具與應放置路徑
+if ($missingBinaries.Count -gt 0) {
+    Write-Host ""
+    Write-Host "===== 建置中止：缺少必要的 sidecar 執行檔 =====" -ForegroundColor Red
+    foreach ($bin in $missingBinaries) {
+        Write-Host ("  缺少工具「{0}」，請將執行檔放置於: {1}\{0}-{2}.exe" -f $bin, $binDir, $rustcHost) -ForegroundColor Red
+    }
+    Write-Host "（版控僅保留 x86_64-pc-windows-msvc 單一副本，建置時會自動複製為當前平台檔名）" -ForegroundColor Yellow
+    Write-Error "sidecar 執行檔不齊全，無法產生完整安裝包。"
+    exit 1
+}
+
 Write-Host "執行 UPX 壓縮執行檔..." -ForegroundColor Cyan
 $upxCmd = Get-Command upx.exe -ErrorAction SilentlyContinue
 if ($upxCmd -or (Test-Path "upx.exe")) {
     $upxPath = if ($upxCmd) { "upx" } else { ".\upx.exe" }
     # 只針對 ffmpeg 和 rclone 壓縮，yt-dlp 已達極限且可能觸發誤判
-    $filesToPack = Get-ChildItem -Path "src-tauri\bin" -Include "ffmpeg-*.exe", "rclone-*.exe" -Recurse
-    foreach ($file in $filesToPack) {
-        Write-Host ">>> 正在壓縮 $($file.Name) ..." -ForegroundColor Yellow
-        & $upxPath -9 $file.FullName | Out-Null
+    # 僅處理當前 host triple 所需的單一副本，避免同一工具的多個平台檔名被重複壓縮
+    $packTargets = @("ffmpeg", "rclone")
+    foreach ($bin in $packTargets) {
+        $file = if ($rustcHost) {
+            Get-Item -Path (Join-Path $binDir "$bin-$rustcHost.exe") -ErrorAction SilentlyContinue
+        } else {
+            Get-ChildItem -Path $binDir -Filter "$bin-*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if ($file) {
+            Write-Host ">>> 正在壓縮 $($file.Name) ..." -ForegroundColor Yellow
+            & $upxPath -9 $file.FullName | Out-Null
+        }
     }
 } else {
     Write-Warning "未找到 UPX (upx.exe)，將略過執行檔壓縮步驟。"

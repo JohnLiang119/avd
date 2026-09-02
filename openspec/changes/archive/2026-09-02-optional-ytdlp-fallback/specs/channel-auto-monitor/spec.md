@@ -1,9 +1,9 @@
-## MODIFIED Requirements
+﻿## MODIFIED Requirements
 
 ### Requirement: Periodic Check & New Video Matching
 系統 MUST 支援每 60 分鐘自動或手動執行頻道輪詢，預設透過 YouTube 官方 RSS 比對影片發布時間 (`publishedTime > lastPublishedTime`) 判定新影片。
 
-#### Scenario: Auto and manual checking via official RSS
+#### Scenario: Auto and manual checking
 - **WHEN** 系統啟動且距離上次檢查超過 60 分鐘，或使用者點擊手動檢查
 - **THEN** 系統預設呼叫官方 RSS 獲取最新影片，比對發布時間篩選出新影片，並精確更新頻道發布時間錨點
 

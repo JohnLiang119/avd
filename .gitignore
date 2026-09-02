@@ -29,10 +29,18 @@ dist-ssr
 *.aar
 temp_aar/
 
+# 第三方工具壓縮包與解壓暫存目錄（不納入版控，見 repo-artifact-hygiene 規格）
+rclone.zip
+rclone_temp/
+upx.exe
+
 # Tauri 產物與測試檔
 src-tauri/target/
 src-tauri/bin/*.mp4
 src-tauri/bin/*.json
+
+# 備份殘留檔（sidecar 更新時產生的舊版副本）
+*.old
 
 # Capacitor / Android 建置暫存檔
 android/.gradle/

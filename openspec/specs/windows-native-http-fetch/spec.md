@@ -1,7 +1,8 @@
-# windows-native-http-fetch Specification
+﻿# windows-native-http-fetch Specification
 
 ## Purpose
-TBD - created by archiving change fix-windows-channel-rss-fetch. Update Purpose after archive.
+為 Windows 桌面端（Tauri）提供繞過瀏覽器 CORS 限制的原生 HTTP GET 通道，使前端能直接取得 YouTube 頻道 RSS 等外部純文字與 XML 資源，確保頻道自動追蹤的定時輪詢與模擬測試在桌面版能與 Android 端行為一致，不因跨域阻擋而失敗。
+
 ## Requirements
 ### Requirement: Windows Native HTTP GET Fetching
 Windows 桌面端 (Tauri) SHALL 提供原生 HTTP GET 請求通道，用於獲取任意外部網址的純文字與 XML 內容，而不受瀏覽器 CORS 限制。
