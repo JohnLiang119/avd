@@ -35,7 +35,9 @@
 - [x] 2.4 執行完整 Tauri 建置，確認 MSI 產出成功且內含三個 sidecar
   - `npm run tauri:build` 以 exit 0 完成（release profile 52.59s），產出 `AVD_1.0.61_x64_zh-TW.msi`，63.26 MB — 與移除 gnu 副本前的同版本 MSI 尺寸一致，確認刪除重複副本對產出無影響。
   - 以 WindowsInstaller COM 查詢 MSI 的 File 資料表，內含 4 個檔案，其中 `yt-dlp.exe`、`ffmpeg.exe`、`rclone.exe` 三個 sidecar 皆齊備。
-- [ ] 2.5 安裝產出的 MSI 並實測一次下載，確認 yt-dlp / ffmpeg / rclone 皆正常運作
+- [x] 2.5 安裝產出的 MSI 並實測一次下載，確認 yt-dlp / ffmpeg / rclone 皆正常運作
+  - 由使用者實機驗證通過。本項在 v1.0.62、v1.0.63、v1.0.64 三次發布中反覆執行，皆確認移除 gnu 重複副本後，三個 sidecar 於安裝後的實際下載流程中運作正常。
+  - 另有非安裝路徑的佐證：直接執行 `src-tauri/bin/` 內三個 msvc 副本，版本回報正常（yt-dlp 2026.08.18 / ffmpeg 7.0.1 / rclone v1.67.0）；MSI 內含檔案清單經 WindowsInstaller COM 查詢確認三者齊備。
 
 ## 3. 階段 B：OpenSpec 變更歸檔與規格回填
 
