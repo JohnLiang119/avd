@@ -52,6 +52,15 @@
 - **Rust / Cargo**: 適用於 Windows Tauri 端
 - **Android SDK & JDK 17+**: 適用於 Android 原生端
 
+### 內建 Sidecar 執行檔
+本專案將 `yt-dlp`、`ffmpeg`、`rclone` 隨倉庫一併發布，clone 後**無須額外下載即可離線建置**。
+
+版控中每個工具**僅保留單一 `x86_64-pc-windows-msvc` 副本**（放在 `src-tauri/bin/`）；建置時 `all.ps1` 會自動偵測當前 Rust host triple，必要時從既有副本複製出所需檔名。因此請勿為了其他平台而在此目錄放入重複副本，以免倉庫體積再次膨脹。
+
+若某個工具在 `src-tauri/bin/` 完全找不到任何副本，`all.ps1` 會列出缺少的工具與應放置路徑並中止建置，不會產生缺件的安裝包。
+
+> `upx.exe` 已不納入版控。缺少它時建置僅會略過壓縮步驟並顯示警告 —— 由於版控中的 sidecar 本身已是壓縮後的產物，安裝包大小不受影響。
+
 ### 常用指令
 ```powershell
 # 1. 安裝前端依賴
