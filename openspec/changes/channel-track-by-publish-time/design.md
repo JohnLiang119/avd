@@ -42,8 +42,14 @@ const newVideos = videos.filter(v => {
   - 直接提取 RSS 最新影片的 `publishedTime` 與 `videoId` 寫入 `channel.lastPublishedTime` 與 `channel.lastKnownVideoId`。
   - 不觸發下載，建立初始時點防線。
 
-### 4. 備援模式（Fallback）的時間戳記相容性
-- 當 RSS 失敗切換至 `yt-dlp` flat-playlist 時，若 yt-dlp 回傳包含 `timestamp` 或 `upload_date`，優先轉換為毫秒時間戳記；若無法取得則以 `Date.now()` 作為降級時間，並依賴 `lastKnownVideoId` 防重複。
+### 4. 備援模式（Fallback）的時間戳記相容性（已修訂）
+- **問題根因（v1.0.61 探索發現）**：yt-dlp 在 `--flat-playlist` 模式下**不回傳** `timestamp` 或 `upload_date`（均為 `null`），`epoch` 欄位為 yt-dlp 執行當下的系統時間而非影片發布時間。前端 fallback 至 `Date.now()` 會污染 `lastPublishedTime` 基準，導致：(1) 備援期間每次檢查都將所有影片判定為「新片」；(2) RSS 恢復後因基準被推進至未來時間點而永久漏片。
+- **修正方案：去掉 `--flat-playlist`，改用完整抓取**：
+  - 去掉 `--flat-playlist` 後，yt-dlp 會逐一解析影片頁面，回傳精確的 `timestamp`（Unix 秒數）與 `upload_date`（`YYYYMMDD`）。
+  - 搭配 `--skip-download --playlist-end 2` 限制只解析前 2 部影片，實測耗時約 5~10 秒，作為備援可接受。
+  - 備援取得精確時間後，可與 RSS 模式走完全相同的 `publishedTime > lastPublishedTime` 比對邏輯。
+- **跨分頁問題**：yt-dlp 抓取 `/channel/{id}` 時會遍歷 Videos、Live、Shorts 三個分頁，`--playlist-end N` 為每個分頁各取 N 部。前端需過濾掉 Live 分頁（透過 `playlist` 欄位包含 `"Live"` 或 `was_live === true`），保留 Videos + Shorts 以對齊 RSS 的涵蓋範圍。
+- **雙平台修正**：Windows（Rust `lib.rs`）與 Android（Java `YoutubeDlPlugin.java`）均需同步修正。
 
 ### 5. 頻道卡片 UI 發布時間展示
 - 於追蹤頻道卡片（如頻道名稱右側或第二行最新影片資訊前）直觀展示格式化之最新發布時間（例如「YYYY/MM/DD HH:mm:ss，如 2026/11/01 16:13:15」），提供清晰完整的時間資訊並兼顧排版適配。
@@ -71,6 +77,31 @@ const newVideos = videos.filter(v => {
 - **前端對接**：前端 `DownloadService.download` 與 `downloadProgress` 監聽器收到後，自動填入 `task.publishTimeStr` 與 `task.channelPrefix`，實現跨平台手動單一影片發布時間完整支援。
 
 
+### 8. 備援機制完整修正設計（雙平台）
+
+#### 8.1 Windows 端（Rust `lib.rs`）
+- **現狀**：`fetch_channel_videos_fallback` 使用 `["--dump-json", "--flat-playlist", "--playlist-end", "2", &url]`，URL 為 `/channel/{id}`。
+- **修正**：移除 `"--flat-playlist"`，新增 `"--skip-download"`，參數改為 `["--dump-json", "--skip-download", "--playlist-end", "2", &url]`。
+- URL 保持 `/channel/{id}`（不加 `/videos`），以同時涵蓋 Videos + Shorts；前端負責過濾 Live。
+
+#### 8.2 Android 端（Java `YoutubeDlPlugin.java`）
+- **現狀**：備援透過 `parsePlaylist()` 方法呼叫，內部使用 `--flat-playlist -J`，是通用播放清單解析，不可直接修改其參數。
+- **修正**：新增專用備援方法 `fetchChannelVideosFallback(PluginCall call)`，使用 `--dump-json --skip-download --playlist-end 2`（不加 `--flat-playlist`），回傳 NDJSON 格式（每行一個 JSON 物件），與 Rust 端行為對齊。
+- 前端 `DownloadService.ts` 的 Android 備援分支改為呼叫新方法。
+
+#### 8.3 前端解析層（`DownloadService.ts`）
+- **Windows 分支（已有基礎）**：`entry.timestamp` 與 `entry.upload_date` 解析邏輯已存在（L935-942），去掉 `--flat-playlist` 後即可正常取得值。
+- **Android 分支**：改為呼叫新的 `fetchChannelVideosFallback` 方法，解析回傳的 NDJSON，提取 `timestamp`、`upload_date`、`title`、`id` 等欄位。
+- **Live 過濾**：兩端統一在前端過濾，條件為 `entry.was_live === true` 或 `entry.playlist` 包含 `"Live"`。
+- **時間解析優先順序**：`timestamp`（秒 × 1000）→ `upload_date`（YYYYMMDD → Date）→ 不再 fallback 到 `Date.now()`，若兩者皆無則該筆影片不參與時間基準更新。
+
+#### 8.4 探索驗證數據
+| 模式 | timestamp | upload_date | 速度（2部）| 涵蓋分頁 |
+|------|-----------|-------------|-----------|----------|
+| `--flat-playlist` | ❌ null | ❌ 不存在 | ~2s | Videos+Live+Shorts |
+| 完整抓取 (`--skip-download`) | ✅ 精確到秒 | ✅ YYYYMMDD | ~5-10s | Videos+Live+Shorts |
+| RSS | ✅ ISO 8601 | N/A | ~1s | Videos+Shorts（不含 Live） |
+
 ## Risks / Trade-offs
 
 - **[Risk] 使用者本地現存頻道無 `lastPublishedTime`**
@@ -79,4 +110,8 @@ const newVideos = videos.filter(v => {
   → **Mitigation**: 由於 YouTube RSS 條目中的 `<published>` 是固定不變的原發布時間（`<updated>` 才會改變），比對 `<published>` 時間可保證不受影片資訊修改影響。
 - **[Risk] 舊版已儲存任務 (`tasks.value` 快取) 缺少結構化欄位**
   → **Mitigation**: Helper 函式支援向下相容，若無獨立欄位則自動從既有 `task.title` 正則解析並回填至結構化欄位。
+- **[Risk] 備援完整抓取速度較慢（5-10 秒 vs 2 秒）**
+  → **Mitigation**: 備援本身是 RSS 異常時的降級路徑，使用頻率低；且 `--playlist-end 2` 嚴格限制解析數量，速度可接受。
+- **[Risk] yt-dlp 抓取頻道頁面跨分頁，`--playlist-end N` 為每個分頁各取 N 部**
+  → **Mitigation**: 前端統一過濾 Live 分頁，保留 Videos + Shorts 對齊 RSS 涵蓋範圍。
 

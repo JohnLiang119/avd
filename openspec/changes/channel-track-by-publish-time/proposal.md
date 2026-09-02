@@ -9,7 +9,7 @@
 - **以影片實際發布時間為基準**：頻道模型新增/遷移至 `lastPublishedTime`（最新已知影片的發布時間戳記），以取代易受輪詢執行時點影響的 `lastCheckTime`。
 - **雙重錨點防護 (Timestamp + Video ID)**：比對條件升級為 `publishedTime > lastPublishedTime` 
 - **舊資料平滑遷移**：支援自動將現有 `localStorage` 中的 `lastCheckTime` 平滑過渡至 `lastPublishedTime`。
-- **備援機制時間解析相容**：當官方 RSS 失敗切換至 `yt-dlp` flat-playlist 或 Android 首頁解析時，確保發布時間轉換正確，避免污染時間游標。
+- **備援機制精確時間修正**：去掉 `--flat-playlist` 改用完整抓取（`--skip-download`），使備援模式回傳精確 `timestamp`，避免 `Date.now()` 污染時間基準；同時過濾 Live 分頁，保留 Videos + Shorts 對齊 RSS 涵蓋範圍。Windows（Rust）與 Android（Java）雙平台同步修正。
 - **頻道卡片視覺化發布時間展示**：在已追蹤頻道管理卡片中（頻道名稱後方或最新影片欄位），直觀顯示該頻道最新影片的實際發布時間（格式如 `2026/11/01 16:13:15`），讓使用者掌握頻道發片動態與追蹤基準。
 - **主畫面任務標題附帶發布時間**：所有影片下載任務（包含由使用者手動單一輸入加入、頻道自動追蹤、測試模擬或播放清單解析加入），於主畫面任務標題（抬頭）後方一律自動附帶影片實際發布時間（例如「`[頻道名] 影片標題 (2026/11/01 16:13:15)`」或「`影片標題 (2026/11/01 16:13:15)`」格式），讓主佇列所有影片的發布時間一目了然。
 ## Capabilities
@@ -25,5 +25,8 @@
   - 重構 `checkAllMonitoredChannels`、`addManualChannel`、`exportChannelsJson`、`downloadProgress`、`processQueue` 與備份還原邏輯中的時間欄位處理。
 - **Android 原生端 (`android/.../YoutubeDlPlugin.java`)**：
   - 在 `download()` 流程中新增 YouTube（`upload_date`/`timestamp`/`uploader`）與 TikTok（`create_time`）的發布時間及頻道資訊提取與回傳。
+  - 新增專用備援方法 `fetchChannelVideosFallback`，使用完整抓取模式（不加 `--flat-playlist`）回傳精確時間。
+- **Windows 原生端 (`src-tauri/src/lib.rs`)**：
+  - 修正 `fetch_channel_videos_fallback` 的 yt-dlp 參數，去掉 `--flat-playlist` 改用 `--skip-download`。
 - **資料儲存 (`localStorage`)**：相容現有 `avd_monitored_channels` 快取資料與 `avd_tasks` 任務快取。
 

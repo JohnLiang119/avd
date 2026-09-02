@@ -32,4 +32,13 @@
 - [x] 5.4 在前端 `DownloadService.download` 與 `App.vue` 監聽接收端完成資料對接與標題自動補齊
 
 
+## 6. 備援機制完整修正（雙平台精確時間 + Live 過濾）
+
+- [ ] 6.1 Windows Rust 端：修改 `src-tauri/src/lib.rs` 的 `fetch_channel_videos_fallback`，移除 `--flat-playlist`，新增 `--skip-download`，使 yt-dlp 回傳精確 `timestamp` 與 `upload_date`
+- [ ] 6.2 Android Java 端：在 `YoutubeDlPlugin.java` 新增專用備援方法 `fetchChannelVideosFallback`，使用 `--dump-json --skip-download --playlist-end 2`（不加 `--flat-playlist`），回傳 NDJSON 格式
+- [ ] 6.3 前端 `DownloadService.ts` Android 備援分支：改為呼叫新的 `fetchChannelVideosFallback` 方法，解析 NDJSON 並提取 `timestamp`、`upload_date`、`title`、`id`
+- [ ] 6.4 前端 `DownloadService.ts` 雙平台備援結果：新增 Live 分頁過濾邏輯（`was_live === true` 或 `playlist` 包含 `"Live"`），保留 Videos + Shorts 對齊 RSS 涵蓋範圍
+- [ ] 6.5 前端 `DownloadService.ts` 備援時間解析：修正時間 fallback 策略，優先 `timestamp`（秒×1000）→ `upload_date`（YYYYMMDD→Date）→ 若兩者皆無則不更新 `lastPublishedTime` 基準（避免 `Date.now()` 污染）
+- [ ] 6.6 驗證備援模式下完整生命週期：RSS 異常 → 備援抓取 → 精確時間比對 → RSS 恢復後基準正常銜接
+
 
