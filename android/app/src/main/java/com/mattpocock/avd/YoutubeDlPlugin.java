@@ -639,20 +639,40 @@ public class YoutubeDlPlugin extends Plugin {
                     }
                 } else {
                     try {
-                        com.yausername.youtubedl_android.mapper.VideoInfo info = YoutubeDL.getInstance().getInfo(url);
-                        if (info != null) {
-                            if (info.getTitle() != null && !info.getTitle().isEmpty()) {
-                                videoTitle = info.getTitle();
-                            }
-                            if (info.getUploader() != null && !info.getUploader().isEmpty()) {
-                                channelPrefix = info.getUploader();
-                            }
-                            String uploadDate = info.getUploadDate();
-                            if (uploadDate != null && uploadDate.length() == 8) {
-                                String y = uploadDate.substring(0, 4);
-                                String m = uploadDate.substring(4, 6);
-                                String d = uploadDate.substring(6, 8);
-                                pubTimeStr = y + "/" + m + "/" + d + " 00:00:00";
+                        // 刻意不使用 YoutubeDL.getInfo() 的 VideoInfo 型別封裝：
+                        // 該 mapper（youtubedl-android 0.18.1）的 24 個 getter 中沒有任何 timestamp
+                        // 相關方法，只能取到 upload_date，導致發布時間永遠是當日午夜。
+                        // getInfo() 內部本就執行 --dump-json，改為自行解析原始 JSON 後
+                        // 網路往返次數不變，卻能取得精確的 timestamp，並順帶取得 live_status。
+                        YoutubeDLRequest infoRequest = new YoutubeDLRequest(url);
+                        infoRequest.addOption("--dump-json");
+                        infoRequest.addOption("--skip-download");
+                        infoRequest.addOption("--no-warnings");
+
+                        YoutubeDLResponse infoResponse = YoutubeDL.getInstance().execute(infoRequest);
+                        String infoJson = infoResponse.getOut() == null ? "" : infoResponse.getOut().trim();
+
+                        if (!infoJson.isEmpty()) {
+                            org.json.JSONObject info = new org.json.JSONObject(infoJson);
+
+                            String t = info.optString("title", "");
+                            if (!t.isEmpty()) videoTitle = t;
+
+                            String uploader = info.optString("uploader", info.optString("channel", ""));
+                            if (!uploader.isEmpty()) channelPrefix = uploader;
+
+                            // 時間解析順序與備援路徑的 mapFallbackEntry 一致：
+                            // timestamp（秒）優先，缺才退回 upload_date 的當日午夜。
+                            long ts = info.optLong("timestamp", 0L);
+                            if (ts > 0) {
+                                pubTimeStr = new java.text.SimpleDateFormat("yyyy/MM/dd HH:mm:ss", java.util.Locale.getDefault())
+                                        .format(new java.util.Date(ts * 1000L));
+                            } else {
+                                String uploadDate = info.optString("upload_date", "");
+                                if (uploadDate.length() == 8) {
+                                    pubTimeStr = uploadDate.substring(0, 4) + "/" + uploadDate.substring(4, 6)
+                                            + "/" + uploadDate.substring(6, 8) + " 00:00:00";
+                                }
                             }
 
                             JSObject titleObj = new JSObject();
@@ -662,7 +682,8 @@ public class YoutubeDlPlugin extends Plugin {
                             notifyListeners("downloadProgress", titleObj);
                         }
                     } catch (Exception e) {
-                        Log.w(TAG, "Could not fetch VideoInfo metadata", e);
+                        // 解析失敗不中斷下載，欄位留空由後續流程補齊
+                        Log.w(TAG, "Could not fetch video metadata", e);
                     }
                 }
 

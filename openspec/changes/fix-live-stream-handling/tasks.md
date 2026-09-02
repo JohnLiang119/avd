@@ -37,6 +37,22 @@
 - [x] 3.6 確認 `processQueue` 既有的「使用者主動中止」判斷仍優先於確定性錯誤判斷
   - 已檢視實際順序：中止判斷在 `catch` 區塊最前，命中即 `break`，確定性錯誤的判斷在其之後。
 
+## 3.D —— Android 單一影片的精確發布時間
+
+- [x] D.1 反編譯 `youtubedl-android 0.18.1` 的 `VideoInfo`，確認是否可取得 `timestamp`
+  - 24 個 getter 中僅有 `getUploadDate()` / `getUploader()` / `getTitle()` 等，**無任何 timestamp 相關方法**。確認並非寫漏，而是被 mapper 的型別封裝擋住，必須繞過它。
+- [x] D.2 將 `download()` 中的 `YoutubeDL.getInfo()` 改為 `--dump-json --skip-download --no-warnings` 並以 `org.json` 解析
+  - `getInfo()` 內部本就執行 `--dump-json`，改寫後網路往返次數不變。`org.json` 於該檔案已被使用，未引入新相依。
+- [x] D.3 時間解析順序與 `mapFallbackEntry` 一致：`timestamp`（秒×1000）→ `upload_date`（退回午夜）→ 不提供
+  - 三處（Rust 備援、前端 `mapFallbackEntry`、Android 單一影片）現在採同一策略，避免日後各自漂移。
+- [x] D.4 解析失敗時不中斷下載，欄位留空由後續流程補齊
+- [x] D.5 確認原本自 `VideoInfo` 取用的三個欄位（`title` / `uploader` / `uploadDate`）皆有對應
+  - `uploader` 另加 `channel` 作為後備。其餘 21 個 getter 原本就未被使用，不受影響。
+- [x] D.6 Android 編譯通過，並以實際影片驗證解析結果
+  - `./gradlew :app:compileDebugJavaWithJavac` 通過。
+  - 以截圖中那支影片（`nehlOK2C2OE`）實測：`timestamp=1788233791` → **改後顯示 `2026/09/01 11:36:31`**，改前為 `2026/09/01 00:00:00`，與截圖上的錯誤時間一致，確認缺陷與修正皆成立。
+  - 同一份 JSON 一併回傳 `live_status: is_live`，分享／手動路徑的直播判定不需額外網路往返即可取得（本次先取回資料，是否據以攔截屬另一議題，見 5.2）。
+
 ## 4. 驗證
 
 - [x] 4.1 `vue-tsc` 型別檢查與 `npm run build` 通過
@@ -44,7 +60,12 @@
   - 本次不新增測試：三項修正皆位於尚未抽離的 `App.vue` 與平台層（Android plugin）。C 的 `matchPermanentError` 本身是純函式、可測，但它宣告於 `App.vue` 內，需待抽離後才能被測試檔引用。已於任務 5.1 記入後續。
 - [ ] 4.3 手動驗證 A：於 Android 上對含進行中直播的頻道執行手動檢查，確認直播未被加入佇列
 - [ ] 4.4 手動驗證 B：直播被跳過後，確認該頻道卡片顯示的時間未推進至該直播的發布時間
-- [ ] 4.5 手動驗證 C：對一支直播中的影片手動加入下載，確認立即失敗且訊息為「此影片為直播或尚未開播」，非「已自動重試 3 次」
+- [x] 4.5 手動驗證 C：對一支直播中的影片手動加入下載，確認立即失敗且訊息為「此影片為直播或尚未開播」，非「已自動重試 3 次」
+  - 由使用者於 v1.0.66 實機驗證通過：自 YouTube 分享至 AVD 一支直播中的影片（`nehlOK2C2OE`），任務立即失敗並顯示「此影片為直播或尚未開播，暫時無法下載」，未出現「已自動重試 3 次」。
+  - 該案例走的是分享路徑（`checkSharedUrl` → `addTask`），未經自動追蹤迴圈，因此不涉及 A 的過濾。此為預期行為：自動追蹤靜默排除、手動與分享路徑放行但失敗時說明原因。
+  - **D 即由此案例的任務標題發現** —— 標題顯示 `(2026/09/01 00:00:00)`，但該影片實際有精確 `timestamp`。
+
+- [ ] 4.6 手動驗證 D：於 Android 分享或手動加入一支影片，確認任務標題顯示的發布時間為實際時間而非當日午夜
 
 ## 5. 收尾
 

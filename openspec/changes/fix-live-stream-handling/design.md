@@ -88,6 +88,30 @@ yt-dlp 不提供結構化的錯誤代碼，只能比對訊息文字。以不分�
 
 其餘確定性錯誤則保留原始訊息，僅移除「已自動重試 N 次」的前綴。
 
+### 決策 5：D 不新增規格 delta —— 屬既有規格的未實作，與 A 同類
+
+`channel-track-by-publish-time` 待歸檔的 delta 已涵蓋此行為：
+
+> **Scenario: Task title with publish time on main queue**
+> **WHEN** 系統將任何影片建立、進行下載或完成為下載任務並於主畫面佇列呈現（**包含使用者手動單一加入**、自動追蹤或播放清單解析）
+> **THEN** 系統產生的任務標題…始終穩定包含該影片之發布時間格式化資訊 (YYYY/MM/DD HH:mm:ss)
+
+Android 顯示午夜屬於未達成該要求的**實作缺口**，與 A（`auto-check-filtering` 規格已要求、Android 未實作）是同一類。
+
+刻意不在本變更為此新增規格，原因是該情境目前歸屬於 `channel-track-by-publish-time` 的 MODIFIED 區塊。若本變更也對同一條需求提出 MODIFIED，兩個未歸檔變更會爭奪同一個需求區塊，歸檔順序將決定內容是否遺失 —— 那正是 `optional-ytdlp-fallback` 曾被工具擋下的情況。
+
+### 決策 6：以 `--dump-json` 取代 `VideoInfo`，而非新增一次查詢
+
+`VideoInfo` 是 `youtubedl-android` 的型別化 mapper，反編譯 0.18.1 版確認其 24 個 getter 中沒有任何 timestamp 相關方法。要取得精確時間只能繞過該封裝。
+
+選擇改寫既有的 `getInfo()` 呼叫為 `--dump-json --skip-download` 並以 `org.json` 解析，而非在其之外「再打一次」：
+
+- `getInfo()` 內部本就是 `--dump-json`，改寫後**網路往返次數不變**。
+- 同一份 JSON 可一併取得 `live_status`，使分享／手動路徑的直播判定變成免費 —— 呼應 design 的 Open Question（是否以單次 `--dump-json` 取代逐片查詢），此處先在單一影片路徑上落實。
+- `org.json` 在該檔案中已被使用（`parsePlaylist`、`fetchChannelVideosFallback`），不引入新相依。
+
+時間解析順序與 `mapFallbackEntry` 一致：`timestamp`（秒×1000）→ `upload_date`（退回午夜）→ 不提供。三處採同一策略可避免日後各自漂移。
+
 ## Risks / Trade-offs
 
 **[Android 端逐片查詢直播狀態會增加檢查耗時]** → 僅對「通過時間比對與去重的新影片」查詢，數量通常為 0 至 2 支，與 Windows 端現行行為相同。不會對每次輪詢造成固定成本。
@@ -97,6 +121,10 @@ yt-dlp 不提供結構化的錯誤代碼，只能比對訊息文字。以不分�
 **[去重濾除者計入「已處理」的邊界情況]** → 若某影片曾被下載、其任務後來因保留上限而被裁切，則它既不在佇列中、也可能低於錨點，行為與現況一致（不會重複下載，因為錨點已在其之後）。此變更不改變該情況。
 
 **[錯誤訊息比對隨 yt-dlp 版本失效]** → 見決策 3，失效方向是安全的（退回重試）。實作時將關鍵片語集中於單一常數，便於日後調整。
+
+**[改寫 `getInfo()` 為手動 JSON 解析，可能遺漏原 mapper 已處理的欄位]** → 原程式碼自 `VideoInfo` 只取用三個欄位（`title`、`uploader`、`uploadDate`），改寫後逐一對應即可，不涉及其餘 21 個 getter。實作後以實際影片比對標題與頻道名稱是否與改寫前一致。
+
+**[`--dump-json` 對某些站台可能回傳多行或非預期結構]** → 單一影片 URL 的 `--dump-json` 回傳單一 JSON 物件。解析失敗時退回原有行為（欄位留空、由下載流程後續補齊），不中斷下載。
 
 **[與 `extract-channel-matching` 的改動區域重疊]** → 本次對 `checkAllMonitoredChannels` 的修改刻意保持最小且集中，該變更抽離時會將此邏輯一併帶入純函式並補上測試。實作後應於 `extract-channel-matching` 的 tasks 補記需涵蓋錨點邊界規則。
 
