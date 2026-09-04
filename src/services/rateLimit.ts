@@ -23,6 +23,29 @@ const RATE_LIMIT_PHRASES = [
   'precondition failed',
 ] as const;
 
+/**
+ * 限流的**間接徵狀**：來源不回 HTTP 狀態碼，而是回一個內容殘缺的頁面，
+ * 使 extractor 抽不到必要欄位。
+ *
+ * 實證（2026-09-04 同一日內）：
+ *   Windows  @bingleng8888888  抽不出 secondary user ID
+ *   Windows  @tiktok（官方）    同一錯誤 —— 官方帳號不可能是私人
+ *   Windows  @bingleng8888888  稍後重試成功，3247 筆
+ *   Android  @lq5325155        明確的 HTTP 429
+ *   Android  @ttggwang         抽不出 secondary user ID
+ *   Windows  @ttggwang         同一時段從另一 IP 打，完全正常
+ *
+ * 官方帳號也中、同一帳號稍後就好、換 IP 就正常 —— 三者合起來只有
+ * 「被擋」解釋得通。yt-dlp 併發的「account is either private or has
+ * embedding disabled」警告對公開帳號一樣會出現，是同一個被擋頁面的產物。
+ *
+ * **但成因有歧義**：真正的私人帳號也可能產生同一則訊息。故此類徵狀
+ * 退避重試的處置與明確限流相同，對使用者的措辭則不可一口咬定原因。
+ */
+const THROTTLE_SYMPTOM_PHRASES = [
+  'unable to extract secondary user id',
+] as const;
+
 /** 退避的初始間隔（毫秒）。 */
 export const RATE_LIMIT_BASE_DELAY_MS = 2000;
 
@@ -34,10 +57,24 @@ export const RATE_LIMIT_BASE_DELAY_MS = 2000;
  */
 export const RATE_LIMIT_MAX_RETRIES = 3;
 
-/** 判定一則錯誤訊息是否為來源限流。 */
+/** 判定一則錯誤訊息是否為**明確**的來源限流（帶 HTTP 狀態碼）。 */
 export function isRateLimited(message: string): boolean {
   const lower = (message || '').toLowerCase();
   return RATE_LIMIT_PHRASES.some(p => lower.includes(p));
+}
+
+/** 判定一則錯誤訊息是否為限流的間接徵狀（成因有歧義）。 */
+export function isThrottleSymptom(message: string): boolean {
+  const lower = (message || '').toLowerCase();
+  return THROTTLE_SYMPTOM_PHRASES.some(p => lower.includes(p));
+}
+
+/**
+ * 是否應退避重試。明確限流與間接徵狀的處置相同 —— 兩者都會自行解除，
+ * 差別只在對使用者怎麼說。
+ */
+export function shouldBackoff(message: string): boolean {
+  return isRateLimited(message) || isThrottleSymptom(message);
 }
 
 /**
@@ -64,11 +101,15 @@ export function totalBackoffMs(
 }
 
 /**
- * 給使用者看的限流訊息。
+ * 給使用者看的訊息。原始訊息不在此改寫 —— 它仍會原樣寫入錯誤紀錄，
+ * 使「使用者看到友善訊息」與「開發者拿得到原文」兩者並存。
  *
- * 原始訊息不在此改寫 —— 它仍會原樣寫入錯誤紀錄，使「使用者看到友善訊息」
- * 與「開發者拿得到原文」兩者並存。
+ * 明確限流與間接徵狀給不同措辭：前者知道原因，後者不知道，
+ * 不該假裝知道。
  */
-export function describeRateLimit(): string {
+export function describeRateLimit(message?: string): string {
+  if (message !== undefined && !isRateLimited(message) && isThrottleSymptom(message)) {
+    return '暫時無法取得此來源的資料（可能是請求過於頻繁，或該內容不公開），請稍後再試';
+  }
   return '來源暫時限流（請求過於頻繁），請稍後再試';
 }

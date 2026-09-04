@@ -154,7 +154,11 @@ public class YoutubeDlPlugin extends Plugin {
 
     /** 限流的判斷片語，與前端 rateLimit.ts 的 RATE_LIMIT_PHRASES 一致。 */
     private static final String[] RATE_LIMIT_PHRASES = {
-        "429", "too many requests", "412", "precondition failed"
+        "429", "too many requests", "412", "precondition failed",
+        // 限流的間接徵狀：來源不回狀態碼，改回一個內容殘缺的頁面，
+        // 使 extractor 抽不到必要欄位。實證見前端 rateLimit.ts 的註解
+        // —— 官方帳號也中、同一帳號稍後就好、換 IP 就正常。
+        "unable to extract secondary user id"
     };
 
     /** 退避重試的次數上限與初始間隔，與前端一致（2s → 4s → 8s，累計 14 秒）。 */

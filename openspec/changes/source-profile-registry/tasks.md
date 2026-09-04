@@ -102,7 +102,22 @@
       `DownloadService.parsePlaylist`，正是 `fix-playlist-parse-hang` 仍待
       實機驗證的區域；若驗證發現問題需要修改，重構會擋路。待其驗證完成
       並歸檔後再動。
-- [x] 10.3 第 7 組的實作細節：
+- [x] 10.3 **v1.0.72 出貨後即被實機推翻一半**：使用者於 Android 撞到
+      `[tiktok:user] ttggwang: Unable to extract secondary user ID`，
+      而 `isRateLimited` 只比對 429／412 等狀態碼，這則一個都不含 ——
+      退避沒啟動，使用者仍看到原始技術文字。
+      **限流至少有兩張臉，v1.0.72 只擋到一張。**
+
+      同日五個資料點證明此訊息是限流的間接徵狀而非 extractor 缺陷：
+      官方 @tiktok 帳號也中過（不可能是私人）、同一帳號稍後重試成功
+      3247 筆、`@ttggwang` 在 Android 失敗的同時段自 Windows（另一 IP）
+      打完全正常。yt-dlp 併發的「account is either private or has
+      embedding disabled」警告對公開帳號一樣出現，是同一個被擋頁面的產物。
+
+      已補 `isThrottleSymptom` 與 `shouldBackoff`，Android 端同步。
+      **成因保留歧義**：真正的私人帳號也可能產生同一訊息，故退避處置相同
+      但措辭改為「可能是請求過於頻繁，或該內容不公開」，不斷言單一原因。
+- [x] 10.4 第 7 組的實作細節：
       - 維持 `--extractor-retries 0` 不變，改由我們這一層辨識限流後重跑
         整個呼叫。兩種失敗各走各的路徑，不需在 yt-dlp 旗標裡表達細緻分類。
       - 退避可被取消打斷（`sleepUnlessCancelled` 每 200ms 檢查一次），

@@ -7,7 +7,7 @@ import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@taur
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 import { formatPublishTime } from './displayFormat';
-import { isRateLimited, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
+import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -153,7 +153,7 @@ async function runParseCommand(args: string[]): Promise<{ code: number; stdout: 
   let last = await runParseCommandOnce(args);
 
   for (let attempt = 1; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
-    if (last.code === 0 || !isRateLimited(last.stderr)) return last;
+    if (last.code === 0 || !shouldBackoff(last.stderr)) return last;
 
     const delay = rateLimitBackoffMs(attempt);
     if (!delay) break;

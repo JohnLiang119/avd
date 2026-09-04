@@ -856,7 +856,7 @@ import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from '
 import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
-import { isRateLimited, describeRateLimit } from './services/rateLimit';
+import { shouldBackoff, describeRateLimit } from './services/rateLimit';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   channelBaseline,
@@ -1781,8 +1781,8 @@ const reportError = (context: string, error: unknown) => {
   }
   // 限流是暫時性的，原始訊息（一長串 HTTP Error 429...）只會讓使用者
   // 以為程式壞了。改寫只發生在呈現層 —— 日誌留的仍是原文。
-  const shown = isRateLimited(message)
-    ? `${context}：${describeRateLimit()}`
+  const shown = shouldBackoff(message)
+    ? `${context}：${describeRateLimit(message)}`
     : `${context}失敗: ${message}`;
   showToast({ message: shown, duration: 5000, closeOnClick: true });
 };

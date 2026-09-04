@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   isRateLimited,
+  isThrottleSymptom,
+  shouldBackoff,
   rateLimitBackoffMs,
   totalBackoffMs,
   describeRateLimit,
@@ -111,5 +113,50 @@ describe('describeRateLimit', () => {
     const msg = describeRateLimit();
     expect(msg).toContain('稍後再試');
     expect(msg).not.toMatch(/429|412|HTTP|Error/);
+  });
+});
+
+describe('限流的間接徵狀', () => {
+  // 使用者於 Android v1.0.72 的錯誤紀錄實錄
+  const SYMPTOM =
+    'ERROR: [tiktok:user] ttggwang: Unable to extract secondary user ID. ' +
+    'If you are able to get the channel_id from a video posted by this user, ' +
+    'try using "tiktokuser:channel_id" as the input URL';
+
+  it('辨識為徵狀，但不是明確的限流', () => {
+    expect(isThrottleSymptom(SYMPTOM)).toBe(true);
+    expect(isRateLimited(SYMPTOM)).toBe(false);
+  });
+
+  it('與明確限流同樣退避重試', () => {
+    expect(shouldBackoff(SYMPTOM)).toBe(true);
+    expect(shouldBackoff('HTTP Error 429: Too Many Requests')).toBe(true);
+  });
+
+  it('不得被歸入確定性錯誤 —— 同一帳號稍後即可成功', () => {
+    expect(matchPermanentError(SYMPTOM).permanent).toBe(false);
+  });
+
+  it('訊息誠實反映成因的歧義，不斷言為單一原因', () => {
+    const msg = describeRateLimit(SYMPTOM);
+    expect(msg).toContain('請求過於頻繁');
+    expect(msg).toContain('不公開');
+    expect(msg).toContain('稍後再試');
+  });
+
+  it('明確限流仍給確定的措辭，不混入歧義', () => {
+    const msg = describeRateLimit('HTTP Error 429: Too Many Requests');
+    expect(msg).toContain('請求過於頻繁');
+    expect(msg).not.toContain('不公開');
+  });
+
+  it('未提供訊息時退回明確限流的措辭', () => {
+    expect(describeRateLimit()).toContain('請求過於頻繁');
+  });
+
+  it('一般失敗既非限流也非徵狀', () => {
+    for (const msg of ['ERROR: Video unavailable', 'ERROR: HTTP Error 404: Not Found']) {
+      expect(shouldBackoff(msg), msg).toBe(false);
+    }
   });
 });
