@@ -567,6 +567,18 @@
         </van-cell-group>
 
         <p style="font-size: 13px; color: #4b5563; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+          診斷
+        </p>
+        <van-cell-group inset style="margin: 0 0 16px 0; border: 1px solid #ebedf0;">
+          <van-cell
+            title="錯誤紀錄"
+            :value="errorLog.length ? `${errorLog.length} 筆` : '無'"
+            is-link
+            @click="showErrorLogModal = true"
+          />
+        </van-cell-group>
+
+        <p style="font-size: 13px; color: #4b5563; margin-bottom: 8px; font-weight: bold;">
           版本與更新
         </p>
         <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
@@ -578,6 +590,50 @@
             </template>
           </van-cell>
         </van-cell-group>
+      </div>
+    </van-dialog>
+
+    <van-dialog
+      v-model:show="showErrorLogModal"
+      title="🧾 錯誤紀錄"
+      show-cancel-button
+      confirm-button-text="複製全部"
+      cancel-button-text="關閉"
+      :before-close="onErrorLogClose"
+      style="max-width: 560px; width: 94%;"
+    >
+      <div style="padding: 12px 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-size: 12px; color: #6b7280;">
+            共 {{ errorLog.length }} 筆，最新在最上面
+          </span>
+          <van-button size="mini" type="danger" plain :disabled="!errorLog.length" @click="clearErrorLog">
+            清空
+          </van-button>
+        </div>
+
+        <div v-if="!errorLog.length" style="padding: 24px 0; text-align: center; color: #9ca3af; font-size: 13px;">
+          目前沒有錯誤紀錄
+        </div>
+
+        <div v-else style="max-height: 340px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px;">
+          <div
+            v-for="(item, idx) in displayedErrorLog"
+            :key="item.time + '_' + idx"
+            style="padding: 8px 10px; border-bottom: 1px solid #f1f3f5;"
+          >
+            <div style="font-size: 11px; color: #6b7280; margin-bottom: 3px;">
+              {{ formatPublishTime(item.time) }} · {{ item.context }}
+            </div>
+            <div style="font-size: 12px; color: #1f2937; word-break: break-all; line-height: 1.5; white-space: pre-wrap;">
+              {{ item.message }}
+            </div>
+          </div>
+        </div>
+
+        <p style="font-size: 11px; color: #9ca3af; margin: 10px 0 0 0; line-height: 1.5;">
+          紀錄僅存於本機、不會自動上傳。複製前請確認內容不含你不願外流的資訊（例如帶權杖的網址）。
+        </p>
       </div>
     </van-dialog>
 
@@ -799,6 +855,7 @@ import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
 import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
+import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   channelBaseline,
@@ -894,7 +951,7 @@ const handleManualCheckUpdate = async () => {
     }
   } catch (e: any) {
     closeToast();
-    showToast('檢查更新失敗，請確認網路連線');
+    reportError('檢查更新', e);
   }
 };
 
@@ -1057,7 +1114,7 @@ const pushListToTv = async () => {
       showToast('推播清單成功！請在 TV 上查看。');
       showCastListModal.value = false;
     } else {
-      showToast('推播清單失敗: ' + (data.error || '未知錯誤'));
+      reportError('推播清單至 TV', data.error || '未知錯誤');
     }
   } catch (e: any) {
     showToast(`無法連線至 ${targetIp}:8080，請確認兩端已連上同一 Wi-Fi`);
@@ -1081,7 +1138,7 @@ const fetchRemoteTasks = async () => {
         showToast('目前沒有任何推播清單');
       }
     } else {
-      showToast('取得清單失敗: ' + resp.status);
+      reportError('取得 TV 清單', `HTTP ${resp.status}`);
     }
   } catch (e) {
     showToast('無法取得清單，請確認服務運行中');
@@ -1282,7 +1339,7 @@ const addManualChannel = async () => {
     manualChannelInput.value = '';
     showToast(`成功加入頻道追蹤！`);
   } catch (e: any) {
-    showToast(`加入失敗: ${e.message || String(e)}`);
+    reportError('加入頻道', e);
   } finally {
     isAddingManualChannel.value = false;
   }
@@ -1339,7 +1396,7 @@ const exportChannelsJson = async () => {
       });
       showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
     } catch (e: any) {
-      showToast(`匯出失敗: ${e.message || String(e)}`);
+      reportError('匯出頻道清單', e);
     }
   } else {
     // Windows (Tauri) 環境：使用原生存檔對話框
@@ -1356,7 +1413,7 @@ const exportChannelsJson = async () => {
         showToast(`已成功匯出 ${monitoredChannels.value.length} 個頻道備份！`);
       }
     } catch (e: any) {
-      showToast(`匯出失敗: ${e.message || String(e)}`);
+      reportError('匯出頻道清單', e);
     }
   }
 };
@@ -1441,7 +1498,7 @@ const handleChannelFileChange = (e: Event) => {
       }
       confirmRestoreChannels(incoming, '本地檔案');
     } catch (err: any) {
-      showToast(`讀取失敗: ${err.message || String(err)}`);
+      reportError('讀取頻道備份', err);
     }
   };
   reader.readAsText(file);
@@ -1532,6 +1589,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     } catch (err) {
       failedCount++;
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
+      // 只記入日誌、不逐頻道彈提示 —— 迴圈結束後由總結提示統一告知。
+      try {
+        errorLog.value = appendErrorEntry(errorLog.value, {
+          time: Date.now(),
+          context: `檢查頻道「${channel.title}」`,
+          message: (err as any)?.message || String(err)
+        });
+      } catch { /* 記錄失敗不得影響檢查流程 */ }
     }
   }
 
@@ -1543,9 +1608,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   if (failedCount > 0 && failedCount >= enabledChannels.length) {
     // 全部失敗
     if (isManual) {
-      showToast(isFallbackEnabled 
-        ? '❌ 無法連線至 YouTube 頻道 (官方 RSS 與備援均失敗)' 
-        : '❌ 官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)');
+      // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
+      showToast({
+        message: isFallbackEnabled
+          ? '❌ 無法連線至 YouTube 頻道 (官方 RSS 與備援均失敗)'
+          : '❌ 官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)',
+        duration: 5000,
+        closeOnClick: true
+      });
     }
   } else if (newVideoCount > 0 && failedCount > 0) {
     // 有新影片但部分失敗
@@ -1612,7 +1682,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     processQueue();
   } catch (e: any) {
     closeToast();
-    showToast(`測試失敗: ${e.message || String(e)}`);
+    reportError('測試抓取', e);
   }
 };
 
@@ -1680,12 +1750,60 @@ const simulateGlobalNewVideo = async () => {
     }
   } catch (e: any) {
     closeToast();
-    showToast(`模擬失敗: ${e.message || String(e)}`);
+    reportError('模擬新片', e);
   }
 };
 
 const url = ref('');
 const mp3Mode = storage.defineSetting('avd_mp3_mode', false);
+
+/** 錯誤日誌：讓失敗訊息在提示消失後仍可回看與複製。 */
+const errorLog = storage.defineSetting<ErrorEntry[]>('avd_error_log', []);
+const showErrorLogModal = ref(false);
+const displayedErrorLog = computed(() => sortedForDisplay(errorLog.value));
+
+/**
+ * 錯誤的單一回報入口：同時寫入日誌並顯示提示。
+ *
+ * 刻意合為一個函式而非分別呼叫 —— 分開必然會漏，單一入口讓
+ * 「提示了就一定有紀錄」成為結構保證而非紀律要求。
+ *
+ * 提示延長至 5 秒並可點擊關閉；讀不完的部分由日誌承接。
+ */
+const reportError = (context: string, error: unknown) => {
+  const message = (error as any)?.message || String(error);
+  try {
+    errorLog.value = appendErrorEntry(errorLog.value, { time: Date.now(), context, message });
+  } catch (e) {
+    // 記錄失敗絕不可讓原本的錯誤處理更糟 —— 這裡本來就已經在錯誤路徑上了。
+    console.error('寫入錯誤日誌失敗', e);
+  }
+  showToast({ message: `${context}失敗: ${message}`, duration: 5000, closeOnClick: true });
+};
+
+const copyErrorLog = async () => {
+  try {
+    await navigator.clipboard.writeText(formatErrorLog(errorLog.value));
+    showToast('已複製錯誤紀錄');
+  } catch (e) {
+    // 靜默失敗會讓使用者以為複製成功、貼出空白，比直接說失敗更糟。
+    showToast({ message: '複製失敗，此裝置可能不允許存取剪貼簿', duration: 5000, closeOnClick: true });
+  }
+};
+
+/** 「複製全部」不應順手關掉對話框 —— 使用者往往要複製後再看一眼。 */
+const onErrorLogClose = async (action: string) => {
+  if (action === 'confirm') {
+    await copyErrorLog();
+    return false;
+  }
+  return true;
+};
+
+const clearErrorLog = () => {
+  errorLog.value = [];
+  showToast('已清空錯誤紀錄');
+};
 
 /** 各來源的解析進度：key 為 parseProgressKey 正規化後的來源鍵。 */
 const parseProgress = storage.defineSetting<Record<string, ParseProgress>>('avd_parse_progress', {});
@@ -1724,7 +1842,7 @@ const handleManualUpdateYtDlp = async () => {
     showToast('yt-dlp 更新成功');
   } catch (err: any) {
     closeToast();
-    showToast(`yt-dlp 更新失敗: ${err.message || String(err)}`);
+    reportError('yt-dlp 更新', err);
   }
 };
 
@@ -2264,7 +2382,7 @@ const addTask = async (urlToAdd: string) => {
         abortParse();
         showToast(`解析逾時（超過 ${Math.round(PARSE_TIMEOUT_MS / 1000)} 秒），已中止`);
       } else if (e?.message !== PARSE_CANCELLED) {
-        showToast(e.message || '播放清單解析失敗');
+        reportError('解析播放清單', e);
       }
       // 使用者主動取消不顯示錯誤訊息
     }
@@ -2578,7 +2696,7 @@ const executeDeleteDownloadedFile = async (task: DownloadTask) => {
     removeTaskDirect(task.id);
     showToast('已刪除檔案');
   } catch (e: any) {
-    showToast('刪除失敗: ' + (e.message || '未知錯誤'));
+    reportError('刪除檔案', e);
   }
 };
 
@@ -2608,7 +2726,7 @@ const playVideo = async (task: DownloadTask) => {
     await DownloadService.playVideo({ uri: task.mediaUri, mimeType });
   } catch (e: any) {
     const errStr = e.message || (typeof e === 'string' ? e : JSON.stringify(e)) || '未知錯誤';
-    showToast('無法播放: ' + errStr);
+    reportError('播放檔案', errStr);
     console.error('Play video error:', e);
   }
 };
@@ -2658,7 +2776,7 @@ const uploadToDrive = async (task: DownloadTask) => {
       showToast('喚起 Google Drive App 上傳中...');
       await DownloadService.uploadToGoogleDrive({ uri: task.mediaUri, mimeType });
     } catch (e: any) {
-      showToast('備份失敗: ' + (e.message || '未知錯誤'));
+      reportError('備份頻道清單', e);
     }
     return;
   }
@@ -2683,7 +2801,7 @@ const uploadToDrive = async (task: DownloadTask) => {
   } catch (e: any) {
     task.uploadStatus = 'error';
     task.uploadErrorMsg = String(e.message || e);
-    showToast('雲端備份失敗: ' + task.uploadErrorMsg);
+    reportError('雲端備份', task.uploadErrorMsg);
   }
 };
 
@@ -2788,7 +2906,7 @@ const startLocalServer = async () => {
     }
   } catch (e: any) {
     const msg = typeof e === 'string' ? e : (e.message || JSON.stringify(e));
-    showToast('啟動快傳服務失敗: ' + msg);
+    reportError('啟動快傳服務', msg);
   }
 };
 
