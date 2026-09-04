@@ -7,6 +7,7 @@ import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@taur
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 import { formatPublishTime } from './displayFormat';
+import { isRateLimited, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -104,7 +105,7 @@ let currentAndroidParseId = '';
  * 刻意不用 execute()：後者一次回傳 stdout 但不交出 child，無法中止，
  * 正是解析階段無法取消的根因（見 design D2）。
  */
-async function runParseCommand(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+async function runParseCommandOnce(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const command = Command.sidecar('bin/yt-dlp', [...PARSE_RESILIENCE_ARGS, ...args], { encoding: 'utf-8' });
 
   let stdout = '';
@@ -126,6 +127,42 @@ async function runParseCommand(args: string[]): Promise<{ code: number; stdout: 
   } finally {
     activeParseChildren.delete(child);
   }
+}
+
+/** 可被取消打斷的等待。取消時立即拋出，不空等完整的退避時間。 */
+async function sleepUnlessCancelled(ms: number): Promise<void> {
+  const step = 200;
+  for (let waited = 0; waited < ms; waited += step) {
+    if (isParseCancelling) throw new Error(PARSE_CANCELLED);
+    await new Promise(r => setTimeout(r, Math.min(step, ms - waited)));
+  }
+  if (isParseCancelling) throw new Error(PARSE_CANCELLED);
+}
+
+/**
+ * 執行解析用的 yt-dlp；遭遇來源限流時退避重試。
+ *
+ * 這是「列表階段快速失敗」的明確例外，且僅適用於限流：其餘 extractor
+ * 失敗仍立即回報。實作上維持 `--extractor-retries 0`（不讓 yt-dlp 自己
+ * 亂重試），改由這一層辨識限流後重跑整個呼叫 —— 兩種失敗各走各的路徑，
+ * 不需要在 yt-dlp 的旗標裡表達細緻的分類。
+ *
+ * 累計退避 14 秒，遠低於 PARSE_TIMEOUT_MS 的 90 秒，退避本身不會撐爆逾時。
+ */
+async function runParseCommand(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  let last = await runParseCommandOnce(args);
+
+  for (let attempt = 1; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+    if (last.code === 0 || !isRateLimited(last.stderr)) return last;
+
+    const delay = rateLimitBackoffMs(attempt);
+    if (!delay) break;
+    console.warn(`[解析] 來源限流，${delay / 1000} 秒後重試（第 ${attempt} 次）`);
+    await sleepUnlessCancelled(delay);
+    last = await runParseCommandOnce(args);
+  }
+
+  return last;
 }
 
 // Mock event emitter for Tauri

@@ -152,6 +152,61 @@ public class YoutubeDlPlugin extends Plugin {
         request.addOption("--retries", "2");
     }
 
+    /** 限流的判斷片語，與前端 rateLimit.ts 的 RATE_LIMIT_PHRASES 一致。 */
+    private static final String[] RATE_LIMIT_PHRASES = {
+        "429", "too many requests", "412", "precondition failed"
+    };
+
+    /** 退避重試的次數上限與初始間隔，與前端一致（2s → 4s → 8s，累計 14 秒）。 */
+    private static final int RATE_LIMIT_MAX_RETRIES = 3;
+    private static final long RATE_LIMIT_BASE_DELAY_MS = 2000L;
+
+    /**
+     * 判定一則錯誤訊息是否為來源限流。
+     *
+     * 限流會隨時間自行解除，性質與「影片不存在」「私人影片」等永久性失敗
+     * 不同 —— 立即放棄會讓使用者看到一長串技術訊息並以為程式壞了。
+     */
+    private static boolean isRateLimited(String message) {
+        if (message == null) return false;
+        String lower = message.toLowerCase(java.util.Locale.ROOT);
+        for (String p : RATE_LIMIT_PHRASES) {
+            if (lower.contains(p)) return true;
+        }
+        return false;
+    }
+
+    /** 第 attempt 次重試前應等待的毫秒數（attempt 自 1 起算）；超出上限回傳 0。 */
+    private static long rateLimitBackoffMs(int attempt) {
+        if (attempt < 1 || attempt > RATE_LIMIT_MAX_RETRIES) return 0L;
+        return RATE_LIMIT_BASE_DELAY_MS * (1L << (attempt - 1));
+    }
+
+    /**
+     * 執行解析用的 yt-dlp；遭遇來源限流時退避重試，與前端 runParseCommand 對稱。
+     *
+     * 僅對限流重試：其餘 extractor 失敗仍立即向外拋出，維持快速失敗。
+     */
+    private YoutubeDLResponse executeParseWithBackoff(YoutubeDLRequest request, String processId)
+            throws YoutubeDLException, InterruptedException, YoutubeDL.CanceledException {
+        YoutubeDLException lastError = null;
+        for (int attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+            if (attempt > 0) {
+                long delay = rateLimitBackoffMs(attempt);
+                if (delay <= 0) break;
+                Log.w(TAG, "來源限流，" + (delay / 1000) + " 秒後重試（第 " + attempt + " 次）");
+                Thread.sleep(delay);
+            }
+            try {
+                return YoutubeDL.getInstance().execute(request, processId);
+            } catch (YoutubeDLException e) {
+                if (!isRateLimited(e.getMessage())) throw e;
+                lastError = e;
+            }
+        }
+        throw lastError;
+    }
+
     /**
      * 套用前端傳來的批次範圍參數（成對的旗標與值，例如
      * `--playlist-end 200` 或 `--playlist-items 201-400`）。
@@ -200,7 +255,7 @@ public class YoutubeDlPlugin extends Plugin {
                 addParseResilienceOptions(request);
                 addRangeOptions(request, rangeArgs);
 
-                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request, processId);
+                YoutubeDLResponse response = executeParseWithBackoff(request, processId);
                 String jsonStr = response.getOut();
 
                 org.json.JSONObject data = new org.json.JSONObject(jsonStr);
@@ -315,7 +370,7 @@ public class YoutubeDlPlugin extends Plugin {
                     // 子清單沿用同一批次範圍，否則頻道的分頁展開會繞過上限。
                     addRangeOptions(subReq, rangeArgs);
 
-                    YoutubeDLResponse subResp = YoutubeDL.getInstance().execute(subReq, processId);
+                    YoutubeDLResponse subResp = executeParseWithBackoff(subReq, processId);
                     org.json.JSONObject subData = new org.json.JSONObject(subResp.getOut());
                     org.json.JSONArray subEntries = subData.optJSONArray("entries");
                     if (subEntries != null && subEntries.length() > 0) {

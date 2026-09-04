@@ -106,12 +106,32 @@ ERROR: [BiliBili] 1zfLc61Eda: HTTP Error 412: Precondition Failed
 
 > **「單次上限 200」對多序列來源的意義是「每序列 200」**，故一個三分頁頻道的首批可達 600 筆。這是刻意的取捨：唯有每序列各自設限，續抓才定址得進去。
 
+### ⑤ 來源限流的辨識與退避（實機回報後追加）
+
+使用者於 Android v1.0.71 解析一個 TikTok 創作者頁時，錯誤紀錄留下：
+
+```
+2026/09/04 17:15:13 · 解析播放清單
+ERROR: lq5325155: Unable to download JSON metadata:
+HTTP Error 429: Too Many Requests (caused by <HTTPError 429: Too Many Requests>)
+```
+
+該帳號是首次解析、一問即被擋，代表限流掛在 **IP** 而非帳號上（當日該 IP 對 TikTok 的請求量偏高，多為開發期間的實測所致）。
+
+兩個問題：
+
+1. **訊息把暫時性狀況說得像故障**。429 的正確處置是「稍後再試」，但使用者看到的是一長串 `Unable to download JSON metadata`，只會以為程式壞了。
+2. **列表階段對限流不退避**。`fix-playlist-parse-hang` 為列表階段訂下 `--extractor-retries 0`，理由是「extractor 層級的失敗多為永久性」。429／412 正是反例。本變更原先只為**補齊階段**寫了這條例外（design D3），這次的實機回報證明**列表階段也會撞上**。
+
+因此：辨識限流類回應，給出「來源暫時限流，請稍後再試」的訊息（日誌仍留原文），並讓列表與補齊兩階段共用同一套退避重試。
+
 ## Capabilities
 
 ### New Capabilities
 
 - `media-source-profiles`：媒體來源的辨識與能力宣告 —— 網址樣式、進度鍵、集合與否、事前確認、metadata 完整度、已知不支援的來源。
-- `playlist-metadata-enrichment`：清單項目 metadata 的補齊階段 —— 觸發條件、漸進更新、局部失敗的容忍，以及面對來源限流的行為。
+- `playlist-metadata-enrichment`：清單項目 metadata 的補齊階段 —— 觸發條件、漸進更新、局部失敗的容忍。
+- `source-rate-limiting`：來源限流的辨識、對使用者的表達，以及退避重試 —— 橫跨列表與補齊兩階段。
 
 ### Modified Capabilities
 
@@ -126,7 +146,8 @@ ERROR: [BiliBili] 1zfLc61Eda: HTTP Error 412: Precondition Failed
 - 新增 `src/services/sourceProfiles.ts` — 來源能力表與查詢函式
 - `src/App.vue` — `isPlaylistUrl`、`isCreatorPageUrl` 改為查表；勾選對話框開啟後啟動補齊
 - `src/services/parseScope.ts` — `parseProgressKey` 改為查表；進度結構改為可容納多序列
-- `src/services/DownloadService.ts` — 項目網址組法改為查表；新增補齊用的解析方法
+- `src/services/DownloadService.ts` — 項目網址組法改為查表；新增補齊用的解析方法；限流辨識與退避
+- 新增 `src/services/rateLimit.ts` — 限流回應的辨識與退避排程（純邏輯，可測試）
 - `android/.../YoutubeDlPlugin.java` — 新增補齊用的 plugin 方法
 - `src/components/YouTubeBatchModal.vue` — 支援項目資料在對話框開啟後被就地更新
 

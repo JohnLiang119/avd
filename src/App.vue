@@ -856,6 +856,7 @@ import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from '
 import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
+import { isRateLimited, describeRateLimit } from './services/rateLimit';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   channelBaseline,
@@ -1778,7 +1779,12 @@ const reportError = (context: string, error: unknown) => {
     // 記錄失敗絕不可讓原本的錯誤處理更糟 —— 這裡本來就已經在錯誤路徑上了。
     console.error('寫入錯誤日誌失敗', e);
   }
-  showToast({ message: `${context}失敗: ${message}`, duration: 5000, closeOnClick: true });
+  // 限流是暫時性的，原始訊息（一長串 HTTP Error 429...）只會讓使用者
+  // 以為程式壞了。改寫只發生在呈現層 —— 日誌留的仍是原文。
+  const shown = isRateLimited(message)
+    ? `${context}：${describeRateLimit()}`
+    : `${context}失敗: ${message}`;
+  showToast({ message: shown, duration: 5000, closeOnClick: true });
 };
 
 const copyErrorLog = async () => {

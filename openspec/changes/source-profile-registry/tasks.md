@@ -63,18 +63,50 @@
 - [ ] 6.4 補齊失敗的項目保留退化標籤，仍可勾選與下載
 - [ ] 6.5 補上 vitest：就地更新後 id 序列不變、部分失敗時的結果合併
 
-## 7. 建置與驗證
+## 7. ⑤ 來源限流的辨識與退避
 
-- [ ] 7.1 `npm run build`、`npx vue-tsc --noEmit`、`npm test`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
-- [ ] 7.2 `openspec validate source-profile-registry --strict` 通過
-- [ ] 7.3 Windows：貼上 Bilibili 空間頁，確認 2 秒內出現對話框，標題隨後陸續補上
-- [ ] 7.4 Windows：補齊進行中關閉對話框，確認背景行程已終止
-- [ ] 7.5 Windows：補齊進行中即勾選並開始下載，確認下載正常且檔名正確
-- [ ] 7.6 Windows：貼上抖音使用者頁，確認得到「目前無法解析」的明確訊息
-- [ ] 7.7 Android 實機：Bilibili 空間頁完整流程
-- [ ] 7.8 Android 實機：既有的 YouTube 與 TikTok 流程未回歸
+- [x] 7.1 新增 `src/services/rateLimit.ts`：`isRateLimited(message)` 辨識 429／412 等限流片語
+- [x] 7.2 實作 `rateLimitBackoffMs(attempt)`：指數退避 2s → 4s → 8s，上限 3 次
+- [x] 7.3 實作 `describeRateLimit()`：回傳給使用者看的「來源暫時限流，請稍後再試」訊息
+- [x] 7.4 補上 vitest：限流片語命中與不命中、與 `matchPermanentError` 互斥（429／412 不得落入確定性清單）、退避序列、次數上限
+- [x] 7.5 列表階段：`runParseCommand` 失敗且判定為限流時退避重試，維持 `--extractor-retries 0` 不變
+- [ ] 7.6 補齊階段沿用同一套退避（與第 5 組整合，不另寫一份）—— 待第 5 組實作時一併完成
+- [x] 7.7 退避的累計等待受 `PARSE_TIMEOUT_MS` 約束，不得使等待無限延長
+- [x] 7.8 呈現層改寫訊息；`reportError` 寫入日誌的仍為原始訊息全文
+- [x] 7.9 Android 端 `YoutubeDlPlugin` 的解析路徑套用同一退避
+- [ ] 7.10 實測：以連續請求觸發 TikTok 或 Bilibili 的限流，確認會退避重試、最終訊息為友善版本、日誌留有原文
 
-## 8. 收尾
+## 8. 建置與驗證
 
-- [ ] 8.1 將實測所推翻或修正的設計假設回填 design.md（特別是 5.2 與 5.5 的結果）
-- [ ] 8.2 若實測顯示各來源的限流特性差異大，將塊大小與節流間隔移入 `SourceProfile` 並記於 design
+- [ ] 8.1 `npm run build`、`npx vue-tsc --noEmit`、`npm test`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
+- [ ] 8.2 `openspec validate source-profile-registry --strict` 通過
+- [ ] 8.3 Windows：貼上 Bilibili 空間頁，確認 2 秒內出現對話框，標題隨後陸續補上
+- [ ] 8.4 Windows：補齊進行中關閉對話框，確認背景行程已終止
+- [ ] 8.5 Windows：補齊進行中即勾選並開始下載，確認下載正常且檔名正確
+- [ ] 8.6 Windows：貼上抖音使用者頁，確認得到「目前無法解析」的明確訊息
+- [ ] 8.7 Android 實機：Bilibili 空間頁完整流程
+- [ ] 8.8 Android 實機：既有的 YouTube 與 TikTok 流程未回歸
+
+## 9. 收尾
+
+- [ ] 9.1 將實測所推翻或修正的設計假設回填 design.md（特別是 6.2 與 6.5 的結果）
+- [ ] 9.2 若實測顯示各來源的限流特性差異大，將塊大小與節流間隔移入 `SourceProfile` 並記於 design
+
+## 10. 實作進度說明（第 7 組先行）
+
+- [x] 10.1 第 7 組（限流）先於其餘組別實作。理由：使用者於 Android v1.0.71
+      實機撞到 TikTok 429，是當下正在痛的問題；且此組主要是新增
+      `rateLimit.ts` 並在 `runParseCommand` 外層加一層退避，與
+      `fix-playlist-parse-hang` 待驗的程式碼糾纏最少。
+- [x] 10.2 第 2～6 組**尚未開始**。那些會大幅改寫 `App.vue` 的新增流程與
+      `DownloadService.parsePlaylist`，正是 `fix-playlist-parse-hang` 仍待
+      實機驗證的區域；若驗證發現問題需要修改，重構會擋路。待其驗證完成
+      並歸檔後再動。
+- [x] 10.3 第 7 組的實作細節：
+      - 維持 `--extractor-retries 0` 不變，改由我們這一層辨識限流後重跑
+        整個呼叫。兩種失敗各走各的路徑，不需在 yt-dlp 旗標裡表達細緻分類。
+      - 退避可被取消打斷（`sleepUnlessCancelled` 每 200ms 檢查一次），
+        不會讓使用者按了取消還空等 8 秒。
+      - 訊息改寫只在呈現層（`reportError`），寫入錯誤紀錄的仍是原文。
+      - Android 端以 `executeParseWithBackoff` 對稱實作，主解析與子清單
+        展開兩處皆已接上。
