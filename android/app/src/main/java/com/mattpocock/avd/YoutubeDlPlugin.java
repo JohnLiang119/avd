@@ -57,6 +57,91 @@ public class YoutubeDlPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /** 標題在檔名中保留的最大字元數，與前端 FILENAME_TITLE_MAX 一致。 */
+    private static final int FILENAME_TITLE_MAX = 30;
+
+    /** 檔名碰撞時的最大嘗試次數，與前端 FILENAME_COLLISION_MAX_TRIES 一致。 */
+    private static final int FILENAME_COLLISION_MAX_TRIES = 100;
+
+    /**
+     * 組出下載檔案的名稱主體（不含副檔名），規則與前端
+     * `src/services/fileNaming.ts` 的 buildDownloadFileName 一致。
+     *
+     * 兩端刻意維持各自的實作（分屬 Java 與 TS），規則對照如下，
+     * 前端測試 `fileNaming.spec.ts` 為準：
+     *
+     *   ("#ちいかわ #chiikawa", "2026/06/29 03:50:12")
+     *       -> "#ちいかわ #chiikawa__20260629_035012"
+     *   ("a/b:c", "")            -> "a_b_c"
+     *   ("", "2026/06/29 03:50:12") -> "video_20260629_035012"
+     *   ("", "")                 -> "video_{當下毫秒}"
+     *
+     * @param pubTimeStr 形如 `yyyy/MM/dd HH:mm:ss`；空字串表示來源未提供發布時間。
+     */
+    private static String buildDownloadFileNameJava(String title, String pubTimeStr) {
+        String base = title == null ? "" : title.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (base.length() > FILENAME_TITLE_MAX) {
+            base = base.substring(0, FILENAME_TITLE_MAX);
+        }
+        base = base.trim().replaceAll("\\.+$", "").trim();
+
+        // "2026/06/29 03:50:12" -> "20260629_035012"
+        String stamp = "";
+        if (pubTimeStr != null && pubTimeStr.length() >= 19) {
+            stamp = pubTimeStr.substring(0, 10).replace("/", "")
+                    + "_" + pubTimeStr.substring(11).replace(":", "");
+        }
+
+        if (!base.isEmpty() && !stamp.isEmpty()) return base + "__" + stamp;
+        if (!base.isEmpty()) return base;
+        if (!stamp.isEmpty()) return "video_" + stamp;
+        return "video_" + System.currentTimeMillis();
+    }
+
+    /**
+     * 尋找一個尚未被占用的檔名主體。
+     *
+     * 保留原有的兩層檢查（MediaStore 與檔案系統），但改為判斷「此名稱可否使用」
+     * 而非「要不要中止」—— 碰撞絕不得使下載失敗。MediaStore 那一層仍需保留：
+     * 媒體庫可能已登錄某個檔名而檔案系統路徑不同。
+     */
+    private String findAvailableBaseName(String base, String ext, Boolean isMp3) {
+        for (int attempt = 0; attempt <= FILENAME_COLLISION_MAX_TRIES; attempt++) {
+            String candidate = (attempt == 0) ? base : (base + "_" + attempt);
+            if (!isFileNameTaken(candidate + ext, isMp3)) {
+                return candidate;
+            }
+        }
+        // 病態情形的最後退路，確保一定回傳可用名稱
+        return base + "_" + System.currentTimeMillis();
+    }
+
+    /** 檢查某個檔名是否已被 MediaStore 登錄或已存在於公開目錄。 */
+    private boolean isFileNameTaken(String fileName, Boolean isMp3) {
+        try {
+            android.net.Uri queryUri = (isMp3 != null && isMp3)
+                ? android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                : android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            String[] projection = { android.provider.MediaStore.MediaColumns.DISPLAY_NAME };
+            String selection = android.provider.MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
+            String[] selectionArgs = { fileName };
+            try (android.database.Cursor cursor = getContext().getContentResolver()
+                    .query(queryUri, projection, selection, selectionArgs, null)) {
+                if (cursor != null && cursor.getCount() > 0) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "MediaStore 檢查失敗，改以檔案系統判斷", e);
+        }
+
+        File publicDir = Environment.getExternalStoragePublicDirectory(
+            (isMp3 != null && isMp3) ? Environment.DIRECTORY_MUSIC : Environment.DIRECTORY_MOVIES
+        );
+        File checkFile = new File(publicDir, fileName);
+        return checkFile.exists() && checkFile.length() > 0;
+    }
+
     /**
      * 解析階段專用的 yt-dlp 選項，與 Windows 端的 PARSE_RESILIENCE_ARGS 對稱。
      * 用意是讓失敗迅速浮現而非堆疊重試；下載路徑不套用。
@@ -792,50 +877,14 @@ public class YoutubeDlPlugin extends Plugin {
                     videoTitle = "video_" + System.currentTimeMillis();
                 }
 
-                String cleanTitle = videoTitle;
-                cleanTitle = cleanTitle.replaceAll("[\\\\/:*?\"<>|]", "_");
-                if (cleanTitle.length() > 30) {
-                    cleanTitle = cleanTitle.substring(0, 30);
-                }
-                cleanTitle = cleanTitle.trim();
-                if (cleanTitle.isEmpty()) {
-                    cleanTitle = "video_" + System.currentTimeMillis();
-                }
+                // 檔名帶入發布時間，與前端 fileNaming.ts 的 buildDownloadFileName 同規則。
+                String cleanTitle = buildDownloadFileNameJava(videoTitle, pubTimeStr);
 
                 String targetExt = (isMp3 != null && isMp3) ? ".mp3" : ".mp4";
+                // 碰撞時遞增改名，不再中止下載：TikTok／Douyin 同描述的多支影片
+                // 本來就是不同影片，把它們判成「重複」是誤判（見 fix-filename-collision）。
+                cleanTitle = findAvailableBaseName(cleanTitle, targetExt, isMp3);
                 String targetFilename = cleanTitle + targetExt;
-                boolean isDuplicate = false;
-
-                try {
-                    android.net.Uri queryUri = (isMp3 != null && isMp3)
-                        ? android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI 
-                        : android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-                    String[] projection = { android.provider.MediaStore.MediaColumns.DISPLAY_NAME };
-                    String selection = android.provider.MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
-                    String[] selectionArgs = { targetFilename };
-                    try (android.database.Cursor cursor = getContext().getContentResolver().query(queryUri, projection, selection, selectionArgs, null)) {
-                        if (cursor != null && cursor.getCount() > 0) {
-                            isDuplicate = true;
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "MediaStore duplicate check failed, fallback to file check", e);
-                }
-
-                if (!isDuplicate) {
-                    File publicDir = Environment.getExternalStoragePublicDirectory(
-                        (isMp3 != null && isMp3) ? Environment.DIRECTORY_MUSIC : Environment.DIRECTORY_MOVIES
-                    );
-                    File checkFile = new File(publicDir, targetFilename);
-                    if (checkFile.exists() && checkFile.length() > 0) {
-                        isDuplicate = true;
-                    }
-                }
-
-                if (isDuplicate) {
-                    Log.w(TAG, "Duplicate download detected: " + targetFilename);
-                    throw new Exception("檔案已存在 (重複)");
-                }
 
                 File videoFile = null;
                 File finalFile = null;

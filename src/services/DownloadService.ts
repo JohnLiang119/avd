@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
+import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
 const _t2cn = OpenCC.Converter({ from: 't', to: 'cn' });
@@ -608,40 +609,35 @@ export const DownloadService = {
 
       // 格式化發布時間
       let pubTimeStr = '';
+      let pubTimeMs = 0;
       if (timestampNum) {
-        pubTimeStr = formatPublishTime(timestampNum * 1000);
+        pubTimeMs = timestampNum * 1000;
+        pubTimeStr = formatPublishTime(pubTimeMs);
       } else if (uploadDate && String(uploadDate).length === 8) {
         const str = String(uploadDate);
         const y = str.slice(0, 4);
         const m = str.slice(4, 6);
         const d = str.slice(6, 8);
         pubTimeStr = `${y}/${m}/${d} 00:00:00`;
+        const parsed = new Date(`${y}-${m}-${d}T00:00:00`).getTime();
+        if (!isNaN(parsed)) pubTimeMs = parsed;
       }
 
-      // 2. 檔名化 (去除非法衝突字元 \ / : * ? " < > | 且限制前 30 字)
-      let cleanFileName = fullTitle.replace(/[\\/:*?"<>|]/g, '_');
-      if (cleanFileName.length > 30) {
-        cleanFileName = cleanFileName.slice(0, 30);
-      }
-      cleanFileName = cleanFileName.trim().replace(/\.+$/, '');
-      if (!cleanFileName) {
-        cleanFileName = `video_${Date.now()}`;
-      }
+      // 2. 檔名化：標題（去非法字元、截 30 字）+ 發布時間。
+      //    只用標題會讓 TikTok／Douyin 同描述的多支影片撞成同一個檔名。
+      const cleanFileName = buildDownloadFileName(fullTitle, pubTimeMs);
 
       // 3. 重複檔名檢測與重新命名
       let downloadedFilePath = tempFilePath;
 
       try {
-        let targetFileName = `${cleanFileName}.${ext}`;
-        let candidatePath = `${targetDirPath}/${targetFileName}`;
-        let counter = 1;
-
-        // 避免重複檔名覆蓋
-        while (await exists(candidatePath)) {
-          targetFileName = `${cleanFileName}_${counter}.${ext}`;
-          candidatePath = `${targetDirPath}/${targetFileName}`;
-          counter++;
-        }
+        // 碰撞時遞增改名而非覆蓋或失敗；含嘗試次數上限，避免病態情形下的無窮迴圈。
+        const targetFileName = await nextAvailableName(
+          cleanFileName,
+          ext,
+          (name) => exists(`${targetDirPath}/${name}`)
+        );
+        const candidatePath = `${targetDirPath}/${targetFileName}`;
 
         if (await exists(tempFilePath)) {
           await rename(tempFilePath, candidatePath);

@@ -2399,6 +2399,9 @@ const PERMANENT_DOWNLOAD_ERRORS = [
   'members-only',
   'join this channel',
   'this live event will begin in',
+  // 檔名碰撞為 100% 確定性，重試毫無意義。取子字串以容忍括號內文字變動。
+  // 修正 fix-filename-collision 後理論上不再出現，保留作為通則的防禦。
+  '檔案已存在',
 ] as const;
 
 /** 這兩種訊息在本專案的情境中幾乎必然來自直播或尚未開播的影片 */
