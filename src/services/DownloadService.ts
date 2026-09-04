@@ -6,6 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
+import { formatPublishTime } from './displayFormat';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -29,31 +30,8 @@ export const isTauri = () => {
   return window.hasOwnProperty('__TAURI_INTERNALS__');
 };
 
-export const formatPublishTime = (timestamp?: number | string | Date): string => {
-  if (!timestamp) return '';
-  let date: Date;
-  if (typeof timestamp === 'number') {
-    date = timestamp < 1e11 ? new Date(timestamp * 1000) : new Date(timestamp);
-  } else if (typeof timestamp === 'string') {
-    if (/^\d+$/.test(timestamp)) {
-      const num = parseInt(timestamp, 10);
-      date = num < 1e11 ? new Date(num * 1000) : new Date(num);
-    } else {
-      date = new Date(timestamp);
-    }
-  } else {
-    date = timestamp;
-  }
-
-  if (!date || isNaN(date.getTime())) return '';
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
-  const ss = String(date.getSeconds()).padStart(2, '0');
-  return `${yyyy}/${mm}/${dd} ${hh}:${min}:${ss}`;
-};
+// formatPublishTime 已移至 displayFormat.ts（純函式，可被測試引用），此處轉出以維持既有匯入路徑。
+export { formatPublishTime } from './displayFormat';
 
 let activeChildProcess: any = null;
 let activeRcloneChildProcess: any = null;

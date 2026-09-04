@@ -798,6 +798,16 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
 import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
+import { buildTaskDisplayTitle } from './services/displayFormat';
+import { matchPermanentError } from './services/downloadErrors';
+import {
+  channelBaseline,
+  isFirstTimeTracking,
+  selectNewVideos,
+  nextChannelBaseline,
+  buildChannelVideoTask,
+  type ChannelAnchor
+} from './composables/useChannelMatching';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { createStorage } from './composables/useStorage';
 import { LocalStorageAdapter, TauriStoreAdapter, localStorageLegacyFallback } from './composables/storageAdapters';
@@ -1438,6 +1448,19 @@ const handleChannelFileChange = (e: Event) => {
 };
 
 
+/**
+ * 將計算出的錨點寫回頻道。`anchor` 為 null 時完全不動任何欄位 ——
+ * 包含 lastCheckTime：`lastPublishedTime || lastCheckTime` 的向下相容鏈
+ * 會讓單獨更新的 lastCheckTime 把當下時間當成基準復活。
+ */
+const applyChannelAnchor = (channel: MonitoredChannel, anchor: ChannelAnchor | null, now: number) => {
+  if (!anchor) return;
+  channel.lastPublishedTime = anchor.publishedTime;
+  channel.lastCheckTime = now;
+  channel.lastKnownVideoId = anchor.videoId;
+  channel.lastVideoTitle = anchor.title;
+};
+
 const checkAllMonitoredChannels = async (isManual = false) => {
   if (isCheckingChannels.value) return;
   if (!monitorConfig.value.autoCheckEnabled && !isManual) return;
@@ -1463,20 +1486,15 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       });
       if (!videos || videos.length === 0) continue;
 
-      const latestVideo = videos[0];
-      const channelLastPub = channel.lastPublishedTime || channel.lastCheckTime || 0;
+      const channelLastPub = channelBaseline(channel);
 
-      if (channelLastPub === 0) {
+      if (isFirstTimeTracking(channel)) {
         // 首次追蹤：以最新影片的發布時間建立初始防線，不觸發下載。
-        // 若來源未提供精確時間（備援模式的 publishedTime 為 0），則不建立基準 ——
-        // 維持未初始化狀態，待下次能取得精確時間時再錨定。
+        // 只看 videos[0]：若來源未提供精確時間（備援模式的 publishedTime 為 0），
+        // 則不建立基準 —— 維持未初始化狀態，待下次能取得精確時間時再錨定。
         // 切勿以當下時間替代：那會把基準推至未來，使該時點之前發布的影片永久漏抓。
-        if (latestVideo.publishedTime) {
-          channel.lastPublishedTime = latestVideo.publishedTime;
-          channel.lastCheckTime = now;
-          channel.lastKnownVideoId = latestVideo.videoId;
-          channel.lastVideoTitle = latestVideo.title;
-        }
+        // 刻意不套用「不越過未處理影片」那道守門：此情境本就不下載任何既有內容。
+        applyChannelAnchor(channel, nextChannelBaseline([videos[0]], 0), now);
         continue;
       }
 
@@ -1485,93 +1503,32 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       // —— 排程直播的 publishedTime 是「建立時間」，在直播結束轉為存檔後並不會改變。
       const unhandledVideoIds = new Set<string>();
 
-      const newVideos = videos.filter(v => {
-        const isTimeNewer = v.publishedTime > channelLastPub;
-        const alreadyInTasks = tasks.value.some((t: any) => {
-          if (t.url && typeof t.url === 'string' && t.url.includes(v.videoId)) return true;
-          if (t.playlists && Array.isArray(t.playlists)) {
-            return t.playlists.some((pl: any) => 
-              pl.subTasks && Array.isArray(pl.subTasks) && pl.subTasks.some((st: any) => st.url && st.url.includes(v.videoId))
-            );
-          }
-          return false;
-        });
-        return isTimeNewer && !alreadyInTasks;
-      });
-
-      if (newVideos.length > 0) {
-        for (const vid of newVideos.reverse()) {
-          const liveStatus = await DownloadService.checkVideoLiveStatus(vid.url);
-          if (liveStatus !== 'not_live') {
-            // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
-            // 兩者皆未被實際處理，記錄下來以阻止錨點越過它們。
-            unhandledVideoIds.add(vid.videoId);
-            console.log(
-              liveStatus === 'live'
-                ? `[自動追蹤] 跳過直播/首播影片: ${vid.title}`
-                : `[自動追蹤] 直播狀態查詢失敗，暫不處理: ${vid.title}`
-            );
-            continue;
-          }
-
-          const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
-          const taskTitle = buildTaskDisplayTitle(vid.title, channel.title, pubTimeStr);
-
-          const lineText = vid.source === 'fallback' 
-            ? '【自動追蹤 (yt-dlp 備援)】排隊優先下載中...' 
-            : '【自動追蹤 (RSS)】排隊優先下載中...';
-
-          if (vid.source === 'fallback') {
-            fallbackVideoCount++;
-          }
-
-          const newTask: DownloadTask = {
-            id: taskStore.nextTaskId(),
-            type: 'file',
-            isGroup: false,
-            url: vid.url,
-            title: taskTitle,
-            rawTitle: vid.title,
-            publishTimeStr: pubTimeStr,
-            channelPrefix: channel.title,
-            status: 'pending',
-            progress: 0,
-            eta: '',
-            line: lineText,
-            path: '',
-            errorMsg: '',
-            mediaUri: '',
-            isAudio: false,
-            subFolder: channel.title ? channel.title.replace(/[\/\\:*?"<>|]/g, '_') : ''
-          };
-
-          tasks.value.unshift(newTask); // 優先插隊至佇列最前面第一位！
-          newVideoCount++;
+      // reverse() 使較舊的影片先進入佇列，較新者最後 unshift 而位於最前。
+      // selectNewVideos 回傳新陣列，reverse 不會影響 videos 的順序。
+      for (const vid of selectNewVideos(videos, channelLastPub, tasks.value).reverse()) {
+        const liveStatus = await DownloadService.checkVideoLiveStatus(vid.url);
+        if (liveStatus !== 'not_live') {
+          // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
+          // 兩者皆未被實際處理，記錄下來以阻止錨點越過它們。
+          unhandledVideoIds.add(vid.videoId);
+          console.log(
+            liveStatus === 'live'
+              ? `[自動追蹤] 跳過直播/首播影片: ${vid.title}`
+              : `[自動追蹤] 直播狀態查詢失敗，暫不處理: ${vid.title}`
+          );
+          continue;
         }
+
+        if (vid.source === 'fallback') {
+          fallbackVideoCount++;
+        }
+
+        // 優先插隊至佇列最前面第一位！
+        tasks.value.unshift(buildChannelVideoTask(vid, channel, taskStore.nextTaskId()));
+        newVideoCount++;
       }
 
-      // 錨點推進有兩道獨立的守門條件：
-      //   1. 必須取得精確發布時間 —— 備援模式下若無精確時間則不推進，
-      //      以當下時間推進會使基準跑到未來，導致 RSS 恢復後永久漏片。
-      //   2. 不得越過本次未被實際處理的影片（直播、或狀態查詢失敗者），
-      //      否則它們日後可正常下載時也不會再被判定為新片。
-      //
-      // 因此錨點取「本次已處理影片中發布時間最大者」，而非逕取 videos[0]。
-      // 相關欄位一併只在推進時更新，避免 `lastPublishedTime || lastCheckTime`
-      // 的向下相容鏈把當下時間當成基準復活。
-      const anchorVideo = videos
-        .filter(v => v.publishedTime && !unhandledVideoIds.has(v.videoId))
-        .reduce<typeof videos[number] | null>(
-          (best, v) => (!best || v.publishedTime > best.publishedTime ? v : best),
-          null
-        );
-
-      if (anchorVideo && anchorVideo.publishedTime > channelLastPub) {
-        channel.lastPublishedTime = anchorVideo.publishedTime;
-        channel.lastCheckTime = now;
-        channel.lastKnownVideoId = anchorVideo.videoId;
-        channel.lastVideoTitle = anchorVideo.title;
-      }
+      applyChannelAnchor(channel, nextChannelBaseline(videos, channelLastPub, unhandledVideoIds), now);
     } catch (err) {
       failedCount++;
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
@@ -1828,40 +1785,7 @@ DownloadService.addListener('serverUploadSpeed', (info: any) => {
   }
 });
 
-const buildTaskDisplayTitle = (rawTitle?: string, channelPrefix?: string, publishTimeStr?: string): string => {
-  let title = (rawTitle || '').trim();
-  
-  if (title) {
-    // 檢查並提取前綴 [頻道名]
-    const prefixMatch = title.match(/^\[([^\]]+)\]\s*/);
-    if (prefixMatch) {
-      if (!channelPrefix) channelPrefix = prefixMatch[1];
-      title = title.replace(/^\[[^\]]+\]\s*/, '').trim();
-    }
-    // 檢查並提取發布時間標記
-    const timeMatch = title.match(/\s*(\(\d{4}\/\d{2}\/\d{2}[^\)]*\))$/);
-    if (timeMatch) {
-      if (!publishTimeStr) publishTimeStr = timeMatch[1].replace(/[()]/g, '').trim();
-      title = title.replace(/\s*\(\d{4}\/\d{2}\/\d{2}[^\)]*\)$/, '').trim();
-    }
-  }
-
-  let finalTitle = title;
-  if (channelPrefix && channelPrefix.trim()) {
-    const cleanPrefix = channelPrefix.trim();
-    if (!finalTitle.startsWith(`[${cleanPrefix}]`)) {
-      finalTitle = `[${cleanPrefix}] ${finalTitle}`;
-    }
-  }
-  if (publishTimeStr && publishTimeStr.trim()) {
-    const cleanTime = publishTimeStr.trim().replace(/[()]/g, '');
-    if (!finalTitle.includes(`(${cleanTime})`)) {
-      finalTitle = `${finalTitle} (${cleanTime})`;
-    }
-  }
-
-  return finalTitle.trim();
-};
+// buildTaskDisplayTitle 已移至 services/displayFormat.ts（純函式，可被測試引用）
 
 
 
@@ -2385,38 +2309,8 @@ const onSubmit = () => {
   addTask(url.value);
 };
 
-/**
- * 重試必然再次失敗的確定性錯誤。
- *
- * yt-dlp 不提供結構化的錯誤代碼，只能比對訊息文字。此清單刻意只納入語意明確、
- * 不可能因網路狀況而出現的訊息 —— 誤判會讓使用者失去自動重試，代價高於漏判。
- * 若日後 yt-dlp 改變措辭導致漏判，行為會退回「照常重試」，即現況，不會產生新故障。
- */
-const PERMANENT_DOWNLOAD_ERRORS = [
-  'requested format is not available',
-  'video unavailable',
-  'private video',
-  'members-only',
-  'join this channel',
-  'this live event will begin in',
-  // 檔名碰撞為 100% 確定性，重試毫無意義。取子字串以容忍括號內文字變動。
-  // 修正 fix-filename-collision 後理論上不再出現，保留作為通則的防禦。
-  '檔案已存在',
-] as const;
-
-/** 這兩種訊息在本專案的情境中幾乎必然來自直播或尚未開播的影片 */
-const LIVE_RELATED_ERRORS = [
-  'requested format is not available',
-  'this live event will begin in',
-] as const;
-
-const matchPermanentError = (msg: string): { permanent: boolean; liveRelated: boolean } => {
-  const lower = msg.toLowerCase();
-  return {
-    permanent: PERMANENT_DOWNLOAD_ERRORS.some(k => lower.includes(k)),
-    liveRelated: LIVE_RELATED_ERRORS.some(k => lower.includes(k)),
-  };
-};
+// PERMANENT_DOWNLOAD_ERRORS / LIVE_RELATED_ERRORS / matchPermanentError
+// 已移至 services/downloadErrors.ts（純函式，可被測試引用），連同其說明註解。
 
 const getNextPendingTask = (): { task: DownloadTask; parentPlaylist?: PlaylistGroupTask; parentChannel?: ChannelGroupTask } | null => {
   for (const item of tasks.value) {
