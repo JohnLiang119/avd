@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@tauri-apps/plugin-fs';
 import * as OpenCC from 'opencc-js';
+import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
 const _t2cn = OpenCC.Converter({ from: 't', to: 'cn' });
@@ -57,6 +58,96 @@ let activeChildProcess: any = null;
 let activeRcloneChildProcess: any = null;
 let isManualCancelling = false;
 let currentAndroidProcessId = '';
+
+// ---- 解析階段（非下載階段）的行程管理與時間界限 ----
+
+// 解析階段的界限、進度鍵與批次範圍計算集中於 parseScope.ts（純函式，可被測試引用），
+// 此處轉出以維持既有的匯入路徑。
+export {
+  PARSE_TIMEOUT_MS,
+  PARSE_CANCELLED,
+  PARSE_BATCH_SIZE,
+  parseProgressKey,
+  buildPlaylistRangeArgs,
+  advanceParseProgress,
+  type ParseProgress
+} from './parseScope';
+
+/**
+ * 解析階段專用的 yt-dlp 選項，用意是讓失敗迅速浮現而非堆疊重試。
+ *
+ * - `--extractor-retries 0`：extractor 層級的失敗多為永久性，重試只是把等待拉長。
+ *   TikTok 的 JS challenge 每一輪都要重跑，正是「數分鐘後才失敗」的主因。
+ * - `--retries 2`：HTTP／片段層級仍保留少量重試，避免正常的大型清單因單次
+ *   網路抖動就整批失敗。
+ * - `--socket-timeout 15`：只約束單次連線；總時長仍由 PARSE_TIMEOUT_MS 保證。
+ *
+ * 下載路徑刻意不套用此組選項，其重試策略維持原狀。
+ */
+const PARSE_RESILIENCE_ARGS = [
+  '--socket-timeout', '15',
+  '--extractor-retries', '0',
+  '--retries', '2'
+];
+
+/**
+ * 由解析結果組出 TikTok 的正式影片網址。
+ *
+ * yt-dlp 的 TikTok entry 實際上已直接帶完整網址（其 TikTokUserIE 以
+ * `https://www.tiktok.com/@{user}/video/{id}` 建立 entry），故此處只處理
+ * 它沒帶的退化情形：`tiktok.com/video/{id}` 不被 TikTok extractor 接受，
+ * 會落入 generic extractor 並導向 404，必須帶上 `@handle` 區段。
+ *
+ * Douyin 不需要對應處理 —— 實測 `douyin.com/video/{id}` 可正確進入
+ * Douyin extractor。
+ */
+function buildTikTokVideoUrl(videoId: string, entry: any, sourceUrl: string): string {
+  // 只取 uploader：實測 channel 是顯示名稱（如「冰冷（小号冲一万）」）、
+  // uploader_id 是純數字 id，兩者拿來組網址都會組出錯的。
+  const fromEntry = entry?.uploader || '';
+  const fromSource = (sourceUrl.match(/tiktok\.com\/@([\w.\-]+)/) || [])[1] || '';
+  const handle = String(fromEntry || fromSource).replace(/^@/, '').trim();
+  // 兩個來源都取不到時保留舊格式，結果不會比現況更差。
+  return handle
+    ? `https://www.tiktok.com/@${handle}/video/${videoId}`
+    : `https://www.tiktok.com/video/${videoId}`;
+}
+
+/** 解析中的 yt-dlp 子行程（主清單與子清單展開可能同時各有一個）。 */
+const activeParseChildren = new Set<any>();
+let isParseCancelling = false;
+/** Android 端本次解析的 processId，取消時用來對應 destroyProcessById。 */
+let currentAndroidParseId = '';
+
+/**
+ * 以 spawn 執行解析用的 yt-dlp，並保存 child handle 供取消使用。
+ *
+ * 刻意不用 execute()：後者一次回傳 stdout 但不交出 child，無法中止，
+ * 正是解析階段無法取消的根因（見 design D2）。
+ */
+async function runParseCommand(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  const command = Command.sidecar('bin/yt-dlp', [...PARSE_RESILIENCE_ARGS, ...args], { encoding: 'utf-8' });
+
+  let stdout = '';
+  let stderr = '';
+  command.stdout.on('data', (line: string) => { stdout += line; });
+  command.stderr.on('data', (line: string) => { stderr += line + '\n'; });
+
+  const exitPromise = new Promise<number>((resolve, reject) => {
+    command.on('close', (data: any) => resolve(data?.code ?? -1));
+    command.on('error', (err: any) => reject(new Error('yt-dlp error: ' + err)));
+  });
+
+  const child = await command.spawn();
+  activeParseChildren.add(child);
+  try {
+    const code = await exitPromise;
+    if (isParseCancelling) throw new Error(PARSE_CANCELLED);
+    return { code, stdout, stderr };
+  } finally {
+    activeParseChildren.delete(child);
+  }
+}
 
 // Mock event emitter for Tauri
 type Listener = (info: any) => void;
@@ -208,9 +299,24 @@ export const DownloadService = {
     }
   },
 
-  async parsePlaylist(url: string): Promise<PlaylistResult> {
+  /**
+   * 解析播放清單／頻道網址。
+   *
+   * @param options.fetched 此來源先前已抓過的筆數；用來決定本批的抓取範圍。
+   *                        0（或省略）代表首批。
+   */
+  async parsePlaylist(url: string, options?: { fetched?: number }): Promise<PlaylistResult> {
+    // 每次解析都重置取消旗標，避免前一次的取消殘留影響本次。
+    isParseCancelling = false;
+    const rangeArgs = buildPlaylistRangeArgs(options?.fetched ?? 0);
+
     if (!isTauri()) {
-      const res = await YoutubeDlPlugin.parsePlaylist({ url });
+      currentAndroidParseId = 'avd_parse_' + Date.now();
+      const res = await YoutubeDlPlugin.parsePlaylist({
+        url,
+        processId: currentAndroidParseId,
+        rangeArgs
+      });
       if (res) {
         if (res.channelTitle) res.channelTitle = convertCnToTw(res.channelTitle);
         if (res.playlistTitle) res.playlistTitle = convertCnToTw(res.playlistTitle);
@@ -228,12 +334,12 @@ export const DownloadService = {
         '--extractor-args', 'youtube:player_client=web_creator,default',
         '--rm-cache-dir',
         '--flat-playlist',
+        ...rangeArgs,
         '-J',
         url
       ];
 
-      const command = Command.sidecar('bin/yt-dlp', args, { encoding: 'utf-8' });
-      const output = await command.execute();
+      const output = await runParseCommand(args);
 
       if (output.code !== 0) {
         throw new Error('解析播放清單失敗: ' + output.stderr);
@@ -265,15 +371,16 @@ export const DownloadService = {
               const subUrl = entryUrl.startsWith('http')
                 ? entryUrl
                 : `https://www.youtube.com/playlist?list=${entryId || entryUrl}`;
+              // 子清單沿用同一批次範圍，否則 YouTube 頻道的分頁展開會繞過上限。
               const subArgs = [
                 '--extractor-args', 'youtube:player_client=web_creator,default',
                 '--rm-cache-dir',
                 '--flat-playlist',
+                ...rangeArgs,
                 '-J',
                 subUrl
               ];
-              const subCmd = Command.sidecar('bin/yt-dlp', subArgs, { encoding: 'utf-8' });
-              const subOut = await subCmd.execute();
+              const subOut = await runParseCommand(subArgs);
               if (subOut.code === 0) {
                 const subData = JSON.parse(subOut.stdout);
                 if (subData.entries && subData.entries.length > 0) {
@@ -282,7 +389,9 @@ export const DownloadService = {
                   continue;
                 }
               }
-            } catch (e) {
+            } catch (e: any) {
+              // 取消必須向外傳遞，否則會被當成「這個子清單展開失敗」而繼續跑下一個。
+              if (e?.message === PARSE_CANCELLED) throw e;
               console.warn('Expanding sub-playlist failed:', entryUrl, e);
             }
           }
@@ -294,7 +403,7 @@ export const DownloadService = {
             if (url.includes('douyin.com')) {
               itemUrl = `https://www.douyin.com/video/${itemUrl}`;
             } else if (url.includes('tiktok.com')) {
-              itemUrl = `https://www.tiktok.com/video/${itemUrl}`;
+              itemUrl = buildTikTokVideoUrl(itemUrl, entry, url);
             } else {
               itemUrl = `https://www.youtube.com/watch?v=${itemUrl}`;
             }
@@ -303,7 +412,7 @@ export const DownloadService = {
             if (url.includes('douyin.com')) {
               itemUrl = `https://www.douyin.com/video/${videoId}`;
             } else if (url.includes('tiktok.com')) {
-              itemUrl = `https://www.tiktok.com/video/${videoId}`;
+              itemUrl = buildTikTokVideoUrl(videoId, entry, url);
             } else {
               itemUrl = `https://www.youtube.com/watch?v=${videoId}`;
             }
@@ -635,6 +744,34 @@ export const DownloadService = {
       let msg = e.message || String(e);
       throw new Error(msg);
     }
+  },
+
+  /**
+   * 中止進行中的播放清單解析。
+   *
+   * 與 cancelDownload 分離：兩者管的是不同的行程，解析被取消時
+   * 不應波及正在進行的下載。
+   */
+  async cancelParsePlaylist() {
+    if (!isTauri()) {
+      if (!currentAndroidParseId) return;
+      try {
+        await YoutubeDlPlugin.cancelParsePlaylist({ processId: currentAndroidParseId });
+      } catch (e) {
+        console.error('Failed to cancel Android parse process', e);
+      }
+      return;
+    }
+
+    isParseCancelling = true;
+    for (const child of Array.from(activeParseChildren)) {
+      try {
+        await child.kill();
+      } catch (e) {
+        console.error('Failed to kill parse child process', e);
+      }
+    }
+    activeParseChildren.clear();
   },
 
   async cancelDownload() {

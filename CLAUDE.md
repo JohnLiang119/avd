@@ -11,6 +11,9 @@
    - JSON（`package.json`、`package-lock.json`、`tsconfig*.json` 等）：UTF-8 **無** BOM
      —— BOM 會使 JSON 解析器失敗，Vite 的 JSON loader 會直接中斷建置。
    - `.ts`、`.vue`：UTF-8 **無** BOM，與專案既有原始碼一致（含 `vite.config.ts`）。
+   - `.java`：UTF-8 **無** BOM —— javac 不接受 BOM，會直接報
+     `illegal character: '﻿'` 與 `class, interface, enum, or record expected`
+     而中斷 `compileDebugJavaWithJavac`。以腳本改寫 Java 檔時務必用 `utf-8` 而非 `utf-8-sig`。
    - OpenSpec 的 delta 規格檔（`openspec/changes/*/specs/**/spec.md`）：UTF-8 **無** BOM
      —— BOM 會使 archive 讀不到第一行的 `## Purpose`，靜默在新主規格留下 TBD 佔位符。
    - git commit 訊息檔：UTF-8 **無** BOM —— 否則 BOM 會混進 commit 標題。

@@ -57,6 +57,44 @@ public class YoutubeDlPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    /**
+     * 解析階段專用的 yt-dlp 選項，與 Windows 端的 PARSE_RESILIENCE_ARGS 對稱。
+     * 用意是讓失敗迅速浮現而非堆疊重試；下載路徑不套用。
+     */
+    private static void addParseResilienceOptions(YoutubeDLRequest request) {
+        request.addOption("--socket-timeout", "15");
+        request.addOption("--extractor-retries", "0");
+        request.addOption("--retries", "2");
+    }
+
+    /**
+     * 套用前端傳來的批次範圍參數（成對的旗標與值，例如
+     * `--playlist-end 200` 或 `--playlist-items 201-400`）。
+     * 範圍由前端依該來源的已抓進度決定，兩平台共用同一套邏輯。
+     */
+    private static void addRangeOptions(YoutubeDLRequest request, java.util.List<String> rangeArgs) {
+        if (rangeArgs == null) return;
+        for (int i = 0; i + 1 < rangeArgs.size(); i += 2) {
+            request.addOption(rangeArgs.get(i), rangeArgs.get(i + 1));
+        }
+    }
+
+    /** 將 rangeArgs 由 JSArray 轉為字串清單；缺漏或格式異常時視為無範圍限制。 */
+    private static java.util.List<String> readRangeArgs(PluginCall call) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            com.getcapacitor.JSArray arr = call.getArray("rangeArgs");
+            if (arr == null) return out;
+            for (Object o : arr.toList()) {
+                if (o != null) out.add(String.valueOf(o));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "rangeArgs 解讀失敗，本次不套用批次範圍", e);
+            out.clear();
+        }
+        return out;
+    }
+
     @PluginMethod
     public void parsePlaylist(PluginCall call) {
         String url = call.getString("url");
@@ -64,6 +102,9 @@ public class YoutubeDlPlugin extends Plugin {
             call.reject("Must provide an url");
             return;
         }
+        // 由前端傳入 processId，取消時據以呼叫 destroyProcessById。
+        final String processId = call.getString("processId", "avd_parse");
+        final java.util.List<String> rangeArgs = readRangeArgs(call);
 
         new Thread(() -> {
             try {
@@ -71,8 +112,10 @@ public class YoutubeDlPlugin extends Plugin {
                 request.addOption("--flat-playlist");
                 request.addOption("-J");
                 request.addOption("--no-warnings");
+                addParseResilienceOptions(request);
+                addRangeOptions(request, rangeArgs);
 
-                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
+                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request, processId);
                 String jsonStr = response.getOut();
 
                 org.json.JSONObject data = new org.json.JSONObject(jsonStr);
@@ -90,7 +133,7 @@ public class YoutubeDlPlugin extends Plugin {
                 com.getcapacitor.JSArray itemsArr = new com.getcapacitor.JSArray();
 
                 if (entries != null) {
-                    processEntriesHelper(url, entries, itemsArr);
+                    processEntriesHelper(url, entries, itemsArr, processId, rangeArgs);
                 }
 
                 JSObject ret = new JSObject();
@@ -98,6 +141,14 @@ public class YoutubeDlPlugin extends Plugin {
                 ret.put("playlistTitle", playlistTitle);
                 ret.put("items", itemsArr);
                 call.resolve(ret);
+            } catch (YoutubeDL.CanceledException e) {
+                // 使用者主動取消，非故障：以可辨識的訊息回覆，前端不顯示為錯誤。
+                Log.i(TAG, "Playlist parse canceled by user");
+                call.reject("PARSE_CANCELLED_BY_USER");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Log.i(TAG, "Playlist parse interrupted");
+                call.reject("PARSE_CANCELLED_BY_USER");
             } catch (Exception e) {
                 Log.e(TAG, "Failed to parse playlist", e);
                 call.reject("解析播放清單失敗: " + e.getMessage());
@@ -105,7 +156,51 @@ public class YoutubeDlPlugin extends Plugin {
         }).start();
     }
 
-    private void processEntriesHelper(String originalUrl, org.json.JSONArray entries, com.getcapacitor.JSArray itemsArr) throws Exception {
+    /**
+     * 中止進行中的播放清單解析。
+     * 與 cancelDownload 分離：兩者管的是不同的行程，取消解析不應波及下載。
+     */
+    @PluginMethod
+    public void cancelParsePlaylist(PluginCall call) {
+        String processId = call.getString("processId", "avd_parse");
+        try {
+            YoutubeDL.getInstance().destroyProcessById(processId);
+        } catch (Exception e) {
+            Log.w(TAG, "取消解析失敗: " + processId, e);
+        }
+        call.resolve();
+    }
+
+    /**
+     * 由解析結果組出 TikTok 的正式影片網址，與前端 buildTikTokVideoUrl 對稱。
+     *
+     * yt-dlp 的 TikTok entry 實際上已直接帶完整網址，此處只處理它沒帶的退化
+     * 情形：`tiktok.com/video/{id}` 不被 TikTok extractor 接受，會落入 generic
+     * extractor 並導向 404，必須帶上 `@handle` 區段。
+     *
+     * Douyin 不需要對應處理 —— 實測 `douyin.com/video/{id}` 可正確解析。
+     */
+    private static String buildTikTokVideoUrl(String videoId, org.json.JSONObject entry, String sourceUrl) {
+        // 只取 uploader：實測 channel 是顯示名稱、uploader_id 是純數字 id，
+        // 兩者拿來組網址都會組出錯的。
+        String handle = (entry != null) ? entry.optString("uploader", "") : "";
+        if (handle == null || handle.trim().isEmpty()) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("tiktok\\.com/@([\\w.\\-]+)").matcher(sourceUrl);
+            handle = m.find() ? m.group(1) : "";
+        }
+        handle = handle.trim();
+        if (handle.startsWith("@")) {
+            handle = handle.substring(1);
+        }
+        // 兩個來源都取不到時保留舊格式，結果不會比現況更差。
+        if (handle.isEmpty()) {
+            return "https://www.tiktok.com/video/" + videoId;
+        }
+        return "https://www.tiktok.com/@" + handle + "/video/" + videoId;
+    }
+
+    private void processEntriesHelper(String originalUrl, org.json.JSONArray entries, com.getcapacitor.JSArray itemsArr, String processId, java.util.List<String> rangeArgs) throws Exception {
         for (int i = 0; i < entries.length(); i++) {
             org.json.JSONObject entry = entries.getJSONObject(i);
             String rawItemTitle = entry.optString("title", entry.optString("fulltitle", "影片 " + (i + 1)));
@@ -131,14 +226,20 @@ public class YoutubeDlPlugin extends Plugin {
                     subReq.addOption("--flat-playlist");
                     subReq.addOption("-J");
                     subReq.addOption("--no-warnings");
+                    addParseResilienceOptions(subReq);
+                    // 子清單沿用同一批次範圍，否則頻道的分頁展開會繞過上限。
+                    addRangeOptions(subReq, rangeArgs);
 
-                    YoutubeDLResponse subResp = YoutubeDL.getInstance().execute(subReq);
+                    YoutubeDLResponse subResp = YoutubeDL.getInstance().execute(subReq, processId);
                     org.json.JSONObject subData = new org.json.JSONObject(subResp.getOut());
                     org.json.JSONArray subEntries = subData.optJSONArray("entries");
                     if (subEntries != null && subEntries.length() > 0) {
-                        processEntriesHelper(originalUrl, subEntries, itemsArr);
+                        processEntriesHelper(originalUrl, subEntries, itemsArr, processId, rangeArgs);
                         continue;
                     }
+                } catch (YoutubeDL.CanceledException e) {
+                    // 取消必須向外傳遞，否則會被當成「這個子清單展開失敗」而繼續跑下一個。
+                    throw e;
                 } catch (Exception e) {
                     Log.w(TAG, "Failed to expand sub-playlist in Android: " + itemUrl, e);
                 }
@@ -149,7 +250,7 @@ public class YoutubeDlPlugin extends Plugin {
                 if (originalUrl.contains("douyin.com")) {
                     itemUrl = "https://www.douyin.com/video/" + targetId;
                 } else if (originalUrl.contains("tiktok.com")) {
-                    itemUrl = "https://www.tiktok.com/video/" + targetId;
+                    itemUrl = buildTikTokVideoUrl(targetId, entry, originalUrl);
                 } else {
                     itemUrl = "https://www.youtube.com/watch?v=" + targetId;
                 }

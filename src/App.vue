@@ -797,6 +797,7 @@ import { open as openShell } from '@tauri-apps/plugin-shell';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
+import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { createStorage } from './composables/useStorage';
 import { LocalStorageAdapter, TauriStoreAdapter, localStorageLegacyFallback } from './composables/storageAdapters';
@@ -1729,6 +1730,9 @@ const simulateGlobalNewVideo = async () => {
 const url = ref('');
 const mp3Mode = storage.defineSetting('avd_mp3_mode', false);
 
+/** 各來源的解析進度：key 為 parseProgressKey 正規化後的來源鍵。 */
+const parseProgress = storage.defineSetting<Record<string, ParseProgress>>('avd_parse_progress', {});
+
 const wifiSsid = storage.defineSetting('avd_wifi_ssid', '');
 const wifiPassword = storage.defineSetting('avd_wifi_pwd', '');
 const showWifiModal = ref(false);
@@ -2190,19 +2194,113 @@ const addTask = async (urlToAdd: string) => {
     urlToAdd.includes('/c/') ||
     (urlToAdd.includes('youtube.com/@') && !urlToAdd.includes('/watch'));
 
+  // 高成本的創作者頁面解析須先徵詢確認。
+  // 刻意不併入 isStrictChannelUrl：那條路徑會連帶詢問「加入自動追蹤」，
+  // 而 TikTok／Douyin 沒有追蹤能力，resolveYouTubeChannel 對它們也不適用。
+  const isCreatorPageUrl = urlToAdd.includes('tiktok.com/@') || urlToAdd.includes('douyin.com/user/');
+
+  // 本次要抓的批次範圍，由該來源已記錄的進度決定。
+  const progressKey = parseProgressKey(urlToAdd);
+  let fetchedBefore = parseProgress.value[progressKey]?.fetched || 0;
+  const sourceComplete = parseProgress.value[progressKey]?.complete || false;
+
+  // 有進度時一律徵詢確認（讓使用者知道本次抓的是哪一段）；
+  // 無進度時只有高成本的創作者頁面才需要事前確認。
+  if (isPlaylistUrl && (isCreatorPageUrl || fetchedBefore > 0)) {
+    const rangeHint = `${fetchedBefore + 1}–${fetchedBefore + PARSE_BATCH_SIZE}`;
+    let message: string;
+    let confirmText: string;
+
+    if (sourceComplete) {
+      message = `此來源先前已抓完全部 ${fetchedBefore} 部。\n\n要從頭重新抓取嗎？`;
+      confirmText = '從頭開始';
+    } else if (fetchedBefore > 0) {
+      message = `此來源已抓過前 ${fetchedBefore} 部。\n\n本次將抓取第 ${rangeHint} 部。`;
+      confirmText = '繼續抓下一批';
+    } else {
+      message = `此網址指向創作者的全部作品。\n\n本次將抓取前 ${PARSE_BATCH_SIZE} 部，其餘可日後再次輸入同一網址接續抓取。`;
+      confirmText = '掃描並選擇下載';
+    }
+
+    try {
+      await showConfirmDialog({
+        title: sourceComplete ? '重新抓取' : '掃描創作者頁面',
+        message,
+        confirmButtonText: confirmText,
+        cancelButtonText: '略過',
+        confirmButtonColor: '#1989fa'
+      });
+      if (sourceComplete) fetchedBefore = 0;
+    } catch {
+      // 抓到一半時，取消後再問一次是否改為從頭開始（Vant 對話框只有兩個按鈕）
+      if (fetchedBefore > 0 && !sourceComplete) {
+        try {
+          await showConfirmDialog({
+            title: '從頭開始？',
+            message: `要改為從第 1 部重新抓取嗎？\n\n(先前記錄的 ${fetchedBefore} 部進度會被清除)`,
+            confirmButtonText: '從頭開始',
+            cancelButtonText: '放棄',
+            confirmButtonColor: '#1989fa'
+          });
+          fetchedBefore = 0;
+        } catch {
+          return;
+        }
+      } else {
+        // 使用者略過：不啟動解析，也不顯示載入提示
+        return;
+      }
+    }
+  }
+
   if (isPlaylistUrl) {
+    // 解析已結束（成功／失敗／逾時）後，關閉提示不應再被視為使用者取消。
+    let parseSettled = false;
+    let parseCancelled = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    const abortParse = () => {
+      DownloadService.cancelParsePlaylist().catch(e => console.warn('取消解析失敗', e));
+    };
+
     showLoadingToast({
-      message: '正在解析播放清單資訊...',
+      message: '正在解析播放清單資訊...\n（點此取消）',
       forbidClick: true,
-      duration: 0
+      duration: 0,
+      closeOnClick: true,
+      onClose: () => {
+        if (!parseSettled) {
+          parseSettled = true;
+          parseCancelled = true;
+          abortParse();
+        }
+      }
     });
 
     try {
-      const res = await DownloadService.parsePlaylist(urlToAdd);
+      // 總時長的唯一保證：--socket-timeout 只約束單次連線，擋不住反覆重試。
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutTimer = setTimeout(() => reject(new Error('PARSE_TIMEOUT')), PARSE_TIMEOUT_MS);
+      });
+      const res = await Promise.race([
+        DownloadService.parsePlaylist(urlToAdd, { fetched: fetchedBefore }),
+        timeoutPromise
+      ]);
+      parseSettled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       closeToast();
 
+      // 解析在使用者按下取消後才回來：尊重取消，不彈出嚮導對話框。
+      if (parseCancelled) return;
+
+      // 只有解析成功才推進進度；失敗、逾時、取消都不動，使用者可原地重試。
+      // 推進量取實際回傳筆數（未勾選的也算看過了）。
+      parseProgress.value = {
+        ...parseProgress.value,
+        [progressKey]: advanceParseProgress(fetchedBefore, res.items?.length || 0)
+      };
+
       if (!res.items || res.items.length === 0) {
-        showToast('此播放清單無可下載的影片');
+        showToast(fetchedBefore > 0 ? '已無更多影片可抓取' : '此播放清單無可下載的影片');
         return;
       }
 
@@ -2232,8 +2330,19 @@ const addTask = async (urlToAdd: string) => {
       showPlaylistModal.value = true;
       url.value = '';
     } catch (e: any) {
+      const wasTimeout = e?.message === 'PARSE_TIMEOUT';
+      parseSettled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
       closeToast();
-      showToast(e.message || '播放清單解析失敗');
+
+      if (wasTimeout) {
+        // 逾時同樣要終止背景行程，否則會留下持續重試的孤兒行程。
+        abortParse();
+        showToast(`解析逾時（超過 ${Math.round(PARSE_TIMEOUT_MS / 1000)} 秒），已中止`);
+      } else if (e?.message !== PARSE_CANCELLED) {
+        showToast(e.message || '播放清單解析失敗');
+      }
+      // 使用者主動取消不顯示錯誤訊息
     }
     return;
   }
