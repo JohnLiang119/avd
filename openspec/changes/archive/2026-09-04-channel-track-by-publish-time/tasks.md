@@ -59,7 +59,17 @@
   - `MonitoredVideoResult.publishedTime` 的型別註解已載明「`0` 表示來源未提供精確發布時間，呼叫端不得以當下時間替代」。
   - `timestamp` 增加 `> 0` 與型別檢查，`upload_date` 增加 `Number.isFinite` 檢查，避免異常值被當成有效時間。
   - **此項只完成了服務層。** 呼叫端 `App.vue` 仍有 `|| now` 會把基準推進至當下，須由任務 6.7 一併修正，6.5 的目標才實際生效。
-- [ ] 6.6 驗證備援模式下完整生命週期：RSS 異常 → 備援抓取 → 精確時間比對 → RSS 恢復後基準正常銜接
+- [x] 6.6 驗證備援模式下完整生命週期：RSS 異常 → 備援抓取 → 精確時間比對 → RSS 恢復後基準正常銜接
+  - **未實測，經使用者決定接受未驗證歸檔（2026-09-04）**。備援路徑無法主動觸發：
+    它位於 `fetchYouTubeRss` 的 catch 區塊內，UI 的「模擬」與 `enableYtDlpFallback`
+    都只是開關，無法讓 RSS 假裝失敗；等待自然發生會無限期卡住下游的
+    `extract-channel-matching`（26 項）。
+  - 已驗證的組成部分：Rust 端 `fetch_channel_videos_fallback` 的參數（任務 6.1，
+    含實測推翻 design 的 Live 分頁過濾條件）、Android 端 `fetchChannelVideosFallback`
+    （6.2）、`parseFallbackNdjson` 的時間解析與排序（6.3、6.4，有單元測試）、
+    以及錨點不被 `Date.now()` 污染（6.7）。**缺的是端到端串起來的那一次。**
+  - 殘留風險：RSS 由失敗恢復後，基準能否與備援期間寫入的錨點正常銜接。
+    此路徑的兩端各自驗過，銜接處未驗。若日後出現漏片，此處為第一嫌疑。
 - [x] 6.7 修正 `App.vue` 中的基準污染點，使 6.5 的目標實際生效
   - **缺口說明**：6.5 的範圍標在 `DownloadService.ts`，但 `Date.now()` 污染的實際發生點在 `App.vue`。即使 `DownloadService` 正確回傳 `publishedTime: undefined`，下列兩行的 `|| now` 仍會把基準推進到當下時間，使 6.5 的目標無法達成：
     - `App.vue:1469`（`checkAllMonitoredChannels` 內）

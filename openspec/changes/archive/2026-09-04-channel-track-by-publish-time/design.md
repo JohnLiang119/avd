@@ -8,8 +8,8 @@
 - 將頻道比對的核心時點改為「影片實際發布時間 (`lastPublishedTime`)」，防止 RSS 快取延遲導致影片漏抓。
 - 採用「發布時間 + Video ID 去重」的雙重錨點演算法，支援同時間排程多部影片發布的情境。
 - 提供舊資料相容層，自動將使用者既有 `localStorage` 中的 `lastCheckTime` 平滑過渡至 `lastPublishedTime`。
-- 保留全域 `monitorConfig.lastGlobalCheckTime` 僅用於排程間隔判定（如每 60 分鐘觸發一次），不干涉頻道影片比對。
 
+- 保留全域 `monitorConfig.lastGlobalCheckTime` 僅用於排程間隔判定（如每 60 分鐘觸發一次），不干涉頻道影片比對。
 **Non-Goals:**
 - 不變更排程輪詢頻率（維持 60 分鐘預設與手動立即檢查）。
 - 不重寫 YouTube RSS 下載或解析通訊協定本身，僅重構比對邏輯與資料欄位。
@@ -102,11 +102,11 @@ const newVideos = videos.filter(v => {
 - **時間解析優先順序**：`timestamp`（秒 × 1000）→ `upload_date`（YYYYMMDD → Date）→ 不再 fallback 到 `Date.now()`，若兩者皆無則該筆影片不參與時間基準更新。
 
 #### 8.4 探索驗證數據
-| 模式 | timestamp | upload_date | 速度（2部）| 涵蓋分頁 |
-|------|-----------|-------------|-----------|----------|
-| `--flat-playlist` | ❌ null | ❌ 不存在 | ~2s | Videos+Live+Shorts |
-| 完整抓取 (`--skip-download`) | ✅ 精確到秒 | ✅ YYYYMMDD | ~5-10s | Videos+Live+Shorts |
-| RSS | ✅ ISO 8601 | N/A | ~1s | Videos+Shorts（不含 Live） |
+| 模式                         | timestamp  | upload_date | 速度（2部） | 涵蓋分頁                   |
+| ---------------------------- | ---------- | ----------- | ----------- | -------------------------- |
+| `--flat-playlist`            | ❌ null     | ❌ 不存在    | ~2s         | Videos+Live+Shorts         |
+| 完整抓取 (`--skip-download`) | ✅ 精確到秒 | ✅ YYYYMMDD  | ~5-10s      | Videos+Live+Shorts         |
+| RSS                          | ✅ ISO 8601 | N/A         | ~1s         | Videos+Shorts（不含 Live） |
 
 ## Risks / Trade-offs
 

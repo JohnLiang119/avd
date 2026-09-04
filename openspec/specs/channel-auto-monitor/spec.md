@@ -1,7 +1,9 @@
-﻿## Purpose
+## Purpose
 
 提供 YouTube 頻道自動追蹤與優先排程下載機制：使用者可訂閱並管理頻道清單，系統定期透過官方 RSS 輪詢比對新影片（免消耗 API 配額），偵測到新片時自動建立下載任務並插入佇列最前端優先執行，讓使用者無須手動查看即可獲取追蹤頻道的最新影片。
+
 ## Requirements
+
 ### Requirement: Channel Subscription & Management
 系統 MUST（必須）允許使用者手動輸入 YouTube 頻道網址或 Handle 解析出資訊，提供視覺化追蹤清單，並支援個別頻道狀態切換與刪除。當使用者在主畫面上方的網址列直接輸入頻道網址時，系統也 MUST（必須）檢查該頻道是否在追蹤清單內，若不在則 MUST（必須）主動詢問使用者是否要加入追蹤。
 
@@ -18,11 +20,23 @@
 - **THEN** 系統不修改追蹤清單，直接執行該頻道的單次下載任務
 
 ### Requirement: Periodic Check & New Video Matching
-系統 MUST 支援每 60 分鐘自動或手動執行頻道輪詢，預設透過 YouTube 官方 RSS 比對影片發布時間 (`publishedTime > lastPublishedTime`) 判定新影片。
+系統 MUST 支援每 60 分鐘自動或手動執行頻道輪詢，透過 YouTube 官方 RSS 並以影片實際發布時間判定新影片 (`publishedTime > lastPublishedTime`)。
 
 #### Scenario: Auto and manual checking
 - **WHEN** 系統啟動且距離上次檢查超過 60 分鐘，或使用者點擊手動檢查
-- **THEN** 系統預設呼叫官方 RSS 獲取最新影片，比對發布時間篩選出新影片，並精確更新頻道發布時間錨點
+- **THEN** 系統解析 RSS 並比對影片實際發布時間篩選出新發布的影片，並將該頻道的 `lastPublishedTime` 與 `lastKnownVideoId` 更新為最新影片的數值
+
+#### Scenario: First time channel subscription anchor
+- **WHEN** 使用者剛新增追蹤頻道或頻道首次執行檢查
+- **THEN** 系統將該頻道目前最新影片的發布時間與 ID 設為起始基準錨點，不觸發歷史影片下載
+
+#### Scenario: Display latest publish time on channel card
+- **WHEN** 使用者檢視已追蹤頻道清單
+- **THEN** 系統在各頻道卡片上展示該頻道最新影片之發布時間格式化資訊
+
+#### Scenario: Task title with publish time on main queue
+- **WHEN** 系統將任何影片建立、進行下載或完成為下載任務並於主畫面佇列呈現（包含使用者手動單一加入、自動追蹤或播放清單解析）
+- **THEN** 系統產生的任務標題（抬頭）在排隊、下載中與完成後始終穩定包含該影片之發布時間格式化資訊 (YYYY/MM/DD HH:mm:ss)，不因進度更新或下載完成事件而遺失
 
 ### Requirement: Priority Insertion & Automatic Download
 系統MUST（必須）將偵測到的新影片建立為 MP4 高畫質任務並插入下載佇列最前面 (`tasks.unshift`)，若當前無任務則自動開始下載，並更新檢查時間。
@@ -71,4 +85,3 @@
 #### Scenario: Task and notification transparency
 - **WHEN** 新影片被加入下載佇列或完成頻道檢查
 - **THEN** 系統在任務狀態文字（`line`）與通知提示中明確標記資料來源通道（如 `【自動追蹤 (RSS)】` 或 `【自動追蹤 (yt-dlp 備援)】`）
-
