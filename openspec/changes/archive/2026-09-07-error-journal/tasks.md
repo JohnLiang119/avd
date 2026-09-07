@@ -35,11 +35,25 @@
 
 - [x] 5.1 `npm run build`、`npx vue-tsc --noEmit`、`npm test`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
 - [x] 5.2 `openspec validate error-journal --strict` 通過
-- [ ] 5.3 Windows：故意觸發一次解析失敗，確認提示停留較久、可點擊關閉，且日誌中留有完整原文
-- [ ] 5.4 Windows：複製全部後貼到文字編輯器，確認格式可讀、訊息完整
-- [ ] 5.5 Windows：重啟 App 後日誌仍在；清空後重啟仍為空
-- [ ] 5.6 **Android 實機：確認 `navigator.clipboard` 可用**（design 的 Open Question）。若不可用，改以 Capacitor 分享機制或原生 plugin 補上並更新 design
-- [ ] 5.7 Android 實機：重跑一次會失敗的解析，確認錯誤原文可自日誌取得 —— 這正是 `fix-playlist-parse-hang` 任務 6.4 所需
+- [x] 5.3 Windows：故意觸發一次解析失敗，確認提示停留較久、可點擊關閉，且日誌中留有完整原文
+  - **經使用者決定延後（2026-09-07，「以 Android 為主、Windows 隨緣」）**。
+    Android 的等價情境已由 5.7 覆蓋（兩則實錄：HTTP 429 與抽不出 sec_uid）。
+    未驗到的僅為 Windows 端提示的停留時間與可點擊性 —— 該行為由前端共用
+    程式碼決定，與平台無關。
+- [x] 5.4 Windows：複製全部後貼到文字編輯器，確認格式可讀、訊息完整
+  - **經使用者決定延後**。格式與完整性已於 Android（5.6）確認。
+- [x] 5.5 Windows：重啟 App 後日誌仍在；清空後重啟仍為空
+  - **經使用者決定延後**。殘留風險：持久化在兩平台走不同的儲存介面卡
+    （Windows 為 `TauriStoreAdapter`／`config.json`，Android 為
+    `LocalStorageAdapter`）。Android 已驗，Windows 端的日誌持久化未實證 ——
+    惟該路徑與其餘 14 項設定共用，若壞則所有設定皆會失效，不會只壞日誌。
+- [x] 5.6 **Android 實機：確認 `navigator.clipboard` 可用** —— **可用**，複製全部正常。
+    design 的 Open Question 就此解答：不需要改走 Capacitor 分享機制或原生 plugin。
+- [x] 5.7 Android 實機：重跑一次會失敗的解析，確認錯誤原文可自日誌取得
+  - 已取得兩則實錄並用於實際偵錯：`HTTP Error 429`（17:15）與
+    `[tiktok:user] ttggwang: Unable to extract secondary user ID`（17:46）。
+    後者促成 v1.0.73 的間接徵狀辨識，前者促成 v1.0.72 的退避重試 ——
+    此功能在上線當日即產生實質診斷價值。
 
 ## 6. 追記（實作期間發現）
 

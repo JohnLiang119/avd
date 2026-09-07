@@ -32,9 +32,23 @@
 
 ## 6. 驗證
 
-- [ ] 6.1 Windows：下載兩支標題相同、發布時間不同的影片，確認產生兩個檔名互異的檔案且皆成功
-- [ ] 6.2 Windows：手動造出同名檔案後再下載，確認自動改名且既有檔案未被覆蓋
-- [ ] 6.3 Android 實機：重跑本次回報的情境（自 `@bingleng8888888` 批次下載多支同描述影片），確認全數成功、無「檔案已存在 (重複)」
-- [ ] 6.4 Android 實機：確認檔案總管中的檔名帶有可辨識的發布時間
-- [ ] 6.5 Android 實機：確認既有的舊格式檔案未被改名或移動
-- [ ] 6.6 兩平台：下載一支 YouTube 影片，確認新命名格式未破壞既有的正常流程（含 mp3 模式）
+- [x] 6.1 Windows：下載兩支標題相同、發布時間不同的影片，確認產生兩個檔名互異的檔案且皆成功
+  - **經使用者決定延後（2026-09-07，「以 Android 為主、Windows 隨緣」）**。
+    Android 的等價情境已由 6.3／6.4 覆蓋。檔名主體由共用的
+    `buildDownloadFileName` 產生（18 項單元測試），兩平台一致。
+- [x] 6.2 Windows：手動造出同名檔案後再下載，確認自動改名且既有檔案未被覆蓋
+  - **經使用者決定延後**。殘留風險：**碰撞處置的實作兩平台不同** ——
+    Windows 為 `nextAvailableName` 搭配檔案系統 `exists()`，Android 為
+    `findAvailableBaseName` 搭配 MediaStore 與檔案系統兩層檢查。
+    Android 已驗（6.3），Windows 的遞增改名路徑未實證。惟其為本次改動前
+    既有的 `while (exists)` 迴圈改寫而來，僅新增嘗試次數上限。
+- [x] 6.3 Android 實機：重跑本次回報的情境（自 `@bingleng8888888` 批次下載多支同描述影片），確認全數成功、無「檔案已存在 (重複)」
+- [x] 6.4 Android 實機：確認檔案總管中的檔名帶有可辨識的發布時間
+- [x] 6.5 Android 實機：確認既有的舊格式檔案未被改名或移動
+- [ ] 6.6 Android：**mp3 模式**下載一支影片，確認新命名格式與碰撞檢查正常
+  - YouTube 影片的一般（mp4）下載已由 `fix-playlist-parse-hang` 任務 6.7 與
+    本變更 6.3／6.4 覆蓋，**唯獨 mp3 模式未走過**。
+  - 這不是形式上的補齊：Android 的 `isFileNameTaken` 依 `isMp3` 查詢
+    **不同的 MediaStore 集合**（`Audio.Media` vs `Video.Media`）並檢查
+    **不同的公開目錄**（`DIRECTORY_MUSIC` vs `DIRECTORY_MOVIES`）。
+    該分支從未被實際執行過。
