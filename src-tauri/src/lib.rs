@@ -116,6 +116,30 @@ fn install_win_msi(msi_path: String) -> Result<(), String> {
     std::process::exit(0);
 }
 
+/// 網路狀態探測固定端點：僅回應 204 且無內容，用於判定「已連線但能否連上網際網路」，
+/// 不代表任何特定網站可用（見 show-network-status/design.md）。
+const NETWORK_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
+
+/// 主畫面網路狀態探測：只有取得預期的 204 才回傳 true。
+/// 任何失敗（連線層、逾時、非 204 狀態碼）一律回傳 false，不視為例外——
+/// 呼叫端（`useNetworkStatus`）依此區分 online 與 degraded，此處不代為判斷。
+#[tauri::command]
+fn probe_internet_connectivity(timeout_ms: u64) -> bool {
+    use std::time::Duration;
+
+    let timeout = Duration::from_millis(timeout_ms.max(1));
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(timeout)
+        .timeout_read(timeout)
+        .redirects(0)
+        .build();
+
+    match agent.get(NETWORK_PROBE_URL).call() {
+        Ok(response) => response.status() == 204,
+        Err(_) => false,
+    }
+}
+
 #[tauri::command]
 fn fetch_http_text(url: String) -> Result<String, String> {
     use std::time::Duration;
@@ -220,6 +244,7 @@ pub fn run() {
             download_win_update_file,
             install_win_msi,
             fetch_http_text,
+            probe_internet_connectivity,
             fetch_channel_videos_fallback,
             update_yt_dlp,
             get_yt_dlp_version

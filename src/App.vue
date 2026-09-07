@@ -51,6 +51,38 @@
           </div>
         </div>
       </div>
+      <div v-if="!isTvMode" style="margin-bottom: 12px;">
+        <div v-if="networkStatusText.compact" style="display: flex; justify-content: flex-end;">
+          <span
+            style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;"
+            :style="networkStatusState === 'online'
+              ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
+              : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
+          >
+            <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
+            <span v-else>{{ networkStatusText.icon }}</span>
+            {{ networkStatusText.main }}
+          </span>
+        </div>
+        <div
+          v-else
+          style="width: 100%; border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; border: 1px solid transparent;"
+          :style="networkStatusState === 'offline'
+            ? 'background: #fef2f2; border-color: #fecaca; color: #b91c1c;'
+            : 'background: #fffbeb; border-color: #fde68a; color: #92400e;'"
+        >
+          <span style="font-size: 18px; flex-shrink: 0; line-height: 1;">{{ networkStatusText.icon }}</span>
+          <div style="flex: 1; line-height: 1.4;">
+            <span style="font-weight: 700; display: block; margin-bottom: 1px;">{{ networkStatusText.main }}</span>
+            <span v-if="networkStatusText.sub" style="font-size: 11px; opacity: 0.85;">{{ networkStatusText.sub }}</span>
+          </div>
+          <button
+            type="button"
+            style="flex-shrink: 0; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;"
+            @click="networkStatus.recheck()"
+          >重新檢查</button>
+        </div>
+      </div>
       <van-form @submit="onSubmit" class="download-form" v-show="!isTvMode">
         <div v-if="isTauri()" style="display: flex; align-items: center; gap: 8px; margin: 0 16px;">
           <van-cell-group inset style="flex: 1; margin: 0;">
@@ -876,6 +908,7 @@ import {
 } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
+import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
 import { classifyChannelRssError, describeChannelRssFailure, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
@@ -1058,6 +1091,33 @@ const toggleTvMode = () => {
 };
 void toggleTvMode;
 
+/**
+ * 主畫面網路狀態：與 TV 接收模式無關，即使切到 TV 模式也持續在背景探測
+ * （不改變 TV 接收模式既有行為），只在畫面上以 `v-show="!isTvMode"` 隱藏顯示。
+ */
+const networkStatus = useNetworkStatus({
+  probe: (timeoutMs) => DownloadService.probeInternetConnectivity(timeoutMs),
+  isDeviceOnline: () => navigator.onLine,
+  onDeviceOnlineChange: (cb) => {
+    const onOnline = () => cb(true);
+    const onOffline = () => cb(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  },
+  isPageVisible: () => document.visibilityState === 'visible',
+  onVisibilityChange: (cb) => {
+    const handler = () => cb(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  },
+});
+const networkStatusState = networkStatus.state;
+const networkStatusText = computed(() => describeNetworkStatus(networkStatusState.value));
+
 const targetTvIp = storage.defineSetting('avd_target_tv_ip', '');
 
 const showCastListModal = ref(false);
@@ -1172,6 +1232,7 @@ const fetchRemoteTasks = async () => {
 
 
 onMounted(async () => {
+  networkStatus.start();
   await storage.hydrate();
 
   if (taskStore.trimmedOnRestore.value > 0) {
@@ -3052,12 +3113,16 @@ onUnmounted(() => {
   if (showQrModal.value) {
     stopLocalServer();
   }
+  networkStatus.stop();
 });
 
 // 從背景返回時檢查
 App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
   if (isActive) {
     checkSharedUrl();
+    // 部分 Android 版本的 WebView 在回到前景時不可靠觸發 visibilitychange，
+    // 在此補一次手動刷新作為保險（見 useNetworkStatus 內建的可見性監聽為主要來源）。
+    networkStatus.recheck();
   }
 });
 
@@ -3146,6 +3211,18 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .app-container {
   min-height: 100vh;
   background-color: #f7f8fa;
+}
+.ns-spinner {
+  width: 9px;
+  height: 9px;
+  border: 2px solid #9ca3af;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ns-spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes ns-spin {
+  to { transform: rotate(360deg); }
 }
 .content {
   padding: 20px;

@@ -1289,6 +1289,26 @@ export const DownloadService = {
     return invoke('stop_win_local_server');
   },
 
+  /**
+   * 主畫面網路狀態探測：打固定的 generate_204 端點，只有取得預期回應才視為 online。
+   *
+   * 刻意不拋出例外——任何失敗（連線層、逾時、非預期回應）一律回傳 false，
+   * 由呼叫端（`useNetworkStatus`）依此區分 online 與 degraded，
+   * 與個別 RSS 請求失敗後的事後分類（`rateLimit.ts` 的 `classifyChannelRssError`）
+   * 是兩件獨立的事，見 show-network-status/design.md 的 Non-Goals。
+   */
+  async probeInternetConnectivity(timeoutMs: number): Promise<boolean> {
+    try {
+      if (!isTauri()) {
+        const res = await YoutubeDlPlugin.probeInternetConnectivity({ timeoutMs });
+        return !!res?.online;
+      }
+      return await invoke<boolean>('probe_internet_connectivity', { timeoutMs });
+    } catch (e) {
+      return false;
+    }
+  },
+
   async isTvDevice(): Promise<{ isTv: boolean }> {
     if (!isTauri()) {
       try {

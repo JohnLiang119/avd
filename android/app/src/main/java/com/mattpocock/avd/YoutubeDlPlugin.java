@@ -38,6 +38,13 @@ public class YoutubeDlPlugin extends Plugin {
     private static final String TAG = "YoutubeDlPlugin";
     private boolean isInitialized = false;
 
+    /**
+     * 網路狀態探測固定端點：僅回應 204 且無內容，用於判定「已連線但能否連上網際網路」，
+     * 不代表任何特定網站可用（見 show-network-status/design.md）。與 Windows/Tauri 端
+     * （src-tauri/src/lib.rs 的 NETWORK_PROBE_URL）使用同一端點。
+     */
+    private static final String NETWORK_PROBE_URL = "https://www.gstatic.com/generate_204";
+
     @Override
     public void load() {
         super.load();
@@ -694,6 +701,37 @@ public class YoutubeDlPlugin extends Plugin {
                 Log.e(TAG, "Failed to fetch channel RSS", e);
                 call.reject("獲取頻道 RSS 失敗: " + e.getMessage());
             }
+        }).start();
+    }
+
+    /**
+     * 主畫面網路狀態探測：只有取得預期的 204 才視為 online。
+     * 任何失敗（DNS、逾時、連線被拒、非預期狀態碼）一律回傳 online=false，
+     * 不以 call.reject 回報例外——呼叫端（useNetworkStatus）依 online 值
+     * 區分 online 與 degraded，此處不代為判斷。
+     */
+    @PluginMethod
+    public void probeInternetConnectivity(PluginCall call) {
+        int timeoutMs = call.getInt("timeoutMs", 4000);
+        int effectiveTimeoutMs = Math.max(timeoutMs, 1);
+
+        new Thread(() -> {
+            boolean online;
+            try {
+                java.net.URL urlObj = new java.net.URL(NETWORK_PROBE_URL);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) urlObj.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(effectiveTimeoutMs);
+                conn.setReadTimeout(effectiveTimeoutMs);
+                conn.setInstanceFollowRedirects(false);
+                online = conn.getResponseCode() == 204;
+            } catch (Exception e) {
+                online = false;
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("online", online);
+            call.resolve(ret);
         }).start();
     }
 
