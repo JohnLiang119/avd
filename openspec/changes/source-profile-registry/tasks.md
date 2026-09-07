@@ -110,8 +110,8 @@
 
 ## 8. 建置與驗證
 
-- [ ] 8.1 `npm run build`、`npx vue-tsc --noEmit`、`npm test`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
-- [ ] 8.2 `openspec validate source-profile-registry --strict` 通過
+- [x] 8.1 `npm run build`、`npx vue-tsc --noEmit`、`npm test`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
+- [x] 8.2 `openspec validate source-profile-registry --strict` 通過
 - [ ] 8.3 Windows：貼上 Bilibili 空間頁，確認 2 秒內出現對話框，標題隨後陸續補上
 - [ ] 8.4 Windows：補齊進行中關閉對話框，確認背景行程已終止
 - [ ] 8.5 Windows：補齊進行中即勾選並開始下載，確認下載正常且檔名正確
