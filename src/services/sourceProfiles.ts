@@ -139,6 +139,23 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     buildItemUrl: (videoId) => `https://www.douyin.com/video/${videoId}`,
   },
   {
+    id: 'bilibili-space',
+    label: 'Bilibili 空間頁',
+    // 實測 yt-dlp 的 BilibiliSpaceVideo extractor 完全支援：
+    // 2 秒回傳全部 38 筆，每筆皆為完整的 bilibili.com/video/BV... 網址。
+    kind: 'collection',
+    match: url => url.includes('space.bilibili.com/'),
+    // mid 在路徑上，天然不受 spm_id_from 等追蹤參數影響
+    progressKey: url => `bilibili:space:${capture(url, /space\.bilibili\.com\/(\d+)/)}`,
+    // 38 筆僅 2 秒，且有 200 筆上限兜著，不值得多一道確認
+    needsPreParseConfirm: false,
+    // entry 只有 id / url / ie_key —— 沒有標題、片長、發布時間，需補齊
+    flatMetadata: 'none',
+    // 空間頁回傳扁平的影片清單，不像 YouTube 頻道那樣展開成多個分頁
+    expandsToSequences: false,
+    supportsChannelTracking: false,
+  },
+  {
     id: 'youtube-playlist',
     label: 'YouTube 播放清單',
     kind: 'collection',

@@ -58,10 +58,20 @@
 
 ## 4. Bilibili 空間頁納入支援
 
-- [ ] 4.1 新增 `bilibili-space` profile：`space.bilibili.com/{mid}`（含 `/video` 變體）、`kind: 'collection'`、`flatMetadata: 'none'`、`progressKey` 取 `bilibili:space:{mid}`
-- [ ] 4.2 決定是否需要 `needsPreParseConfirm`（實測 38 筆僅 2 秒，可能不需要）
+- [x] 4.1 新增 `bilibili-space` profile：`space.bilibili.com/{mid}`（含 `/video` 變體）、`kind: 'collection'`、`flatMetadata: 'none'`、`progressKey` 取 `bilibili:space:{mid}`
+- [x] 4.2 決定是否需要 `needsPreParseConfirm` —— **不需要**。38 筆僅 2 秒，
+      且有 200 筆上限兜著；多一道確認只是多一次點擊。有進度時仍會出現
+      續抓確認，那由 `progressView.hasAny` 驅動，與此旗標無關。
 - [ ] 4.3 實測：解析該網址能得到完整項目清單，數量與 `playlist_count` 一致
-- [ ] 4.4 實測：帶不同 `spm_id_from` 的同一網址取得相同進度鍵
+  - **本次無法完成：Bilibili 正在擋這個 IP**（`Request is blocked by server (412)`），
+    為 09-04 密集實測的餘波。
+  - 已排除一項假設：加不加 `--rm-cache-dir` 皆為 412，故非 App 的參數所致。
+  - 09-04 的成功紀錄可資參照：`playlist_count: 38`、2 秒、entries 皆為
+    完整的 `bilibili.com/video/BV...`、`_type` 為 `url`（非分頁）。
+  - 併入第 8 組的實機驗證，屆時限流應已解除。
+- [x] 4.4 帶不同 `spm_id_from` 的同一網址取得相同進度鍵 —— 由單元測試涵蓋。
+      mid 位於路徑上（`space.bilibili.com/{mid}`），追蹤參數在查詢字串裡，
+      天然不受影響；`/video` 變體亦得到相同的鍵。此為純字串邏輯，不需網路。
 
 ## 5. 補齊階段
 

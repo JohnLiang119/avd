@@ -21,6 +21,22 @@ describe('resolveSourceProfile 命中', () => {
     expect(id('https://v.douyin.com/abcdef/')).toBe('douyin-short');
   });
 
+  it('Bilibili 空間頁', () => {
+    expect(id('https://space.bilibili.com/3493134753335919?spm_id_from=333.788.upinfo.detail.click'))
+      .toBe('bilibili-space');
+    expect(kind('https://space.bilibili.com/3493134753335919')).toBe('collection');
+    // /video 變體
+    expect(id('https://space.bilibili.com/3493134753335919/video')).toBe('bilibili-space');
+  });
+
+  it('Bilibili 的清單資訊不完整，需要補齊階段', () => {
+    // 實測 entry 只有 id / url / ie_key 三個欄位，對照 TikTok 的 26 個
+    const p = resolveSourceProfile('https://space.bilibili.com/123');
+    expect(p.flatMetadata).toBe('none');
+    // 空間頁是扁平清單，不展開成多個分頁
+    expect(p.expandsToSequences).toBe(false);
+  });
+
   it('YouTube 播放清單', () => {
     expect(id('https://www.youtube.com/playlist?list=PLabc-123')).toBe('youtube-playlist');
   });
@@ -83,6 +99,8 @@ describe('progressKey 的字面輸出（抽離前 parseProgressKey 的既有格�
     ['https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow', 'yt:channel:UCSJ4gkVC6NrvII8umztf0Ow'],
     ['https://www.youtube.com/@SomeCreator', 'yt:@SomeCreator'],
     ['https://www.douyin.com/user/MS4wLjABAAAA', 'douyin:MS4wLjABAAAA'],
+    ['https://space.bilibili.com/3493134753335919?spm_id_from=333.788.x', 'bilibili:space:3493134753335919'],
+    ['https://space.bilibili.com/3493134753335919/video', 'bilibili:space:3493134753335919'],
     ['https://example.com/list?token=abc', 'https://example.com/list'],
   ];
 
@@ -105,6 +123,8 @@ describe('能力宣告', () => {
   it('只有創作者頁需要事前確認', () => {
     const needs = SOURCE_PROFILES.filter(p => p.needsPreParseConfirm).map(p => p.id);
     expect(needs).toEqual(['tiktok-user', 'douyin-user']);
+    // Bilibili 38 筆僅 2 秒，且有 200 筆上限兜著，不值得多一道確認
+    expect(resolveSourceProfile('https://space.bilibili.com/123').needsPreParseConfirm).toBe(false);
   });
 
   it('YouTube 頻道不走此旗標 —— 它有自己的兩段式確認', () => {
