@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>network-status 示意圖</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    background: #e5e7eb;
+    color: #1f2937;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px 12px 60px;
+  }
+
+  /* ===== 上方控制列（示意圖操作用，不屬於正式畫面） ===== */
+  .controls {
+    width: 100%;
+    max-width: 900px;
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  .controls h1 {
+    font-size: 15px;
+    margin: 0 0 12px;
+    color: #111827;
+  }
+  .controls .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .controls .row:last-child { margin-bottom: 0; }
+  .controls .label {
+    font-size: 12px;
+    color: #6b7280;
+    min-width: 84px;
+  }
+  .ctrl-btn {
+    border: 1px solid #d1d5db;
+    background: #f9fafb;
+    color: #374151;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .ctrl-btn:hover { background: #f3f4f6; }
+  .ctrl-btn.active {
+    background: #1989fa;
+    border-color: #1989fa;
+    color: #fff;
+  }
+
+  /* ===== 手機外框（示意圖用） ===== */
+  .phone-frame {
+    width: 375px;
+    max-width: 100%;
+    background: #f7f8fa;
+    border-radius: 22px;
+    border: 8px solid #111827;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    overflow: hidden;
+    transition: width .25s ease;
+  }
+  .phone-frame.desktop-width { width: 720px; border-radius: 12px; border-width: 4px; }
+
+  .app-content {
+    padding: 16px 14px 24px;
+    min-height: 480px;
+  }
+
+  /* ===== 既有：LAN 快傳伺服器卡片（僅示意，樣式取自 App.vue 現況） ===== */
+  .server-status-card {
+    width: 100%;
+    background: #fff;
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    border: 1px solid #e5e7eb;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .server-status-card .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #10b981;
+    flex-shrink: 0;
+  }
+  .server-status-card .title {
+    font-size: 13px; font-weight: bold; color: #374151;
+  }
+  .server-status-card .ip {
+    font-size: 11px; color: #6b7280; margin-left: auto; font-family: monospace;
+  }
+
+  /* ===== 新增：網路狀態元件 ===== */
+  .network-status { margin-bottom: 12px; }
+
+  /* 正常：靠右小型標籤 */
+  .ns-compact {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .ns-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+  .ns-badge.online {
+    background: #ecfdf5;
+    color: #059669;
+    border: 1px solid #a7f3d0;
+  }
+  .ns-badge.checking {
+    background: #f3f4f6;
+    color: #6b7280;
+    border: 1px solid #e5e7eb;
+  }
+  .ns-badge .icon { font-size: 12px; line-height: 1; }
+  .ns-spinner {
+    width: 9px; height: 9px;
+    border: 2px solid #9ca3af;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: ns-spin 0.8s linear infinite;
+  }
+  @keyframes ns-spin { to { transform: rotate(360deg); } }
+
+  /* 異常：全寬展開列 */
+  .ns-banner {
+    width: 100%;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    border: 1px solid transparent;
+  }
+  .ns-banner.degraded {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+  }
+  .ns-banner.offline {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #b91c1c;
+  }
+  .ns-banner .icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .ns-banner .text { flex: 1; line-height: 1.4; }
+  .ns-banner .text .main { font-weight: 700; display: block; margin-bottom: 1px; }
+  .ns-banner .text .sub { font-size: 11px; opacity: 0.85; }
+  .ns-recheck-btn {
+    flex-shrink: 0;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .ns-recheck-btn:hover { background: rgba(0,0,0,0.05); }
+  .ns-recheck-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* ===== 其餘主畫面示意（網址輸入區與按鈕，僅供版面比對） ===== */
+  .fake-url-input {
+    width: 100%;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #9ca3af;
+    margin-bottom: 12px;
+  }
+  .fake-btn-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .fake-btn {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 4px;
+    text-align: center;
+    font-size: 11px;
+    color: #6b7280;
+  }
+  .fake-task {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    color: #9ca3af;
+    text-align: center;
+  }
+
+  .note {
+    max-width: 900px;
+    width: 100%;
+    margin-top: 20px;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.7;
+    background: #fff;
+    border-radius: 10px;
+    padding: 14px 18px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  }
+  .note b { color: #374151; }
+</style>
+</head>
+<body>
+
+  <div class="controls">
+    <h1>network-status 示意圖 —— 僅供版面與文案確認，非正式執行路徑</h1>
+
+    <div class="row">
+      <span class="label">網路狀態</span>
+      <button class="ctrl-btn" data-state="checking">檢查中 checking</button>
+      <button class="ctrl-btn" data-state="online">正常 online</button>
+      <button class="ctrl-btn" data-state="degraded">不穩定 degraded</button>
+      <button class="ctrl-btn" data-state="offline">離線 offline</button>
+    </div>
+
+    <div class="row">
+      <span class="label">畫面寬度</span>
+      <button class="ctrl-btn" data-width="mobile">手機寬度</button>
+      <button class="ctrl-btn" data-width="desktop">桌面寬度</button>
+    </div>
+
+    <div class="row">
+      <span class="label">LAN 快傳</span>
+      <button class="ctrl-btn" data-lan="on">顯示快傳伺服器卡片</button>
+      <button class="ctrl-btn" data-lan="off">隱藏（未啟用快傳）</button>
+    </div>
+  </div>
+
+  <div class="phone-frame" id="phoneFrame">
+    <div class="app-content">
+
+      <!-- 既有：LAN 快傳伺服器卡片（維持獨立區塊，不與網路狀態合併） -->
+      <div class="server-status-card" id="lanCard">
+        <span class="dot"></span>
+        <span class="title">伺服器運行中</span>
+        <span class="ip">192.168.1.23</span>
+      </div>
+
+      <!-- 新增：網際網路狀態元件 -->
+      <div class="network-status" id="networkStatus">
+        <!-- 內容由下方 script 依狀態切換 -->
+      </div>
+
+      <div class="fake-url-input">貼上 YouTube / TikTok 網址…</div>
+
+      <div class="fake-btn-row">
+        <div class="fake-btn">🎵 音訊</div>
+        <div class="fake-btn">📺 頻道</div>
+        <div class="fake-btn">📡 快傳</div>
+        <div class="fake-btn">▾ 收合</div>
+      </div>
+
+      <div class="fake-task">（下方為任務佇列，示意圖不呈現）</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>版面說明：</b>網路狀態元件位於「網址輸入列」正上方、「LAN 快傳伺服器卡片」下方。
+    正常狀態僅顯示靠右的精簡標籤，不佔用整列高度；離線／不穩定時展開為全寬提示列並提供「重新檢查」。
+    切換右上角「LAN 快傳」按鈕可確認：即使網際網路離線，只要快傳伺服器仍在區域網路運作，
+    兩張卡片會同時獨立呈現、不互相覆蓋或合併成一則訊息。
+  </div>
+
+<script>
+  const stateEl = document.getElementById('networkStatus');
+  const frameEl = document.getElementById('phoneFrame');
+  const lanCardEl = document.getElementById('lanCard');
+  let currentState = 'checking';
+  let checkingBusy = false;
+
+  const TEMPLATES = {
+    checking: () => `
+      <div class="ns-compact">
+        <span class="ns-badge checking">
+          <span class="ns-spinner"></span>
+          正在檢查連線
+        </span>
+      </div>
+    `,
+    online: () => `
+      <div class="ns-compact">
+        <span class="ns-badge online">
+          <span class="icon">●</span>
+          網路正常
+        </span>
+      </div>
+    `,
+    degraded: () => `
+      <div class="ns-banner degraded">
+        <span class="icon">⚠️</span>
+        <span class="text">
+          <span class="main">網路不穩定</span>
+          <span class="sub">已連線但暫時無法連上網際網路，部分功能可能較慢或失敗</span>
+        </span>
+        <button class="ns-recheck-btn" onclick="recheck()">重新檢查</button>
+      </div>
+    `,
+    offline: () => `
+      <div class="ns-banner offline">
+        <span class="icon">⛔</span>
+        <span class="text">
+          <span class="main">目前無法連上網際網路</span>
+          <span class="sub">請確認 Wi-Fi 或行動網路已開啟</span>
+        </span>
+        <button class="ns-recheck-btn" onclick="recheck()">重新檢查</button>
+      </div>
+    `,
+  };
+
+  function render() {
+    stateEl.innerHTML = TEMPLATES[currentState]();
+  }
+
+  function setState(next) {
+    currentState = next;
+    render();
+    document.querySelectorAll('[data-state]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.state === next);
+    });
+  }
+
+  function recheck() {
+    if (checkingBusy) return;
+    checkingBusy = true;
+    const prev = currentState;
+    setState('checking');
+    setTimeout(() => {
+      checkingBusy = false;
+      setState(prev === 'offline' || prev === 'degraded' ? 'online' : prev);
+    }, 900);
+  }
+
+  document.querySelectorAll('[data-state]').forEach(btn => {
+    btn.addEventListener('click', () => setState(btn.dataset.state));
+  });
+
+  document.querySelectorAll('[data-width]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      frameEl.classList.toggle('desktop-width', btn.dataset.width === 'desktop');
+      document.querySelectorAll('[data-width]').forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+
+  document.querySelectorAll('[data-lan]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      lanCardEl.style.display = btn.dataset.lan === 'on' ? 'flex' : 'none';
+      document.querySelectorAll('[data-lan]').forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+
+  // 初始狀態
+  setState('checking');
+  document.querySelector('[data-width="mobile"]').classList.add('active');
+  document.querySelector('[data-lan="on"]').classList.add('active');
+</script>
+
+</body>
+</html>
