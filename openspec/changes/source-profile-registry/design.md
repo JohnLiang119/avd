@@ -98,7 +98,11 @@ yt-dlp 接受多個網址於單次呼叫，輸出為 NDJSON（每行一個 JSON�
 
 **塊大小與節流間隔以實測為準**：Bilibili 在 5 支連續請求下已有 3 支被 412。初值取小（每塊 5 支、塊間 1 秒）並於任務中實測調整；此二值置於註冊表之外的共用常數，因限流是來源特性而非解析特性 —— 若日後發現各來源差異大，再移入 `SourceProfile`。
 
-**Windows 的漸進性天然成立**：`runParseCommand` 已逐行累積 stdout，改為逐行回呼即可。**Android 需確認**：`YoutubeDL.execute` 為阻塞式，其 `Function3<Float, Long, String>` 回呼的第三個參數是否為 stdout 行尚未驗證。若不可行，退回「每塊一次 plugin 呼叫」的較粗粒度漸進 —— 塊大小既然只有 5，粒度已足夠。
+**實作決定（任務 5.2 查明後）：兩平台皆採「每塊一次呼叫」，不做逐行回呼。**
+
+查明結果：Android 的 `Function3<Float, Long, String>` 回呼第三參數**確實是**原始 stdout 行 —— 既有的下載進度解析（`YoutubeDlPlugin.java`）本就從中以正則擷取速度字串，證明可行。
+
+但仍決定不用：`--dump-json` 每支影片輸出一整行完整 JSON（可能數 KB），把它塞進原意為「一行進度文字」的回呼參數並不穩固，且每塊只有 5 支，塊為單位的漸進粒度已經足夠 —— 逐行回呼換來的細緻度在使用者體感上不可辨。故 Windows 與 Android 一致採「每塊一次呼叫」，`enrichPlaylistItems` 對每塊回呼一次 `onChunk`。
 
 ### D5. 漸進回填以取代 ref 內容達成，不改動對話框元件
 

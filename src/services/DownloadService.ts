@@ -8,6 +8,11 @@ import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 import { formatPublishTime } from './displayFormat';
 import { resolveSourceProfile } from './sourceProfiles';
+import {
+  chunkUrls, parseEnrichNdjson, withinBudget,
+  ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
+  type EnrichedItem
+} from './enrichment';
 import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
@@ -170,6 +175,94 @@ async function runParseCommand(args: string[]): Promise<{ code: number; stdout: 
   }
 
   return last;
+}
+
+/** 補齊中的 yt-dlp 子行程。與列表階段分開 —— 取消補齊不應波及解析。 */
+const activeEnrichChildren = new Set<any>();
+let isEnrichCancelling = false;
+/** Android 端本次補齊的 processId。 */
+let currentAndroidEnrichId = '';
+
+/** 補齊被取消時拋出的錯誤訊息。 */
+export const ENRICH_CANCELLED = 'ENRICH_CANCELLED_BY_USER';
+
+/**
+ * 補齊階段專用的 yt-dlp 選項。
+ *
+ * **刻意不含 `--extractor-retries 0`** —— 那是列表階段「快速失敗」的設定。
+ * 補齊面對的主要失敗是來源限流（412／429），那是暫時性的，正該退避重試；
+ * 重試由我們這一層負責（見下方 runEnrichChunk）。
+ */
+const ENRICH_ARGS = [
+  '--dump-json',
+  '--skip-download',
+  '--no-warnings',
+  '--socket-timeout', '15',
+  '--retries', '2'
+];
+
+/** 可被取消打斷的等待。 */
+async function sleepUnlessEnrichCancelled(ms: number): Promise<void> {
+  const step = 200;
+  for (let waited = 0; waited < ms; waited += step) {
+    if (isEnrichCancelling) throw new Error(ENRICH_CANCELLED);
+    await new Promise(r => setTimeout(r, Math.min(step, ms - waited)));
+  }
+  if (isEnrichCancelling) throw new Error(ENRICH_CANCELLED);
+}
+
+/** 以單次呼叫帶多個網址取得 NDJSON。平台分支只有這一層。 */
+async function fetchEnrichNdjson(urls: string[]): Promise<string> {
+  if (!isTauri()) {
+    currentAndroidEnrichId = 'avd_enrich_' + Date.now();
+    const res = await YoutubeDlPlugin.enrichItems({ urls, processId: currentAndroidEnrichId });
+    return res?.ndjson || '';
+  }
+
+  const command = Command.sidecar('bin/yt-dlp', [...ENRICH_ARGS, ...urls], { encoding: 'utf-8' });
+  let stdout = '';
+  command.stdout.on('data', (line: string) => { stdout += line + String.fromCharCode(10); });
+
+  const exitPromise = new Promise<void>((resolve, reject) => {
+    command.on('close', () => resolve());
+    command.on('error', (err: any) => reject(new Error('yt-dlp error: ' + err)));
+  });
+
+  const child = await command.spawn();
+  activeEnrichChildren.add(child);
+  try {
+    await exitPromise;
+    if (isEnrichCancelling) throw new Error(ENRICH_CANCELLED);
+    return stdout;
+  } finally {
+    activeEnrichChildren.delete(child);
+  }
+}
+
+/** 抓取單一塊，對限流退避重試。 */
+async function runEnrichChunk(urls: string[]): Promise<EnrichedItem[]> {
+  for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = rateLimitBackoffMs(attempt);
+      if (!delay) break;
+      console.warn(`[補齊] 來源限流，${delay / 1000} 秒後重試（第 ${attempt} 次）`);
+      await sleepUnlessEnrichCancelled(delay);
+    }
+    try {
+      const ndjson = await fetchEnrichNdjson(urls);
+      const parsed = parseEnrichNdjson(ndjson);
+      // 整塊都沒解析出東西，且訊息像限流 —— 退避後再試一次。
+      if (parsed.length > 0) return parsed;
+    } catch (e: any) {
+      if (e?.message === ENRICH_CANCELLED) throw e;
+      if (!shouldBackoff(e?.message || String(e))) {
+        // 非限流的失敗：這一塊補不到就算了，不重試也不中斷其餘的塊。
+        console.warn('[補齊] 本塊失敗', e);
+        return [];
+      }
+    }
+  }
+  return [];
 }
 
 // Mock event emitter for Tauri
@@ -808,6 +901,73 @@ export const DownloadService = {
       let msg = e.message || String(e);
       throw new Error(msg);
     }
+  },
+
+  /**
+   * 補齊清單項目的 metadata。
+   *
+   * 在勾選對話框**已經顯示之後**才呼叫 —— 不延後使用者看到清單。
+   * 逐塊回呼，每塊之間節流以降低觸發來源限流的機率。
+   *
+   * 局部失敗不視為錯誤：補不到的項目保留退化標籤，仍可勾選與下載。
+   * 超出時間預算即停止並保留已取得的結果。
+   *
+   * @param onChunk 每取得一塊就回呼一次，供呼叫端漸進回填
+   */
+  async enrichPlaylistItems(
+    urls: string[],
+    onChunk: (enriched: EnrichedItem[]) => void,
+    options?: { budgetMs?: number; chunkSize?: number }
+  ): Promise<void> {
+    isEnrichCancelling = false;
+    const startedAt = Date.now();
+    const budget = options?.budgetMs ?? ENRICH_BUDGET_MS;
+    const chunks = chunkUrls(urls, options?.chunkSize ?? ENRICH_CHUNK_SIZE);
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        if (isEnrichCancelling) return;
+        if (!withinBudget(startedAt, Date.now(), budget)) {
+          console.warn(`[補齊] 超出時間預算，已取得 ${i} / ${chunks.length} 塊`);
+          return;
+        }
+
+        const enriched = await runEnrichChunk(chunks[i]);
+        if (isEnrichCancelling) return;
+        if (enriched.length > 0) onChunk(enriched);
+
+        // 塊間節流：實測 Bilibili 在 5 個連續請求下已有 3 個被 412。
+        if (i < chunks.length - 1) await sleepUnlessEnrichCancelled(ENRICH_THROTTLE_MS);
+      }
+    } catch (e: any) {
+      if (e?.message === ENRICH_CANCELLED) return;
+      // 補齊是增益，整體失敗也只是少了資訊。
+      console.warn('[補齊] 中止', e);
+    }
+  },
+
+  /** 中止進行中的補齊。與解析的取消分開，互不波及。 */
+  async cancelEnrich() {
+    isEnrichCancelling = true;
+
+    if (!isTauri()) {
+      if (!currentAndroidEnrichId) return;
+      try {
+        await YoutubeDlPlugin.cancelParsePlaylist({ processId: currentAndroidEnrichId });
+      } catch (e) {
+        console.error('Failed to cancel Android enrich process', e);
+      }
+      return;
+    }
+
+    for (const child of Array.from(activeEnrichChildren)) {
+      try {
+        await child.kill();
+      } catch (e) {
+        console.error('Failed to kill enrich child process', e);
+      }
+    }
+    activeEnrichChildren.clear();
   },
 
   /**

@@ -838,6 +838,7 @@
       :playlist-title="parsedPlaylistTitle"
       :items="parsedPlaylistItems"
       @confirm="onBatchModalConfirm"
+      @cancel="onBatchModalCancel"
     />
     <van-action-sheet
       v-model:show="showRestoreSheet"
@@ -877,6 +878,7 @@ import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { shouldBackoff, describeRateLimit } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
+import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   channelBaseline,
@@ -2007,7 +2009,17 @@ const parsedChannelTitle = ref('');
 const parsedPlaylistTitle = ref('');
 const parsedPlaylistItems = ref<PlaylistItem[]>([]);
 
+/**
+ * 補齊可被取消：對話框關閉（略過或確認）皆停止背景行程 ——
+ * 確認後清單已定案交給下載，補齊不再有意義；略過則使用者根本不需要它。
+ */
+const onBatchModalCancel = () => {
+  DownloadService.cancelEnrich().catch(e => console.warn('取消補齊失敗', e));
+};
+
 const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
+  DownloadService.cancelEnrich().catch(e => console.warn('取消補齊失敗', e));
+
   if (!selectedItems || selectedItems.length === 0) {
     showToast('請至少勾選一部影片');
     return;
@@ -2471,6 +2483,19 @@ const addTask = async (urlToAdd: string) => {
       parsedPlaylistItems.value = freshItems;
       showPlaylistModal.value = true;
       url.value = '';
+
+      // 補齊在對話框已顯示之後才啟動 —— 不延後使用者看到清單。
+      // 只有 metadata 不完整的來源才需要（見來源能力表 flatMetadata）。
+      if (sourceProfile.flatMetadata === 'none') {
+        DownloadService.enrichPlaylistItems(
+          freshItems.map(i => i.url),
+          (chunk: EnrichedItem[]) => {
+            // 就地更新欄位，id 序列不變 —— 勾選狀態以 id 記錄，
+            // 換掉序列會讓已勾選的項目對不上。
+            parsedPlaylistItems.value = mergeEnriched(parsedPlaylistItems.value, chunk);
+          }
+        ).catch(e => console.warn('補齊失敗', e));
+      }
     } catch (e: any) {
       const wasTimeout = e?.message === 'PARSE_TIMEOUT';
       parseSettled = true;

@@ -306,6 +306,62 @@ public class YoutubeDlPlugin extends Plugin {
     }
 
     /**
+     * 補齊清單項目的 metadata：以單次呼叫帶多個網址，回傳 NDJSON。
+     *
+     * 刻意不套用 addParseResilienceOptions —— 其中的 `--extractor-retries 0`
+     * 是列表階段「快速失敗」的設定。補齊面對的主要失敗是來源限流，
+     * 那是暫時性的，重試由前端的分塊退避負責。
+     */
+    @PluginMethod
+    public void enrichItems(PluginCall call) {
+        com.getcapacitor.JSArray urlsArr = call.getArray("urls");
+        if (urlsArr == null || urlsArr.length() == 0) {
+            call.reject("Must provide urls");
+            return;
+        }
+        final String processId = call.getString("processId", "avd_enrich");
+        final java.util.List<String> urls = new java.util.ArrayList<>();
+        try {
+            for (Object o : urlsArr.toList()) {
+                if (o != null) urls.add(String.valueOf(o));
+            }
+        } catch (Exception e) {
+            call.reject("urls 解讀失敗: " + e.getMessage());
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                // 第一個網址交給 YoutubeDLRequest，其餘以 addOption 附加 ——
+                // 該類別的建構子只收單一 url，但額外的位置參數同樣會被帶到命令列。
+                YoutubeDLRequest request = new YoutubeDLRequest(urls.get(0));
+                for (int i = 1; i < urls.size(); i++) {
+                    request.addOption(urls.get(i));
+                }
+                request.addOption("--dump-json");
+                request.addOption("--skip-download");
+                request.addOption("--no-warnings");
+                request.addOption("--socket-timeout", "15");
+                request.addOption("--retries", "2");
+
+                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request, processId);
+                JSObject ret = new JSObject();
+                ret.put("ndjson", response.getOut() == null ? "" : response.getOut());
+                call.resolve(ret);
+            } catch (YoutubeDL.CanceledException e) {
+                call.reject("ENRICH_CANCELLED_BY_USER");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                call.reject("ENRICH_CANCELLED_BY_USER");
+            } catch (Exception e) {
+                // 補齊是增益：失敗只回報訊息，由前端決定保留退化標籤。
+                Log.w(TAG, "補齊失敗", e);
+                call.reject("補齊失敗: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    /**
      * 中止進行中的播放清單解析。
      * 與 cancelDownload 分離：兩者管的是不同的行程，取消解析不應波及下載。
      */

@@ -75,21 +75,25 @@
 
 ## 5. 補齊階段
 
-- [ ] 5.1 `DownloadService` 新增補齊方法：接受一組網址，以單次 yt-dlp 呼叫帶多個網址、`--dump-json --skip-download`，解析 NDJSON 逐筆回呼
-- [ ] 5.2 **先驗證**：Android 的 `execute(request, processId, Function3)` 回呼第三參數是否為 stdout 行。可行則逐行回呼；不可行則退回「每塊一次 plugin 呼叫」
-- [ ] 5.3 補齊採與列表階段相反的重試策略：對 412／429 退避重試，不套用 `--extractor-retries 0`
-- [ ] 5.4 分塊執行並於塊間節流，初值每塊 5 支、間隔 1 秒
+- [x] 5.1 `DownloadService` 新增補齊方法：接受一組網址，以單次 yt-dlp 呼叫帶多個網址、`--dump-json --skip-download`，解析 NDJSON 逐筆回呼
+- [x] 5.2 **先驗證**：Android 的 `execute(request, processId, Function3)` 回呼第三參數是否為 stdout 行 —— **確實是**（既有下載進度解析已從中正則擷取速度）。
+  - 但決定**兩平台一致採「每塊一次呼叫」**，不做逐行回呼：`--dump-json`
+    每支輸出一整行完整 JSON（可能數 KB），塞進原意為「一行進度文字」的
+    回呼參數並不穩固；且每塊僅 5 支，塊為單位的粒度已足夠，逐行回呼的
+    細緻度在體感上不可辨。design D4 已回填此決定。
+- [x] 5.3 補齊採與列表階段相反的重試策略：對 412／429 退避重試，不套用 `--extractor-retries 0`
+- [x] 5.4 分塊執行並於塊間節流，初值每塊 5 支、間隔 1 秒
 - [ ] 5.5 實測調整塊大小與間隔：以 Bilibili 38 筆為樣本，記錄不同組合的成功率與總耗時，擇一為預設值並寫回 design
-- [ ] 5.6 補齊有自有時間預算，超出即停止並保留已取得的結果
-- [ ] 5.7 補齊可取消：對話框關閉或取消新增時停止並終止背景行程
+- [x] 5.6 補齊有自有時間預算，超出即停止並保留已取得的結果
+- [x] 5.7 補齊可取消：對話框關閉或取消新增時停止並終止背景行程
 
 ## 6. 漸進回填
 
-- [ ] 6.1 解析完成後立即顯示對話框；`flatMetadata === 'none'` 時於其後啟動補齊
-- [ ] 6.2 補齊結果依 `id` 就地更新 `parsedPlaylistItems`，不替換整個陣列為新的 id 序列
-- [ ] 6.3 確認 `YouTubeBatchModal` 的 `:key="item.id"` 穩定，更新期間既有勾選狀態不變
-- [ ] 6.4 補齊失敗的項目保留退化標籤，仍可勾選與下載
-- [ ] 6.5 補上 vitest：就地更新後 id 序列不變、部分失敗時的結果合併
+- [x] 6.1 解析完成後立即顯示對話框；`flatMetadata === 'none'` 時於其後啟動補齊
+- [x] 6.2 補齊結果依 `id` 就地更新 `parsedPlaylistItems`，不替換整個陣列為新的 id 序列
+- [x] 6.3 確認 `YouTubeBatchModal` 的 `:key="item.id"` 穩定，更新期間既有勾選狀態不變
+- [x] 6.4 補齊失敗的項目保留退化標籤，仍可勾選與下載
+- [x] 6.5 補上 vitest：就地更新後 id 序列不變、部分失敗時的結果合併
 
 ## 7. ⑤ 來源限流的辨識與退避
 
@@ -98,7 +102,7 @@
 - [x] 7.3 實作 `describeRateLimit()`：回傳給使用者看的「來源暫時限流，請稍後再試」訊息
 - [x] 7.4 補上 vitest：限流片語命中與不命中、與 `matchPermanentError` 互斥（429／412 不得落入確定性清單）、退避序列、次數上限
 - [x] 7.5 列表階段：`runParseCommand` 失敗且判定為限流時退避重試，維持 `--extractor-retries 0` 不變
-- [ ] 7.6 補齊階段沿用同一套退避（與第 5 組整合，不另寫一份）—— 待第 5 組實作時一併完成
+- [x] 7.6 補齊階段沿用同一套退避（與第 5 組整合，不另寫一份）—— `runEnrichChunk` 直接匯入並使用 `rateLimit.ts` 的 `shouldBackoff` / `rateLimitBackoffMs` / `RATE_LIMIT_MAX_RETRIES`，與列表階段的 `runParseCommand` 同源
 - [x] 7.7 退避的累計等待受 `PARSE_TIMEOUT_MS` 約束，不得使等待無限延長
 - [x] 7.8 呈現層改寫訊息；`reportError` 寫入日誌的仍為原始訊息全文
 - [x] 7.9 Android 端 `YoutubeDlPlugin` 的解析路徑套用同一退避
