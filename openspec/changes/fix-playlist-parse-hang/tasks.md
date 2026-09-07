@@ -21,7 +21,8 @@
 - [x] 3.4 Android：`parsePlaylist` 改用 `execute(request, processId, cb)`，processId 由呼叫端傳入或自動產生後回傳；捕捉 `CanceledException` 並以可辨識的結果回覆前端
 - [x] 3.5 Android：新增取消解析的 plugin 方法，內部呼叫 `destroyProcessById(processId)`
 - [x] 3.6 前端：解析包上 90 秒逾時，逾時即觸發對應平台的終止路徑並以失敗結束
-- [x] 3.7 前端：載入提示改為可取消，取消時觸發終止路徑；確保 `closeToast()` 在成功、失敗、逾時、取消四條路徑上都會執行
+- [x] 3.7 前端：載入提示改為可取消，取消時觸發終止路徑；確保提示在成功、失敗、逾時、取消四條路徑上都會關閉
+      （**初版實作無效，見第 12 組**；已改用 `van-dialog` + 取消鈕）
 - [x] 3.8 確保取消後的狀態乾淨：立即輸入另一網址能正常啟動新解析，不受前次殘留影響
 
 ## 4. ③ 使用者頁的事前確認
@@ -41,7 +42,7 @@
 ## 6. 驗證
 
 - [x] 6.1 Windows：以 App 實際參數對該 TikTok 網址實測，`--playlist-end 200` 為 11 秒（對照全抓 2m18s／3247 筆），遠在 90 秒上限內
-- [x] 6.2 Windows：輸入一個正常大型 YouTube 播放清單，於解析中途按取消，確認介面立即恢復且 yt-dlp 子行程已終止（工作管理員確認）
+- [ ] 6.2 Windows：輸入一個正常大型 YouTube 播放清單，於解析中途按取消，確認介面立即恢復且 yt-dlp 子行程已終止（工作管理員確認）
 - [x] 6.3 Windows：以新參數重跑 1.3 的基準來源，各分頁筆數 [117, 23, 332] 與改前完全一致（註：此為 yt-dlp 層級比對，App 內的 spawn 累積路徑仍待 6.2 一併驗證）
 - [x] 6.4 Android 實機：同一個 TikTok 網址，確認等待時間由數分鐘壓至可接受範圍，並記錄失敗訊息原文（回填 design 的 Open Question）
   - **等待時間**：由任務 10.11 覆蓋 —— 連續三批 1-200／201-400／401-600 皆完成，
@@ -131,3 +132,19 @@
       符號以維持既有匯入路徑。
 - [x] 11.2 `.java` 不可加 BOM：以腳本改寫時誤用 `utf-8-sig`，javac 直接以
       `illegal character: '﻿'` 中斷編譯。已補進 CLAUDE.md 的編碼規範。
+
+## 12. 缺陷：取消途徑從未生效（實機回報後查明）
+
+- [x] 12.1 **根因**：`forbidClick` 與 `closeOnClick` 在 vant 中互斥。
+      `lock-click.mjs` 將 `van-toast--unclickable` 加在 **`document.body`**，
+      而該 class 的 CSS 為 `.van-toast--unclickable * { pointer-events: none }`
+      —— 對 body 的**所有後代**關閉指標事件，**包含 toast 自己**。
+      故 design D2 所訂的「forbidClick 維持，但提供明確的取消操作」
+      在 Toast 上無法成立，任務 3.7 的實作從未生效。
+- [x] 12.2 **影響範圍為兩個平台**，非 Android 獨有。Windows 的 6.2 原先回報
+      通過，但點擊取消當時不可能有作用（很可能是解析自然完成而被讀成恢復）。
+      6.2 與 3.7 已退回未驗證。
+- [x] 12.3 改為 `van-dialog`：載入提示改用僅含「取消」鈕的對話框，
+      內含 `van-loading` 與說明文字。理由見下方替代方案評估。
+- [x] 12.4 更新 design D2，記錄 forbidClick／closeOnClick 互斥此一事實
+- [ ] 12.5 Windows 重驗 6.2；Android 重驗 6.5

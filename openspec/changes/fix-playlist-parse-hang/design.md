@@ -49,6 +49,34 @@ public final YoutubeDLResponse execute(YoutubeDLRequest, String, Function3<...>)
 
 `DownloadService.ts:471` 的下載路徑已經是這個寫法，照既有模式實作即可。**風險是大型 JSON 的累積出錯導致截斷**，列入 Risks。
 
+### D2b. 取消途徑改用對話框 —— Toast 做不到（實機回報後修正）
+
+原訂作法（proposal ②、任務 3.7）為「loading toast 維持 `forbidClick`，但加上 `closeOnClick` 讓使用者點擊取消」。**此組合在 vant 中不可能成立。**
+
+```js
+// vant/es/toast/lock-click.mjs
+document.body.classList.add("van-toast--unclickable");
+```
+```css
+.van-toast--unclickable * { pointer-events: none }
+```
+
+`forbidClick` 把 class 加在 **`document.body`**，而該規則對 body 的**所有後代**關閉指標事件 —— **包含 toast 自己**。故 `closeOnClick` 永遠不會觸發。
+
+**此缺陷兩個平台皆有**，非 Android 獨有；Windows 的 6.2 原先回報通過，實為解析自然完成而被讀成恢復。
+
+**改為只帶「取消」鈕的 `van-dialog`**：遮罩照樣擋住頁面（`forbidClick` 原本的用途），取消是明確的按鈕而非猜測性的點擊。
+
+**替代方案評估**：
+
+| 作法 | 否決理由 |
+| --- | --- |
+| 拿掉 `forbidClick`，保留 `closeOnClick` | 頁面在解析期間可操作，使用者能觸發第二次解析 |
+| `overlay: true` + `closeOnClickOverlay` | 可行（`lockClick` 只受 `forbidClick` 驅動），但「點任意處取消」易誤觸，且與規格要求的「明確的取消途徑」不符 |
+| **對話框 + 取消鈕** | **採用**。不誤觸、可發現、語意明確 |
+
+**其餘 `showLoadingToast` 不受影響**：另外五處（更新檢查、模擬抓取、頻道檢查等）皆為短時操作且未宣稱可取消，`forbidClick` 在那裡正是它該做的事。
+
 ### D3. 時間上限：前端 90 秒硬上限，`--socket-timeout 15` 為輔
 
 兩者層級不同，需並存：

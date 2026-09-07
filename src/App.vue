@@ -594,6 +594,21 @@
     </van-dialog>
 
     <van-dialog
+      v-model:show="showParsingModal"
+      :show-confirm-button="false"
+      show-cancel-button
+      cancel-button-text="取消"
+      :close-on-click-overlay="false"
+      @cancel="onParsingCancel"
+      style="max-width: 360px; width: 82%;"
+    >
+      <div style="padding: 26px 20px 18px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+        <van-loading size="26px" />
+        <span style="font-size: 14px; color: #1f2937; text-align: center;">{{ parsingMessage }}</span>
+      </div>
+    </van-dialog>
+
+    <van-dialog
       v-model:show="showErrorLogModal"
       title="🧾 錯誤紀錄"
       show-cancel-button
@@ -1758,6 +1773,40 @@ const simulateGlobalNewVideo = async () => {
 const url = ref('');
 const mp3Mode = storage.defineSetting('avd_mp3_mode', false);
 
+/**
+ * 解析進行中的對話框。
+ *
+ * 刻意不用 showLoadingToast：vant 的 `forbidClick` 會把
+ * `van-toast--unclickable` 加在 document.body 上，而該 class 的 CSS 是
+ * `.van-toast--unclickable * { pointer-events: none }` —— 對 body 的所有
+ * 後代關閉指標事件，**包含 toast 自己**。故 forbidClick 與 closeOnClick
+ * 互斥，Toast 上做不出「擋住頁面但自己可點」的取消途徑。
+ *
+ * 改用只帶「取消」鈕的對話框：遮罩照樣擋住頁面，取消是明確的按鈕而非
+ * 猜測性的點擊，也不會被誤觸。
+ */
+const showParsingModal = ref(false);
+const parsingMessage = ref('');
+/** 由目前進行中的解析註冊；對話框的取消鈕透過它回呼。 */
+let parseCancelHandler: (() => void) | null = null;
+
+const openParsingModal = (message: string, onCancel: () => void) => {
+  parsingMessage.value = message;
+  parseCancelHandler = onCancel;
+  showParsingModal.value = true;
+};
+
+const closeParsingModal = () => {
+  showParsingModal.value = false;
+  parseCancelHandler = null;
+};
+
+const onParsingCancel = () => {
+  const handler = parseCancelHandler;
+  parseCancelHandler = null;
+  handler?.();
+};
+
 /** 錯誤日誌：讓失敗訊息在提示消失後仍可回看與複製。 */
 const errorLog = storage.defineSetting<ErrorEntry[]>('avd_error_log', []);
 const showErrorLogModal = ref(false);
@@ -2310,17 +2359,11 @@ const addTask = async (urlToAdd: string) => {
       DownloadService.cancelParsePlaylist().catch(e => console.warn('取消解析失敗', e));
     };
 
-    showLoadingToast({
-      message: '正在解析播放清單資訊...\n（點此取消）',
-      forbidClick: true,
-      duration: 0,
-      closeOnClick: true,
-      onClose: () => {
-        if (!parseSettled) {
-          parseSettled = true;
-          parseCancelled = true;
-          abortParse();
-        }
+    openParsingModal('正在解析播放清單資訊...', () => {
+      if (!parseSettled) {
+        parseSettled = true;
+        parseCancelled = true;
+        abortParse();
       }
     });
 
@@ -2335,7 +2378,7 @@ const addTask = async (urlToAdd: string) => {
       ]);
       parseSettled = true;
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      closeToast();
+      closeParsingModal();
 
       // 解析在使用者按下取消後才回來：尊重取消，不彈出嚮導對話框。
       if (parseCancelled) return;
@@ -2381,7 +2424,7 @@ const addTask = async (urlToAdd: string) => {
       const wasTimeout = e?.message === 'PARSE_TIMEOUT';
       parseSettled = true;
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      closeToast();
+      closeParsingModal();
 
       if (wasTimeout) {
         // 逾時同樣要終止背景行程，否則會留下持續重試的孤兒行程。
