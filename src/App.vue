@@ -872,6 +872,7 @@ import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELL
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { shouldBackoff, describeRateLimit } from './services/rateLimit';
+import { resolveSourceProfile } from './services/sourceProfiles';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   channelBaseline,
@@ -2223,9 +2224,25 @@ const addTask = async (urlToAdd: string) => {
     return;
   }
 
-  const isStrictChannelUrl = 
-    (urlToAdd.includes('/channel/') || urlToAdd.includes('/c/') || urlToAdd.includes('youtube.com/@')) 
-    && !urlToAdd.includes('/watch') 
+  // 來源的一切判斷（是否多片、要不要事前確認、能否追蹤、進度鍵、
+  // 項目網址組法）皆由 sourceProfiles.ts 的能力表提供，此處不再比對字串。
+  const sourceProfile = resolveSourceProfile(urlToAdd);
+
+  if (sourceProfile.kind === 'unsupported') {
+    // 已知不支援：明講，而非讓它落入 generic extractor 後產生困惑的失敗。
+    // 置於追蹤詢問之前 —— 不支援的來源連問都不該問。
+    showToast({
+      message: `${sourceProfile.label}目前無法解析`,
+      duration: 4000,
+      closeOnClick: true
+    });
+    return;
+  }
+
+  // 能否加入自動追蹤由能力表宣告；此處另排除子頁面 —— 那是網址形狀的
+  // 問題（頻道底下的 /watch 或 /playlist），與來源本身的能力無關。
+  const isStrictChannelUrl = sourceProfile.supportsChannelTracking
+    && !urlToAdd.includes('/watch')
     && !urlToAdd.includes('/playlist');
 
   if (isStrictChannelUrl) {
@@ -2283,18 +2300,12 @@ const addTask = async (urlToAdd: string) => {
     }
   }
 
-  const isPlaylistUrl = urlToAdd.includes('list=') ||
-    urlToAdd.includes('douyin.com/user/') ||
-    urlToAdd.includes('v.douyin.com') ||
-    urlToAdd.includes('tiktok.com/@') ||
-    urlToAdd.includes('/channel/') ||
-    urlToAdd.includes('/c/') ||
-    (urlToAdd.includes('youtube.com/@') && !urlToAdd.includes('/watch'));
+  const isPlaylistUrl = sourceProfile.kind === 'collection';
 
   // 高成本的創作者頁面解析須先徵詢確認。
   // 刻意不併入 isStrictChannelUrl：那條路徑會連帶詢問「加入自動追蹤」，
   // 而 TikTok／Douyin 沒有追蹤能力，resolveYouTubeChannel 對它們也不適用。
-  const isCreatorPageUrl = urlToAdd.includes('tiktok.com/@') || urlToAdd.includes('douyin.com/user/');
+  const isCreatorPageUrl = sourceProfile.needsPreParseConfirm;
 
   // 本次要抓的批次範圍，由該來源已記錄的進度決定。
   const progressKey = parseProgressKey(urlToAdd);

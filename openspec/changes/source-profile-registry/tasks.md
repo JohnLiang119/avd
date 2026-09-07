@@ -5,21 +5,32 @@
 
 ## 1. 來源能力表
 
-- [ ] 1.1 新增 `src/services/sourceProfiles.ts`，定義 `SourceProfile` 介面與 `SourceKind` / `FlatMetadata` 型別
-- [ ] 1.2 為既有來源各建一筆：`youtube-playlist`（`list=`）、`youtube-channel`（`/channel/`、`/c/`）、`youtube-handle`（`youtube.com/@`）、`tiktok-user`、`douyin-user`（`kind: 'unsupported'`）、`douyin-short`（`v.douyin.com`）
-- [ ] 1.3 加入 fallback profile（`kind: 'single'`），涵蓋所有未命中的網址
-- [ ] 1.4 實作 `resolveSourceProfile(url)`：依序比對、首個命中者生效
-- [ ] 1.5 補上 vitest：每個 profile 的命中與不命中、順序敏感案例（`watch?v=x&list=PL...` 必須解析為清單而非單片）、fallback
+- [x] 1.1 新增 `src/services/sourceProfiles.ts`，定義 `SourceProfile` 介面與 `SourceKind` / `FlatMetadata` 型別
+- [x] 1.2 為既有來源各建一筆：`youtube-playlist`（`list=`）、`youtube-channel`（`/channel/`、`/c/`）、`youtube-handle`（`youtube.com/@`）、`tiktok-user`、`douyin-user`（`kind: 'unsupported'`）、`douyin-short`（`v.douyin.com`）
+- [x] 1.3 加入 fallback profile（`kind: 'single'`），涵蓋所有未命中的網址
+- [x] 1.4 實作 `resolveSourceProfile(url)`：依序比對、首個命中者生效
+- [x] 1.5 補上 vitest：每個 profile 的命中與不命中、順序敏感案例（`watch?v=x&list=PL...` 必須解析為清單而非單片）、fallback
 
 ## 2. 五處改為查表（純重構，行為不變）
 
-- [ ] 2.1 `App.vue` 的 `isPlaylistUrl` 改為 `resolveSourceProfile(url).kind === 'collection'`
-- [ ] 2.2 `App.vue` 的 `isCreatorPageUrl` 改為 profile 的 `needsPreParseConfirm`
-- [ ] 2.3 `App.vue` 新增 `unsupported` 分支：顯示「此來源目前無法解析」並直接返回
-- [ ] 2.4 `parseScope.ts` 的 `parseProgressKey` 改為委派給 profile 的 `progressKey`；原有的 regex 搬進各 profile
-- [ ] 2.5 `DownloadService.ts` 兩處項目網址組法改為呼叫 profile 的 `buildItemUrl`（僅 TikTok 有）
-- [ ] 2.6 全域搜尋 `includes('tiktok`、`includes('douyin`、`includes('/channel/'`、`includes('list='` 等，確認除註冊表外無殘留判斷
-- [ ] 2.7 回歸：既有的 YouTube 頻道／播放清單、TikTok 創作者頁流程行為完全不變（含進度鍵格式）
+- [x] 2.1 `App.vue` 的 `isPlaylistUrl` 改為 `resolveSourceProfile(url).kind === 'collection'`
+- [x] 2.2 `App.vue` 的 `isCreatorPageUrl` 改為 profile 的 `needsPreParseConfirm`
+- [x] 2.3 `App.vue` 新增 `unsupported` 分支：顯示「此來源目前無法解析」並直接返回
+- [x] 2.4 `parseScope.ts` 的 `parseProgressKey` 改為委派給 profile 的 `progressKey`；原有的 regex 搬進各 profile
+- [x] 2.5 `DownloadService.ts` 兩處項目網址組法改為呼叫 profile 的 `buildItemUrl`（僅 TikTok 有）
+- [x] 2.6 全域搜尋 `includes('tiktok`、`includes('douyin`、`includes('/channel/'`、`includes('list='` 等，確認除註冊表外無殘留判斷
+- [x] 2.7 回歸：既有的 YouTube 頻道／播放清單、TikTok 創作者頁流程行為完全不變（含進度鍵格式）
+  - 進度鍵以**字面值**斷言（8 組），不與 `parseProgressKey` 互相比對 ——
+    後者現已委派給本表，那樣的測試是套套邏輯，看起來有覆蓋卻什麼都沒保證。
+  - 順序敏感的案例（`watch?v=x&list=PL...` 須為清單、`@handle/watch` 不算頻道）
+    已釘住。
+- [x] 2.8 **追加**：`isStrictChannelUrl` 亦收入能力表。第 2.6 步的全域搜尋
+      發現它仍以字串判斷 YouTube 頻道。新增 `supportsChannelTracking` 旗標
+      （追蹤機制綁定官方 RSS，僅 YouTube 成立）；`/watch`、`/playlist`
+      的排除留在呼叫端 —— 那是網址形狀的問題，與來源能力無關。
+- [x] 2.9 **追加**：`douyin-short` 補上 `buildItemUrl`，使
+      `DownloadService.resolveItemUrl` 的預設規則收斂為單一條（YouTube）。
+      原先仍有一行 `sourceUrl.includes('douyin.com')` 的網域判斷殘留。
 
 ## 3. ④ 多序列來源的進度定址（自 fix-playlist-parse-hang 併入）
 

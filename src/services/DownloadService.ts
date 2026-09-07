@@ -7,6 +7,7 @@ import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@taur
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 import { formatPublishTime } from './displayFormat';
+import { resolveSourceProfile } from './sourceProfiles';
 import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
@@ -71,26 +72,15 @@ const PARSE_RESILIENCE_ARGS = [
 ];
 
 /**
- * 由解析結果組出 TikTok 的正式影片網址。
+ * 組出項目的完整網址。
  *
- * yt-dlp 的 TikTok entry 實際上已直接帶完整網址（其 TikTokUserIE 以
- * `https://www.tiktok.com/@{user}/video/{id}` 建立 entry），故此處只處理
- * 它沒帶的退化情形：`tiktok.com/video/{id}` 不被 TikTok extractor 接受，
- * 會落入 generic extractor 並導向 404，必須帶上 `@handle` 區段。
- *
- * Douyin 不需要對應處理 —— 實測 `douyin.com/video/{id}` 可正確進入
- * Douyin extractor。
+ * 有專屬規則的來源（目前只有 TikTok）由能力表提供；其餘沿用依網域判斷的
+ * 預設規則。多數來源的 entry 本就帶完整網址，走不到這裡。
  */
-function buildTikTokVideoUrl(videoId: string, entry: any, sourceUrl: string): string {
-  // 只取 uploader：實測 channel 是顯示名稱（如「冰冷（小号冲一万）」）、
-  // uploader_id 是純數字 id，兩者拿來組網址都會組出錯的。
-  const fromEntry = entry?.uploader || '';
-  const fromSource = (sourceUrl.match(/tiktok\.com\/@([\w.\-]+)/) || [])[1] || '';
-  const handle = String(fromEntry || fromSource).replace(/^@/, '').trim();
-  // 兩個來源都取不到時保留舊格式，結果不會比現況更差。
-  return handle
-    ? `https://www.tiktok.com/@${handle}/video/${videoId}`
-    : `https://www.tiktok.com/video/${videoId}`;
+function resolveItemUrl(rawId: string, entry: any, sourceUrl: string): string {
+  const profile = resolveSourceProfile(sourceUrl);
+  if (profile.buildItemUrl) return profile.buildItemUrl(rawId, entry, sourceUrl);
+  return `https://www.youtube.com/watch?v=${rawId}`;
 }
 
 /** 解析中的 yt-dlp 子行程（主清單與子清單展開可能同時各有一個）。 */
@@ -416,22 +406,10 @@ export const DownloadService = {
           const videoId = entry.id || entry.url || String(index);
           let itemUrl = entry.url || entry.webpage_url || '';
           if (itemUrl && !itemUrl.startsWith('http')) {
-            if (url.includes('douyin.com')) {
-              itemUrl = `https://www.douyin.com/video/${itemUrl}`;
-            } else if (url.includes('tiktok.com')) {
-              itemUrl = buildTikTokVideoUrl(itemUrl, entry, url);
-            } else {
-              itemUrl = `https://www.youtube.com/watch?v=${itemUrl}`;
-            }
+            itemUrl = resolveItemUrl(itemUrl, entry, url);
           }
           if (!itemUrl) {
-            if (url.includes('douyin.com')) {
-              itemUrl = `https://www.douyin.com/video/${videoId}`;
-            } else if (url.includes('tiktok.com')) {
-              itemUrl = buildTikTokVideoUrl(videoId, entry, url);
-            } else {
-              itemUrl = `https://www.youtube.com/watch?v=${videoId}`;
-            }
+            itemUrl = resolveItemUrl(videoId, entry, url);
           }
 
           let durationStr = '';

@@ -1,3 +1,5 @@
+import { resolveSourceProfile } from './sourceProfiles';
+
 /**
  * 解析階段的界限與批次範圍計算。
  *
@@ -24,26 +26,13 @@ export const PARSE_BATCH_SIZE = 200;
 /**
  * 將來源網址正規化為穩定的進度鍵。
  *
- * 不能直接拿輸入網址當鍵：分享出來的網址帶有每次都不同的追蹤參數
- * （如 `?_r=1&_t=ZS-99RJ3WEDUOH`），會讓同一個創作者每次分享都被當成新來源。
+ * 規則本身由來源能力表宣告（`sourceProfiles.ts`）—— 此處僅委派，
+ * 以維持既有的匯入路徑。不能直接拿輸入網址當鍵：分享出來的網址帶有
+ * 每次都不同的追蹤參數（如 `?_r=1&_t=ZS-99RJ3WEDUOH`），會讓同一個
+ * 創作者每次分享都被當成新來源。
  */
 export function parseProgressKey(url: string): string {
-  const tiktok = url.match(/tiktok\.com\/@([\w.\-]+)/);
-  if (tiktok) return `tiktok:@${tiktok[1]}`;
-
-  const list = url.match(/[?&]list=([\w\-]+)/);
-  if (list) return `yt:list:${list[1]}`;
-
-  const channel = url.match(/\/channel\/([\w\-]+)/);
-  if (channel) return `yt:channel:${channel[1]}`;
-
-  const ytHandle = url.match(/youtube\.com\/@([\w.\-]+)/);
-  if (ytHandle) return `yt:@${ytHandle[1]}`;
-
-  const douyin = url.match(/douyin\.com\/user\/([\w.\-]+)/);
-  if (douyin) return `douyin:${douyin[1]}`;
-
-  return url.split('?')[0];
+  return resolveSourceProfile(url).progressKey(url || '');
 }
 
 /**
