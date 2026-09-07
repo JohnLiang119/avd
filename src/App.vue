@@ -868,7 +868,11 @@ import { open as openShell } from '@tauri-apps/plugin-shell';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { DownloadService, isTauri, formatPublishTime, type PlaylistItem } from './services/DownloadService';
-import { parseProgressKey, advanceParseProgress, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress } from './services/parseScope';
+import {
+  parseProgressKey, advanceParseProgress, collectSourceProgress, pendingSequences,
+  applySequenceResults, resetSourceProgress, describeNextBatch, describeProgress,
+  SINGLE_SEQUENCE, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress
+} from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { shouldBackoff, describeRateLimit } from './services/rateLimit';
@@ -2308,25 +2312,47 @@ const addTask = async (urlToAdd: string) => {
   const isCreatorPageUrl = sourceProfile.needsPreParseConfirm;
 
   // 本次要抓的批次範圍，由該來源已記錄的進度決定。
+  // 多序列來源（YouTube 頻道的 Videos／Live／Shorts）逐序列記錄 ——
+  // 以合計筆數定址會讓較長的分頁在合計超過其長度後再也取不到內容。
   const progressKey = parseProgressKey(urlToAdd);
-  let fetchedBefore = parseProgress.value[progressKey]?.fetched || 0;
-  const sourceComplete = parseProgress.value[progressKey]?.complete || false;
+  const multiSequence = sourceProfile.expandsToSequences;
+  let progressView = collectSourceProgress(parseProgress.value, progressKey, multiSequence);
+  let fetchedBefore = progressView.sequences[SINGLE_SEQUENCE]?.fetched || 0;
+  const sourceComplete = progressView.allComplete;
+
+  const restartFromScratch = () => {
+    parseProgress.value = resetSourceProgress(parseProgress.value, progressKey, multiSequence);
+    progressView = collectSourceProgress(parseProgress.value, progressKey, multiSequence);
+    fetchedBefore = 0;
+  };
 
   // 有進度時一律徵詢確認（讓使用者知道本次抓的是哪一段）；
   // 無進度時只有高成本的創作者頁面才需要事前確認。
-  if (isPlaylistUrl && (isCreatorPageUrl || fetchedBefore > 0)) {
-    const rangeHint = `${fetchedBefore + 1}–${fetchedBefore + PARSE_BATCH_SIZE}`;
+  if (isPlaylistUrl && (isCreatorPageUrl || progressView.hasAny)) {
+    // 多序列來源不報單一合計數字 —— 「200」對它的意義是「每序列 200」。
+    const rangeHint = describeNextBatch(progressView, multiSequence);
     let message: string;
     let confirmText: string;
 
     if (sourceComplete) {
-      message = `此來源先前已抓完全部 ${fetchedBefore} 部。\n\n要從頭重新抓取嗎？`;
+      message = `此來源先前已抓完（${describeProgress(progressView, multiSequence)}）。
+
+要從頭重新抓取嗎？`;
       confirmText = '從頭開始';
-    } else if (fetchedBefore > 0) {
-      message = `此來源已抓過前 ${fetchedBefore} 部。\n\n本次將抓取第 ${rangeHint} 部。`;
+    } else if (progressView.hasAny) {
+      message = `此來源已抓過 ${describeProgress(progressView, multiSequence)}。
+
+本次將抓取 ${rangeHint}。`;
       confirmText = '繼續抓下一批';
+    } else if (multiSequence) {
+      message = `此網址指向創作者的全部作品，底下可能有多個分頁。
+
+本次將抓取${rangeHint}，其餘可日後再次輸入同一網址接續抓取。`;
+      confirmText = '掃描並選擇下載';
     } else {
-      message = `此網址指向創作者的全部作品。\n\n本次將抓取前 ${PARSE_BATCH_SIZE} 部，其餘可日後再次輸入同一網址接續抓取。`;
+      message = `此網址指向創作者的全部作品。
+
+本次將抓取前 ${PARSE_BATCH_SIZE} 部，其餘可日後再次輸入同一網址接續抓取。`;
       confirmText = '掃描並選擇下載';
     }
 
@@ -2338,10 +2364,10 @@ const addTask = async (urlToAdd: string) => {
         cancelButtonText: '略過',
         confirmButtonColor: '#1989fa'
       });
-      if (sourceComplete) fetchedBefore = 0;
+      if (sourceComplete) restartFromScratch();
     } catch {
       // 抓到一半時，取消後再問一次是否改為從頭開始（Vant 對話框只有兩個按鈕）
-      if (fetchedBefore > 0 && !sourceComplete) {
+      if (progressView.hasAny && !sourceComplete) {
         try {
           await showConfirmDialog({
             title: '從頭開始？',
@@ -2350,7 +2376,7 @@ const addTask = async (urlToAdd: string) => {
             cancelButtonText: '放棄',
             confirmButtonColor: '#1989fa'
           });
-          fetchedBefore = 0;
+          restartFromScratch();
         } catch {
           return;
         }
@@ -2383,8 +2409,15 @@ const addTask = async (urlToAdd: string) => {
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutTimer = setTimeout(() => reject(new Error('PARSE_TIMEOUT')), PARSE_TIMEOUT_MS);
       });
+      // 多序列來源的續抓：各序列帶自己的起點，而非以合計筆數定址。
+      const pending = multiSequence ? pendingSequences(progressView) : {};
+      const isSequenceContinuation = Object.keys(pending).length > 0;
+
       const res = await Promise.race([
-        DownloadService.parsePlaylist(urlToAdd, { fetched: fetchedBefore }),
+        DownloadService.parsePlaylist(
+          urlToAdd,
+          isSequenceContinuation ? { sequences: pending } : { fetched: fetchedBefore }
+        ),
         timeoutPromise
       ]);
       parseSettled = true;
@@ -2396,10 +2429,17 @@ const addTask = async (urlToAdd: string) => {
 
       // 只有解析成功才推進進度；失敗、逾時、取消都不動，使用者可原地重試。
       // 推進量取實際回傳筆數（未勾選的也算看過了）。
-      parseProgress.value = {
-        ...parseProgress.value,
-        [progressKey]: advanceParseProgress(fetchedBefore, res.items?.length || 0)
-      };
+      if (res.sequenceReturns) {
+        // 多序列：逐序列推進，未回傳的序列不動（例如已抓完者本就不再請求）。
+        parseProgress.value = applySequenceResults(
+          parseProgress.value, progressKey, pending, res.sequenceReturns
+        );
+      } else {
+        parseProgress.value = {
+          ...parseProgress.value,
+          [progressKey]: advanceParseProgress(fetchedBefore, res.items?.length || 0)
+        };
+      }
 
       if (!res.items || res.items.length === 0) {
         showToast(fetchedBefore > 0 ? '已無更多影片可抓取' : '此播放清單無可下載的影片');

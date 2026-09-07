@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  collectSourceProgress,
+  pendingSequences,
+  applySequenceResults,
+  sequenceProgressKey,
+  SINGLE_SEQUENCE,
+  type ParseProgress,
   parseProgressKey,
   buildPlaylistRangeArgs,
   advanceParseProgress,
@@ -89,5 +95,90 @@ describe('advanceParseProgress', () => {
     // 使用者只勾了 3 部，但這一批的 200 部都已經看過了。
     const after = advanceParseProgress(0, 200, 200);
     expect(after.fetched).toBe(200);
+  });
+});
+
+describe('多序列來源的進度定址', () => {
+  const KEY = 'yt:channel:UCSJ4gkVC6NrvII8umztf0Ow';
+  // Lofi Girl 實測：videos 117／streams 23／shorts 332
+  const afterFirstBatch: Record<string, ParseProgress> = {
+    [`${KEY}/videos`]: { fetched: 117, complete: true },
+    [`${KEY}/streams`]: { fetched: 23, complete: true },
+    [`${KEY}/shorts`]: { fetched: 200, complete: false },
+  };
+
+  it('合計為各序列之和，但續抓不以合計定址', () => {
+    const view = collectSourceProgress(afterFirstBatch, KEY, true);
+    expect(view.total).toBe(340);
+    // 340 對任何一個分頁都沒有意義 —— 拿它當範圍起點正是原本的漏片根因
+    expect(view.sequences.shorts.fetched).toBe(200);
+  });
+
+  it('只有未抓完的序列會被續抓，且各自帶自己的起點', () => {
+    const view = collectSourceProgress(afterFirstBatch, KEY, true);
+    // videos 與 streams 已完成，不再發出請求
+    expect(pendingSequences(view)).toEqual({ shorts: 200 });
+  });
+
+  it('shorts 續抓自第 201 部而非第 341 部', () => {
+    const pending = pendingSequences(collectSourceProgress(afterFirstBatch, KEY, true));
+    expect(buildPlaylistRangeArgs(pending.shorts, 200)).toEqual(['--playlist-items', '201-400']);
+    // 原本的錯誤行為：以合計 340 定址 → 341-540 → 三個分頁都回 0
+    expect(buildPlaylistRangeArgs(340, 200)).toEqual(['--playlist-items', '341-540']);
+  });
+
+  it('部分序列未完成時，來源不算抓完', () => {
+    expect(collectSourceProgress(afterFirstBatch, KEY, true).allComplete).toBe(false);
+  });
+
+  it('所有序列皆完成時，來源才算抓完', () => {
+    const done = { ...afterFirstBatch, [`${KEY}/shorts`]: { fetched: 332, complete: true } };
+    expect(collectSourceProgress(done, KEY, true).allComplete).toBe(true);
+  });
+
+  it('推進只動本批回傳的序列，其餘不變', () => {
+    const next = applySequenceResults(afterFirstBatch, KEY, { shorts: 200 }, { shorts: 132 }, 200);
+    expect(next[`${KEY}/shorts`]).toEqual({ fetched: 332, complete: true });
+    expect(next[`${KEY}/videos`]).toEqual({ fetched: 117, complete: true });
+    expect(next[`${KEY}/streams`]).toEqual({ fetched: 23, complete: true });
+  });
+
+  it('推進回傳新物件，不就地修改', () => {
+    const before = { ...afterFirstBatch };
+    applySequenceResults(afterFirstBatch, KEY, { shorts: 200 }, { shorts: 132 }, 200);
+    expect(afterFirstBatch).toEqual(before);
+  });
+});
+
+describe('舊格式進度鍵（不寫遷移，直接忽略）', () => {
+  const KEY = 'yt:channel:UCabc';
+
+  it('多序列來源忽略不帶序列識別的舊鍵', () => {
+    // 舊鍵是本變更之前的單一純量進度，其數值對任何序列都沒有意義。
+    const view = collectSourceProgress({ [KEY]: { fetched: 340, complete: true } }, KEY, true);
+    expect(view.hasAny).toBe(false);
+    expect(view.total).toBe(0);
+    expect(view.allComplete).toBe(false);
+  });
+
+  it('單序列來源仍讀取不帶識別的鍵', () => {
+    const view = collectSourceProgress({ [KEY]: { fetched: 200, complete: false } }, KEY, false);
+    expect(view.sequences[SINGLE_SEQUENCE]).toEqual({ fetched: 200, complete: false });
+    expect(view.total).toBe(200);
+  });
+
+  it('單序列來源不會誤讀其他來源的鍵', () => {
+    const view = collectSourceProgress({ 'yt:channel:UCother': { fetched: 5, complete: false } }, KEY, false);
+    expect(view.hasAny).toBe(false);
+  });
+
+  it('sequenceProgressKey：單序列不加分隔符', () => {
+    expect(sequenceProgressKey(KEY, 'videos')).toBe(`${KEY}/videos`);
+    expect(sequenceProgressKey(KEY, SINGLE_SEQUENCE)).toBe(KEY);
+  });
+
+  it('空進度表安全', () => {
+    expect(collectSourceProgress(undefined, KEY, true).hasAny).toBe(false);
+    expect(pendingSequences(collectSourceProgress({}, KEY, true))).toEqual({});
   });
 });

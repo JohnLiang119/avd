@@ -83,6 +83,23 @@ function resolveItemUrl(rawId: string, entry: any, sourceUrl: string): string {
   return `https://www.youtube.com/watch?v=${rawId}`;
 }
 
+/** YouTube 頻道底下的分頁名，用於自網址還原分頁根。 */
+const CHANNEL_TAB_SEGMENTS = ['videos', 'streams', 'shorts', 'playlists', 'live', 'featured'];
+
+/** 自子清單 entry 取出序列識別（分頁名），如 videos / streams / shorts。 */
+function sequenceKeyOf(entry: any, index: number): string {
+  const wp = String(entry?.webpage_url || entry?.url || '');
+  const seg = wp.split('?')[0].replace(/\/+$/, '').split('/').pop() || '';
+  return seg || `seq${index}`;
+}
+
+/** 組出某序列（分頁）的網址，供續抓單獨抓取。 */
+function sequenceUrl(sourceUrl: string, sequence: string): string {
+  const base = sourceUrl.split('?')[0].replace(/\/+$/, '');
+  const tabPattern = new RegExp(`/(${CHANNEL_TAB_SEGMENTS.join('|')})$`);
+  return `${base.replace(tabPattern, '')}/${sequence}`;
+}
+
 /** 解析中的 yt-dlp 子行程（主清單與子清單展開可能同時各有一個）。 */
 const activeParseChildren = new Set<any>();
 let isParseCancelling = false;
@@ -190,6 +207,11 @@ export interface PlaylistResult {
   channelTitle: string;
   playlistTitle: string;
   items: PlaylistItem[];
+  /**
+   * 多序列來源本批各序列的回傳筆數（如 `{ videos: 117, shorts: 200 }`）。
+   * 單序列來源為 undefined。呼叫端據此逐序列推進進度。
+   */
+  sequenceReturns?: Record<string, number>;
 }
 
 /**
@@ -311,9 +333,46 @@ export const DownloadService = {
    * @param options.fetched 此來源先前已抓過的筆數；用來決定本批的抓取範圍。
    *                        0（或省略）代表首批。
    */
-  async parsePlaylist(url: string, options?: { fetched?: number }): Promise<PlaylistResult> {
+  /**
+   * 解析播放清單／頻道網址。
+   *
+   * @param options.fetched   單序列來源已抓過的筆數
+   * @param options.sequences 多序列來源各序列已抓過的筆數。給定且非空時走
+   *                          續抓路徑：只對這些序列各自發出請求，各帶自己的
+   *                          範圍。以合計筆數定址是原本的漏片根因。
+   */
+  async parsePlaylist(
+    url: string,
+    options?: { fetched?: number; sequences?: Record<string, number> }
+  ): Promise<PlaylistResult> {
     // 每次解析都重置取消旗標，避免前一次的取消殘留影響本次。
     isParseCancelling = false;
+
+    const seqFetched = options?.sequences;
+    if (seqFetched && Object.keys(seqFetched).length > 0) {
+      // 續抓：逐序列各抓一次。此路徑平台無關 —— 每次都只是對某個分頁網址
+      // 做一次普通解析，兩端的既有實作都能處理。
+      const merged: PlaylistItem[] = [];
+      const returns: Record<string, number> = {};
+      let channelTitle = '';
+      let playlistTitle = '';
+
+      for (const [sequence, fetched] of Object.entries(seqFetched)) {
+        const res = await this.parsePlaylist(sequenceUrl(url, sequence), { fetched });
+        if (!channelTitle && res?.channelTitle) channelTitle = res.channelTitle;
+        if (!playlistTitle && res?.playlistTitle) playlistTitle = res.playlistTitle;
+        returns[sequence] = res?.items?.length || 0;
+        if (res?.items) merged.push(...res.items);
+      }
+
+      return {
+        channelTitle: channelTitle || '頻道主',
+        playlistTitle: playlistTitle || '播放清單',
+        items: merged,
+        sequenceReturns: returns
+      };
+    }
+
     const rangeArgs = buildPlaylistRangeArgs(options?.fetched ?? 0);
 
     if (!isTauri()) {
@@ -355,7 +414,10 @@ export const DownloadService = {
       const channelTitle = convertCnToTw(data.uploader || data.channel || data.uploader_id || '頻道主');
       const playlistTitle = convertCnToTw(data.title || '播放清單');
 
-      const processEntries = async (entriesData: any[]): Promise<PlaylistItem[]> => {
+      // 各分頁本批的回傳筆數，僅記錄頂層的子清單（分頁），不含更深的巢狀。
+      const sequenceReturns: Record<string, number> = {};
+
+      const processEntries = async (entriesData: any[], isTopLevel = false): Promise<PlaylistItem[]> => {
         const result: PlaylistItem[] = [];
 
         for (let index = 0; index < entriesData.length; index++) {
@@ -373,6 +435,17 @@ export const DownloadService = {
                                 (entryId && typeof entryId === 'string' && entryId.startsWith('PL'));
 
           if (isSubPlaylist && (entryUrl || entryId)) {
+            // 內嵌 entries 優先：實測 `--playlist-end N` 打在頻道網址上時，
+            // 各分頁的內嵌結果已各自被裁到 N，與逐分頁呼叫完全相同。
+            // 現行程式碼原本一律重打，等於同一批資料抓兩次（共 4 次呼叫）。
+            const inline = Array.isArray(entry.entries) ? entry.entries : null;
+            if (inline && inline.length > 0) {
+              const subItems = await processEntries(inline);
+              if (isTopLevel) sequenceReturns[sequenceKeyOf(entry, index)] = subItems.length;
+              result.push(...subItems);
+              continue;
+            }
+
             try {
               const subUrl = entryUrl.startsWith('http')
                 ? entryUrl
@@ -391,6 +464,7 @@ export const DownloadService = {
                 const subData = JSON.parse(subOut.stdout);
                 if (subData.entries && subData.entries.length > 0) {
                   const subItems = await processEntries(subData.entries);
+                  if (isTopLevel) sequenceReturns[sequenceKeyOf(entry, index)] = subItems.length;
                   result.push(...subItems);
                   continue;
                 }
@@ -450,12 +524,13 @@ export const DownloadService = {
         initialEntries = [data];
       }
 
-      const items = await processEntries(initialEntries);
+      const items = await processEntries(initialEntries, true);
 
       return {
         channelTitle,
         playlistTitle,
-        items
+        items,
+        sequenceReturns: Object.keys(sequenceReturns).length > 0 ? sequenceReturns : undefined
       };
     } catch (e: any) {
       throw new Error('播放清單解析失敗: ' + (e.message || String(e)));

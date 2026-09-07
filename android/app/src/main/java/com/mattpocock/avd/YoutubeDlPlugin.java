@@ -276,14 +276,19 @@ public class YoutubeDlPlugin extends Plugin {
 
                 com.getcapacitor.JSArray itemsArr = new com.getcapacitor.JSArray();
 
+                // 各分頁本批的回傳筆數，供前端逐序列推進進度。
+                org.json.JSONObject sequenceReturns = new org.json.JSONObject();
                 if (entries != null) {
-                    processEntriesHelper(url, entries, itemsArr, processId, rangeArgs);
+                    processEntriesHelper(url, entries, itemsArr, processId, rangeArgs, true, sequenceReturns);
                 }
 
                 JSObject ret = new JSObject();
                 ret.put("channelTitle", channelTitle);
                 ret.put("playlistTitle", playlistTitle);
                 ret.put("items", itemsArr);
+                if (sequenceReturns.length() > 0) {
+                    ret.put("sequenceReturns", sequenceReturns);
+                }
                 call.resolve(ret);
             } catch (YoutubeDL.CanceledException e) {
                 // 使用者主動取消，非故障：以可辨識的訊息回覆，前端不顯示為錯誤。
@@ -316,6 +321,19 @@ public class YoutubeDlPlugin extends Plugin {
     }
 
     /**
+     * 自子清單 entry 取出序列識別（分頁名），與前端 sequenceKeyOf 對稱。
+     * 如 `.../channel/UCxxx/videos` -> `videos`。
+     */
+    private static String sequenceKeyOf(org.json.JSONObject entry, int index) {
+        String wp = entry == null ? "" : entry.optString("webpage_url", entry.optString("url", ""));
+        int q = wp.indexOf('?');
+        String path = (q >= 0 ? wp.substring(0, q) : wp).replaceAll("/+$", "");
+        int slash = path.lastIndexOf('/');
+        String seg = slash >= 0 ? path.substring(slash + 1) : "";
+        return seg.isEmpty() ? ("seq" + index) : seg;
+    }
+
+    /**
      * 由解析結果組出 TikTok 的正式影片網址，與前端 buildTikTokVideoUrl 對稱。
      *
      * yt-dlp 的 TikTok entry 實際上已直接帶完整網址，此處只處理它沒帶的退化
@@ -344,7 +362,9 @@ public class YoutubeDlPlugin extends Plugin {
         return "https://www.tiktok.com/@" + handle + "/video/" + videoId;
     }
 
-    private void processEntriesHelper(String originalUrl, org.json.JSONArray entries, com.getcapacitor.JSArray itemsArr, String processId, java.util.List<String> rangeArgs) throws Exception {
+    private void processEntriesHelper(String originalUrl, org.json.JSONArray entries,
+            com.getcapacitor.JSArray itemsArr, String processId, java.util.List<String> rangeArgs,
+            boolean isTopLevel, org.json.JSONObject sequenceReturns) throws Exception {
         for (int i = 0; i < entries.length(); i++) {
             org.json.JSONObject entry = entries.getJSONObject(i);
             String rawItemTitle = entry.optString("title", entry.optString("fulltitle", "影片 " + (i + 1)));
@@ -362,6 +382,18 @@ public class YoutubeDlPlugin extends Plugin {
                                    (videoId != null && videoId.startsWith("PL"));
 
             if (isSubPlaylist && (itemUrl != null || videoId != null)) {
+                // 內嵌 entries 優先：`--playlist-end N` 打在頻道網址上時，
+                // 各分頁的內嵌結果已各自被裁到 N，與逐分頁呼叫完全相同。
+                org.json.JSONArray inline = entry.optJSONArray("entries");
+                if (inline != null && inline.length() > 0) {
+                    int before = itemsArr.length();
+                    processEntriesHelper(originalUrl, inline, itemsArr, processId, rangeArgs, false, sequenceReturns);
+                    if (isTopLevel) {
+                        sequenceReturns.put(sequenceKeyOf(entry, i), itemsArr.length() - before);
+                    }
+                    continue;
+                }
+
                 try {
                     String subUrl = (itemUrl != null && itemUrl.startsWith("http"))
                             ? itemUrl
@@ -378,7 +410,11 @@ public class YoutubeDlPlugin extends Plugin {
                     org.json.JSONObject subData = new org.json.JSONObject(subResp.getOut());
                     org.json.JSONArray subEntries = subData.optJSONArray("entries");
                     if (subEntries != null && subEntries.length() > 0) {
-                        processEntriesHelper(originalUrl, subEntries, itemsArr, processId, rangeArgs);
+                        int before = itemsArr.length();
+                        processEntriesHelper(originalUrl, subEntries, itemsArr, processId, rangeArgs, false, sequenceReturns);
+                        if (isTopLevel) {
+                            sequenceReturns.put(sequenceKeyOf(entry, i), itemsArr.length() - before);
+                        }
                         continue;
                     }
                 } catch (YoutubeDL.CanceledException e) {

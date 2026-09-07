@@ -34,19 +34,26 @@
 
 ## 3. ④ 多序列來源的進度定址（自 fix-playlist-parse-hang 併入）
 
-- [ ] 3.1 `SourceProfile` 新增宣告：此來源是否會展開為多個獨立序列
-- [ ] 3.2 `youtube-channel` / `youtube-handle` 標為多序列；`youtube-playlist`、`tiktok-user`、`bilibili-space` 為單序列
-- [ ] 3.3 進度結構改為可容納序列識別（`yt:channel:UCxxx/videos` 等），單序列來源的鍵格式維持原樣
-- [ ] 3.4 續抓只對 `complete: false` 的序列發出請求，各自帶自己的範圍
-- [ ] 3.5 所有序列皆 `complete` 時才將該來源標記為已抓完
-- [ ] 3.6 首批直接採用頂層回應內嵌的 `entry.entries`，不再為各分頁重打 yt-dlp
+- [x] 3.1 `SourceProfile` 新增宣告：此來源是否會展開為多個獨立序列
+- [x] 3.2 `youtube-channel` / `youtube-handle` 標為多序列；`youtube-playlist`、`tiktok-user`、`bilibili-space` 為單序列
+- [x] 3.3 進度結構改為可容納序列識別（`yt:channel:UCxxx/videos` 等），單序列來源的鍵格式維持原樣
+- [x] 3.4 續抓只對 `complete: false` 的序列發出請求，各自帶自己的範圍
+- [x] 3.5 所有序列皆 `complete` 時才將該來源標記為已抓完
+- [x] 3.6 首批直接採用頂層回應內嵌的 `entry.entries`，不再為各分頁重打 yt-dlp
       （實測 `--playlist-end 200` 打在頻道網址上時，內嵌結果已各自裁到 200，
       與逐分頁呼叫完全相同 —— 一併結案 fix-playlist-parse-hang 任務 8.6）
-- [ ] 3.7 事前確認對話框據實說明各序列的範圍，不報單一合計數字
-- [ ] 3.8 舊格式的進度鍵直接忽略、視為無進度，不寫遷移邏輯
-- [ ] 3.9 補上 vitest：序列長度不一時的續抓定址、部分序列已完成、全部完成才標記來源完成、舊鍵被忽略
-- [ ] 3.10 實測回歸：Lofi Girl 頻道（videos 117／streams 23／shorts 332）
+- [x] 3.7 事前確認對話框據實說明各序列的範圍，不報單一合計數字
+- [x] 3.8 舊格式的進度鍵直接忽略、視為無進度，不寫遷移邏輯
+- [x] 3.9 補上 vitest：序列長度不一時的續抓定址、部分序列已完成、全部完成才標記來源完成、舊鍵被忽略
+- [x] 3.10 實測回歸：Lofi Girl 頻道（videos 117／streams 23／shorts 332）
       首批得 340 筆（4 秒、1 次呼叫），第二批 shorts 應得剩餘 132 筆而非 0 筆
+  - yt-dlp 層級已實證：`--playlist-end 200` 打在頻道網址上，內嵌 entries
+    為 117／23／200（4 秒、1 次呼叫）；直接打 shorts 分頁，
+    `--playlist-items 201-400` 得 **132 筆**、`341-540` 得 **0 筆**
+    （後者即修正前程式實際送出的範圍）。
+  - App 層級由單元測試涵蓋：`pendingSequences` 只回傳未完成的序列、
+    各帶自己的起點，`buildPlaylistRangeArgs(200)` 得 `201-400`。
+  - **端到端仍待實機**，歸於第 8 組的驗證項目。
 - [ ] 3.11 實測：600 筆規模下勾選對話框的渲染表現；若不可接受，將虛擬列表升格為必要工作並更新 design
 
 ## 4. Bilibili 空間頁納入支援
@@ -136,3 +143,21 @@
       - 訊息改寫只在呈現層（`reportError`），寫入錯誤紀錄的仍是原文。
       - Android 端以 `executeParseWithBackoff` 對稱實作，主解析與子清單
         展開兩處皆已接上。
+
+## 11. 實作期間發現（第 3 組）
+
+- [x] 11.1 **design D6 有一處未預見**：Android 的 plugin 在 Java 端的
+      `processEntriesHelper` 就把子清單攤平了，前端拿到的是扁平清單，
+      看不到分頁結構。故「首批取得各序列筆數」無法只在前端完成。
+      解法：Java 端一併回傳 `sequenceReturns`（各分頁本批筆數），
+      與 TypeScript 端對稱。**續抓路徑則平台無關** —— 那只是對各分頁網址
+      各做一次普通解析，兩端既有實作都能處理，不需額外的原生改動。
+- [x] 11.2 序列識別取自分頁網址的最後一段（`.../channel/UCxxx/videos`
+      → `videos`）。續抓時以 `sequenceUrl()` 還原分頁網址，會先剝掉來源
+      網址既有的分頁後綴，避免組出 `/videos/shorts` 這種路徑。
+- [x] 11.3 序列筆數**只記錄頂層的子清單**（分頁），不含更深的巢狀。
+      頻道的 playlists 分頁底下還會有一層真正的播放清單，那層維持原本的
+      展開行為，不進入進度記錄。
+- [x] 11.4 Java 端 `sequenceKeyOf` 原以 `wp.split("\?")` 取路徑，
+      經腳本傳遞後轉義少一層而成為非法的 Java 逸出字元。改為
+      `indexOf('?')` + `substring`，不倚賴正規式。

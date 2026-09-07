@@ -42,6 +42,16 @@ export interface SourceProfile {
   /** 清單解析結果的資訊完整度，決定是否啟動補齊階段 */
   flatMetadata: FlatMetadata;
   /**
+   * 此來源是否會展開為多個獨立序列。
+   *
+   * YouTube 頻道底下的 Videos／Live／Shorts 是三串各自獨立、長度互異的
+   * 清單。單一純量進度無法定址進三個序列 —— `fetched = 340` 對任何一個
+   * 分頁都沒有意義，拿它當範圍起點必然錯位。故此類來源的進度須逐序列記錄。
+   *
+   * 連帶影響「單次上限 200」的語意：對多序列來源是「每序列 200」。
+   */
+  expandsToSequences: boolean;
+  /**
    * 是否可加入自動追蹤。
    *
    * 追蹤機制綁定 YouTube 的官方 RSS，故僅 YouTube 頻道成立。呼叫端仍需
@@ -99,6 +109,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     progressKey: url => `tiktok:@${capture(url, /tiktok\.com\/@([\w.\-]+)/)}`,
     needsPreParseConfirm: true,
     flatMetadata: 'full',
+    expandsToSequences: false,
     supportsChannelTracking: false,
     buildItemUrl: buildTikTokVideoUrl,
   },
@@ -112,6 +123,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     progressKey: url => `douyin:${capture(url, /douyin\.com\/user\/([\w.\-]+)/)}`,
     needsPreParseConfirm: true,
     flatMetadata: 'full',
+    expandsToSequences: false,
     supportsChannelTracking: false,
   },
   {
@@ -122,6 +134,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     progressKey: stripQuery,
     needsPreParseConfirm: false,
     flatMetadata: 'full',
+    expandsToSequences: false,
     supportsChannelTracking: false,
     buildItemUrl: (videoId) => `https://www.douyin.com/video/${videoId}`,
   },
@@ -133,6 +146,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     progressKey: url => `yt:list:${capture(url, /[?&]list=([\w\-]+)/)}`,
     needsPreParseConfirm: false,
     flatMetadata: 'full',
+    expandsToSequences: false,
     supportsChannelTracking: false,
   },
   {
@@ -149,6 +163,8 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     // YouTube 頻道有自己的兩段式確認（加入追蹤 → 掃描明細），不走此旗標。
     needsPreParseConfirm: false,
     flatMetadata: 'full',
+    // Videos／Live／Shorts 三個分頁各自成串
+    expandsToSequences: true,
     supportsChannelTracking: true,
   },
   {
@@ -159,6 +175,7 @@ export const SOURCE_PROFILES: SourceProfile[] = [
     progressKey: url => `yt:@${capture(url, /youtube\.com\/@([\w.\-]+)/)}`,
     needsPreParseConfirm: false,
     flatMetadata: 'full',
+    expandsToSequences: true,
     supportsChannelTracking: true,
   },
 ];
@@ -172,6 +189,7 @@ export const FALLBACK_PROFILE: SourceProfile = {
   progressKey: stripQuery,
   needsPreParseConfirm: false,
   flatMetadata: 'full',
+  expandsToSequences: false,
   supportsChannelTracking: false,
 };
 

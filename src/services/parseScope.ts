@@ -73,3 +73,143 @@ export function advanceParseProgress(
     complete: safeReturned < batchSize
   };
 }
+
+/** 序列識別與來源鍵之間的分隔符。 */
+export const SEQUENCE_SEPARATOR = '/';
+
+/** 單序列來源在進度表中使用的序列識別（空字串，鍵即為來源鍵本身）。 */
+export const SINGLE_SEQUENCE = '';
+
+/** 組出某序列在進度表中的鍵。 */
+export function sequenceProgressKey(sourceKey: string, sequence: string): string {
+  return sequence ? `${sourceKey}${SEQUENCE_SEPARATOR}${sequence}` : sourceKey;
+}
+
+/** 某來源目前的進度概觀。 */
+export interface SourceProgressView {
+  /** 各序列的進度。單序列來源以 `SINGLE_SEQUENCE` 為識別。 */
+  sequences: Record<string, ParseProgress>;
+  /** 已抓筆數合計 */
+  total: number;
+  /** 是否有任何進度紀錄 */
+  hasAny: boolean;
+  /** 是否所有已知序列皆已抓完 */
+  allComplete: boolean;
+}
+
+/**
+ * 自完整進度表取出某來源的進度。
+ *
+ * 多序列來源**只認帶序列識別的鍵**，不帶識別的舊格式鍵直接忽略 ——
+ * 那是本變更之前寫下的單一純量進度，其數值對任何一個序列都沒有意義
+ * （見 design D6）。忽略等同於「沒抓過」，該來源會從頭抓一次，
+ * 重複的項目本就由既有的去重過濾吸收。刻意不寫遷移邏輯。
+ */
+export function collectSourceProgress(
+  all: Record<string, ParseProgress> | undefined,
+  sourceKey: string,
+  multiSequence: boolean
+): SourceProgressView {
+  const table = all || {};
+  const sequences: Record<string, ParseProgress> = {};
+
+  if (multiSequence) {
+    const prefix = sourceKey + SEQUENCE_SEPARATOR;
+    for (const key of Object.keys(table)) {
+      if (key.startsWith(prefix)) {
+        sequences[key.slice(prefix.length)] = table[key];
+      }
+    }
+  } else if (table[sourceKey]) {
+    sequences[SINGLE_SEQUENCE] = table[sourceKey];
+  }
+
+  const entries = Object.values(sequences);
+  return {
+    sequences,
+    total: entries.reduce((sum, p) => sum + (p?.fetched || 0), 0),
+    hasAny: entries.length > 0,
+    // 所有已知序列皆抓完才算抓完 —— 只要有一個還沒完，來源就還沒完。
+    allComplete: entries.length > 0 && entries.every(p => p?.complete),
+  };
+}
+
+/** 取出尚未抓完的序列及其已抓筆數，供續抓決定各自的範圍。 */
+export function pendingSequences(view: SourceProgressView): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [seq, p] of Object.entries(view.sequences)) {
+    if (!p?.complete) out[seq] = p?.fetched || 0;
+  }
+  return out;
+}
+
+/**
+ * 依本批各序列的回傳筆數推進進度，回傳更新後的完整進度表。
+ *
+ * 回傳新物件而非就地修改：呼叫端是持久化的 Ref，替換整個值才會觸發寫入。
+ */
+export function applySequenceResults(
+  all: Record<string, ParseProgress> | undefined,
+  sourceKey: string,
+  before: Record<string, number>,
+  returns: Record<string, number>,
+  batchSize = PARSE_BATCH_SIZE
+): Record<string, ParseProgress> {
+  const next = { ...(all || {}) };
+  for (const [seq, returned] of Object.entries(returns)) {
+    const prior = before[seq] || 0;
+    next[sequenceProgressKey(sourceKey, seq)] = advanceParseProgress(prior, returned, batchSize);
+  }
+  return next;
+}
+
+/** 清除某來源的所有進度（含各序列），供「從頭開始」使用。 */
+export function resetSourceProgress(
+  all: Record<string, ParseProgress> | undefined,
+  sourceKey: string,
+  multiSequence: boolean
+): Record<string, ParseProgress> {
+  const next = { ...(all || {}) };
+  delete next[sourceKey];
+  if (multiSequence) {
+    const prefix = sourceKey + SEQUENCE_SEPARATOR;
+    for (const key of Object.keys(next)) {
+      if (key.startsWith(prefix)) delete next[key];
+    }
+  }
+  return next;
+}
+
+/**
+ * 供事前確認對話框使用的範圍說明。
+ *
+ * 多序列來源不報單一合計數字 —— 「200」對它的意義是「每序列 200」，
+ * 只說一個總數會讓使用者以為那是全部（見 design D6 的風險項）。
+ */
+export function describeNextBatch(
+  view: SourceProgressView,
+  multiSequence: boolean,
+  batchSize = PARSE_BATCH_SIZE
+): string {
+  if (!multiSequence) {
+    const fetched = view.sequences[SINGLE_SEQUENCE]?.fetched || 0;
+    return `第 ${fetched + 1}–${fetched + batchSize} 部`;
+  }
+
+  const pending = pendingSequences(view);
+  const names = Object.keys(pending);
+  if (names.length === 0) {
+    return `每個分頁的前 ${batchSize} 部`;
+  }
+  return names
+    .map(seq => `${seq} 第 ${pending[seq] + 1}–${pending[seq] + batchSize} 部`)
+    .join('、');
+}
+
+/** 各序列已抓進度的摘要，如 `videos 117（已完）、shorts 200`。 */
+export function describeProgress(view: SourceProgressView, multiSequence: boolean): string {
+  if (!multiSequence) return `${view.total} 部`;
+  const parts = Object.entries(view.sequences)
+    .map(([seq, p]) => `${seq} ${p.fetched}${p.complete ? '（已完）' : ''}`);
+  return parts.length ? `${parts.join('、')}，合計 ${view.total} 部` : `${view.total} 部`;
+}
