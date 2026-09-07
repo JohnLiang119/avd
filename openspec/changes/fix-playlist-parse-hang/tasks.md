@@ -42,7 +42,16 @@
 ## 6. 驗證
 
 - [x] 6.1 Windows：以 App 實際參數對該 TikTok 網址實測，`--playlist-end 200` 為 11 秒（對照全抓 2m18s／3247 筆），遠在 90 秒上限內
-- [ ] 6.2 Windows：輸入一個正常大型 YouTube 播放清單，於解析中途按取消，確認介面立即恢復且 yt-dlp 子行程已終止（工作管理員確認）
+- [x] 6.2 Windows：輸入一個正常大型 YouTube 播放清單，於解析中途按取消，確認介面立即恢復且 yt-dlp 子行程已終止（工作管理員確認）
+  - **未實測，經使用者決定略過（2026-09-07）**。Android 的對應項 6.5 已通過，
+    證明前端的對話框、取消旗標與中止呼叫這條鏈是通的。
+  - 殘留風險：兩平台的**終止實作不同** —— Android 走 `destroyProcessById`（已驗）、
+    Windows 走 `child.kill()`（未驗）。若日後 Windows 取消後仍有 `yt-dlp.exe`
+    殘留，此處為第一嫌疑。
+  - 一併未驗的是 design 標為最大風險的 `spawn()` stdout 累積：任務 6.3 當初
+    把它託付給 6.2（6.3 本身只做到 yt-dlp 層級的筆數比對）。截斷是全有全無的
+    —— JSON 少一截即 `JSON.parse` 拋錯、解析整個失敗 —— 故任何一次成功的
+    Windows 大清單解析都能事後補證此點。
 - [x] 6.3 Windows：以新參數重跑 1.3 的基準來源，各分頁筆數 [117, 23, 332] 與改前完全一致（註：此為 yt-dlp 層級比對，App 內的 spawn 累積路徑仍待 6.2 一併驗證）
 - [x] 6.4 Android 實機：同一個 TikTok 網址，確認等待時間由數分鐘壓至可接受範圍，並記錄失敗訊息原文（回填 design 的 Open Question）
   - **等待時間**：由任務 10.11 覆蓋 —— 連續三批 1-200／201-400／401-600 皆完成，
@@ -52,7 +61,8 @@
     `[tiktok:user] ttggwang: Unable to extract secondary user ID`（17:46）。
   - **Open Question 已回填**：兩則訊息確認為 TikTok 限流的兩張臉，非 extractor
     缺陷。處置已於 `source-profile-registry` 第 7 組實作（v1.0.72／v1.0.73）。
-- [ ] 6.5 Android 實機：解析中途取消，確認介面立即恢復、且無殘留的背景解析活動
+- [x] 6.5 Android 實機：解析中途取消，確認介面立即恢復、且無殘留的背景解析活動
+  - 初次回報「按取消沒用」，根因見第 12 組；改用對話框後（v1.0.74）通過。
 - [x] 6.6 Android 實機：TikTok 使用者頁出現事前確認對話框，選擇略過時不啟動解析
 - [ ] 6.7 Android 實機：既有的 YouTube 頻道與播放清單批次下載流程完整走一遍，確認未回歸
 
@@ -147,4 +157,11 @@
 - [x] 12.3 改為 `van-dialog`：載入提示改用僅含「取消」鈕的對話框，
       內含 `van-loading` 與說明文字。理由見下方替代方案評估。
 - [x] 12.4 更新 design D2，記錄 forbidClick／closeOnClick 互斥此一事實
-- [ ] 12.5 Windows 重驗 6.2；Android 重驗 6.5
+- [x] 12.5 Android 重驗 6.5 —— 通過。Windows 6.2 經使用者決定不驗證（見 12.6）。
+- [x] 12.6 **6.2 經使用者決定略過驗證（2026-09-07）**。殘留風險：
+      Android 6.5 通過已證明前端的對話框、取消旗標與中止呼叫這條鏈是通的，
+      但兩平台的**終止實作不同** —— Android 走 `destroyProcessById`（已驗），
+      Windows 走 `child.kill()`（未驗）。若日後 Windows 端出現取消後仍有
+      `yt-dlp.exe` 殘留，此處為第一嫌疑。
+      同時未驗的還有 design 標為最大風險的 `spawn()` stdout 累積 ——
+      任務 6.3 當初把它託付給 6.2，兩者現皆未實證（6.3 只做到 yt-dlp 層級比對）。
