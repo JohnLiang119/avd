@@ -24,6 +24,9 @@ import java.util.Locale;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.UnknownHostException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 import java.util.Enumeration;
 import android.net.wifi.WifiManager;
 
@@ -669,7 +672,7 @@ public class YoutubeDlPlugin extends Plugin {
                 conn.setReadTimeout(8000);
 
                 if (conn.getResponseCode() != 200) {
-                    call.reject("HTTP " + conn.getResponseCode() + ": 無法獲取頻道 RSS");
+                    call.reject("HTTP_STATUS:" + conn.getResponseCode() + ":無法獲取頻道 RSS");
                     return;
                 }
 
@@ -684,6 +687,9 @@ public class YoutubeDlPlugin extends Plugin {
                 JSObject ret = new JSObject();
                 ret.put("xml", sb.toString());
                 call.resolve(ret);
+            } catch (UnknownHostException | ConnectException | SocketTimeoutException e) {
+                Log.e(TAG, "Network error while fetching channel RSS", e);
+                call.reject("NETWORK_ERROR:" + (e.getMessage() != null ? e.getMessage() : e.toString()));
             } catch (Exception e) {
                 Log.e(TAG, "Failed to fetch channel RSS", e);
                 call.reject("獲取頻道 RSS 失敗: " + e.getMessage());

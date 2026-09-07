@@ -132,7 +132,15 @@ fn fetch_http_text(url: String) -> Result<String, String> {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
         .call()
-        .map_err(|e| format!("HTTP 請求失敗: {}", e))?;
+        .map_err(|e| {
+            let message = e.to_string();
+            match e {
+                ureq::Error::Status(status, _) => {
+                    format!("HTTP_STATUS:{}:{}", status, message)
+                }
+                ureq::Error::Transport(_) => format!("NETWORK_ERROR:{}", message),
+            }
+        })?;
 
     let text = response
         .into_string()

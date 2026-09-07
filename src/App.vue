@@ -876,7 +876,7 @@ import {
 } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
-import { shouldBackoff, describeRateLimit } from './services/rateLimit';
+import { classifyChannelRssError, describeChannelRssFailure, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
@@ -1557,6 +1557,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   let newVideoCount = 0;
   let fallbackVideoCount = 0;
   let failedCount = 0;
+  const failedLevels: ChannelRssErrorLevel[] = [];
   const now = Date.now();
 
   for (const channel of enabledChannels) {
@@ -1611,6 +1612,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       applyChannelAnchor(channel, nextChannelBaseline(videos, channelLastPub, unhandledVideoIds), now);
     } catch (err) {
       failedCount++;
+      failedLevels.push(classifyChannelRssError(err));
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
       // 只記入日誌、不逐頻道彈提示 —— 迴圈結束後由總結提示統一告知。
       try {
@@ -1627,15 +1629,18 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   isCheckingChannels.value = false;
 
   const isFallbackEnabled = !!monitorConfig.value.enableYtDlpFallback;
+  const failureLevel: ChannelRssErrorLevel = failedLevels.every(level => level === 'network')
+    ? 'network'
+    : failedLevels.includes('server')
+      ? 'server'
+      : 'content';
 
   if (failedCount > 0 && failedCount >= enabledChannels.length) {
     // 全部失敗
     if (isManual) {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
       showToast({
-        message: isFallbackEnabled
-          ? '❌ 無法連線至 YouTube 頻道 (官方 RSS 與備援均失敗)'
-          : '❌ 官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)',
+        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}`,
         duration: 5000,
         closeOnClick: true
       });
@@ -1643,7 +1648,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   } else if (newVideoCount > 0 && failedCount > 0) {
     // 有新影片但部分失敗
     const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
-    const failHint = isFallbackEnabled ? `⚠️ ${failedCount} 個頻道無法連線` : `⚠️ ${failedCount} 個頻道 RSS 異常`;
+    const failHint = `⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}`;
     showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！（${failHint}）`);
     processQueue();
   } else if (newVideoCount > 0) {
@@ -1653,9 +1658,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
-    showToast(isFallbackEnabled 
-      ? `已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道連線失敗）` 
-      : `已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道 RSS 異常，可於設定開啟備援）`);
+    showToast(`已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）`);
   } else if (isManual) {
     // 全部成功且沒新片
     showToast('已檢查完成 [官方 RSS]，目前沒有新影片');

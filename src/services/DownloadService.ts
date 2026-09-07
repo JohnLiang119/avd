@@ -13,7 +13,7 @@ import {
   ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
   type EnrichedItem
 } from './enrichment';
-import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
+import { classifyChannelRssError, shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -34,7 +34,7 @@ const convertCnToTw = (text: string): string => {
 const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
 
 export const isTauri = () => {
-  return window.hasOwnProperty('__TAURI_INTERNALS__');
+  return typeof window !== 'undefined' && window.hasOwnProperty('__TAURI_INTERNALS__');
 };
 
 // formatPublishTime 已移至 displayFormat.ts（純函式，可被測試引用），此處轉出以維持既有匯入路徑。
@@ -149,6 +149,33 @@ async function sleepUnlessCancelled(ms: number): Promise<void> {
     await new Promise(r => setTimeout(r, Math.min(step, ms - waited)));
   }
   if (isParseCancelling) throw new Error(PARSE_CANCELLED);
+}
+
+
+/**
+ * 取得頻道 RSS，僅對網路層與伺服器層錯誤套用共用的指數退避。
+ * `sleep` 可注入以便測試時不必實際等待 2s/4s/8s。
+ */
+export async function fetchChannelRssWithRetry(
+  request: () => Promise<string>,
+  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  maxRetries = RATE_LIMIT_MAX_RETRIES
+): Promise<string> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const xmlText = await request();
+      if (!xmlText) throw new Error('頻道 RSS 內容為空');
+      return xmlText;
+    } catch (error) {
+      const level = classifyChannelRssError(error);
+      const retryAttempt = attempt + 1;
+      const delay = level === 'content' ? 0 : rateLimitBackoffMs(retryAttempt, maxRetries);
+      if (!delay) throw error;
+      console.warn(`[頻道 RSS] ${level} 錯誤，${delay / 1000} 秒後重試（第 ${retryAttempt} 次）`);
+      await sleep(delay);
+    }
+  }
+  throw new Error('頻道 RSS 重試流程異常');
 }
 
 /**
@@ -1314,21 +1341,23 @@ export const DownloadService = {
     options?: { enableFallback?: boolean }
   ): Promise<MonitoredVideoResult[]> {
     try {
-      let xmlText = '';
-      if (!isTauri()) {
-        // Android 端使用原生外掛繞過 WebView CORS 限制
-        const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
-        xmlText = res.xml || '';
-      } else {
+      const xmlText = await fetchChannelRssWithRetry(async () => {
+        if (!isTauri()) {
+          // Android 端使用原生外掛繞過 WebView CORS 限制
+          const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
+          return res.xml || '';
+        }
+
         // Windows/桌面端調用 Rust 原生 HTTP 請求通道，繞過 WebView CORS 限制
         const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
-        xmlText = await invoke<string>('fetch_http_text', { url: rssUrl });
-      }
-
-      if (!xmlText) throw new Error('頻道 RSS 內容為空');
+        return invoke<string>('fetch_http_text', { url: rssUrl });
+      });
 
       const parser = new DOMParser();
       const doc = parser.parseFromString(xmlText, 'application/xml');
+      if (doc.documentElement?.nodeName.toLowerCase() === 'parsererror' || doc.querySelector('parsererror')) {
+        throw new Error('頻道 RSS XML 解析失敗');
+      }
       const entries = Array.from(doc.querySelectorAll('entry'));
       
       return entries.map(entry => {

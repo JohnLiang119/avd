@@ -6,6 +6,8 @@ import {
   rateLimitBackoffMs,
   totalBackoffMs,
   describeRateLimit,
+  classifyChannelRssError,
+  describeChannelRssFailure,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_BASE_DELAY_MS
 } from '../rateLimit';
@@ -158,5 +160,20 @@ describe('限流的間接徵狀', () => {
     for (const msg of ['ERROR: Video unavailable', 'ERROR: HTTP Error 404: Not Found']) {
       expect(shouldBackoff(msg), msg).toBe(false);
     }
+  });
+});
+
+describe('頻道 RSS 錯誤分類與提示', () => {
+  it('解析網路層、伺服器層與內容層錯誤', () => {
+    expect(classifyChannelRssError('NETWORK_ERROR:Unable to resolve host')).toBe('network');
+    expect(classifyChannelRssError(new Error('官方 RSS 失敗: HTTP_STATUS:503:service unavailable'))).toBe('server');
+    expect(classifyChannelRssError('頻道 RSS XML 解析失敗')).toBe('content');
+  });
+
+  it('網路層文案不建議開啟備援，其他層級保留備援建議', () => {
+    expect(describeChannelRssFailure('network', { fallbackEnabled: true })).toContain('目前無法連線');
+    expect(describeChannelRssFailure('network', { fallbackEnabled: true })).not.toContain('備援');
+    expect(describeChannelRssFailure('server', { fallbackEnabled: false })).toContain('開啟 yt-dlp 備援');
+    expect(describeChannelRssFailure('content', { fallbackEnabled: false })).toContain('開啟 yt-dlp 備援');
   });
 });

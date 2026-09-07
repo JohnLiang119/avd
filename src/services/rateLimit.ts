@@ -56,6 +56,40 @@ export const RATE_LIMIT_BASE_DELAY_MS = 2000;
  * 約束 —— 14 秒在其中仍有充裕餘裕，不會讓退避本身把逾時撐爆。
  */
 export const RATE_LIMIT_MAX_RETRIES = 3;
+export type ChannelRssErrorLevel = 'network' | 'server' | 'content';
+
+function errorMessageOf(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? '');
+  }
+  return String(error ?? '');
+}
+
+/** 將頻道 RSS 邊界層傳回的錯誤前綴轉成前端可用的錯誤層級。 */
+export function classifyChannelRssError(error: unknown): ChannelRssErrorLevel {
+  const message = errorMessageOf(error);
+  if (/NETWORK_ERROR:/i.test(message)) return 'network';
+  if (/HTTP_STATUS:\d+:/i.test(message)) return 'server';
+  return 'content';
+}
+
+/** 依頻道 RSS 失敗層級產生通知文案；network 不提供無效的備援建議。 */
+export function describeChannelRssFailure(
+  level: ChannelRssErrorLevel,
+  options: { fallbackEnabled?: boolean; compact?: boolean } = {}
+): string {
+  if (level === 'network') {
+    return '目前無法連線（裝置未連上網路）';
+  }
+  if (options.compact) {
+    return options.fallbackEnabled ? '無法連線' : 'RSS 異常';
+  }
+  return options.fallbackEnabled
+    ? '無法連線至 YouTube 頻道 (官方 RSS 與備援均失敗)'
+    : '官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)';
+}
 
 /** 判定一則錯誤訊息是否為**明確**的來源限流（帶 HTTP 狀態碼）。 */
 export function isRateLimited(message: string): boolean {
