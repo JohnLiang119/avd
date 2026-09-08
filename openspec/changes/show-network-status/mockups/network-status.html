@@ -105,14 +105,9 @@
     font-size: 11px; color: #6b7280; margin-left: auto; font-family: monospace;
   }
 
-  /* ===== 新增：網路狀態元件 ===== */
-  .network-status { margin-bottom: 12px; }
+  /* ===== 新增：網路狀態元件（位於「重整／音訊」按鈕列，靠左） ===== */
+  .network-status { display: flex; align-items: center; }
 
-  /* 正常：靠右小型標籤 */
-  .ns-compact {
-    display: flex;
-    justify-content: flex-end;
-  }
   .ns-badge {
     display: inline-flex;
     align-items: center;
@@ -142,11 +137,12 @@
   }
   @keyframes ns-spin { to { transform: rotate(360deg); } }
 
-  /* 異常：全寬展開列 */
+  /* 異常：全寬展開列，獨立佔一列於「重整」列上方，不與按鈕擠在同一排 */
   .ns-banner {
     width: 100%;
     border-radius: 8px;
     padding: 10px 12px;
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -212,6 +208,24 @@
     font-size: 11px;
     color: #6b7280;
   }
+  /* 第一排：左側放網路狀態標籤，右側維持按鈕靠右對齊，對應 App.vue 的 justify-content: flex-end */
+  .fake-btn-row-2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .fake-btn-inline {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    padding: 6px 12px;
+    text-align: center;
+    font-size: 11px;
+    color: #6b7280;
+    white-space: nowrap;
+  }
   .fake-task {
     background: #fff;
     border: 1px solid #e5e7eb;
@@ -273,13 +287,21 @@
         <span class="ip">192.168.1.23</span>
       </div>
 
-      <!-- 新增：網際網路狀態元件 -->
-      <div class="network-status" id="networkStatus">
-        <!-- 內容由下方 script 依狀態切換 -->
-      </div>
-
       <div class="fake-url-input">貼上 YouTube / TikTok 網址…</div>
 
+      <!-- 異常時（degraded/offline）：全寬提示列，獨立一排，位於按鈕列上方 -->
+      <div id="networkBanner"></div>
+
+      <!-- 第一排：重整、清除、刪除、設定；正常/檢查中時，網路狀態標籤與「重整」同排、置左 -->
+      <div class="fake-btn-row-2">
+        <div class="network-status" id="networkStatus"></div>
+        <div class="fake-btn-inline">↻ 重整</div>
+        <div class="fake-btn-inline">🗑 清除</div>
+        <div class="fake-btn-inline">❌ 刪除</div>
+        <div class="fake-btn-inline">⚙ 設定</div>
+      </div>
+
+      <!-- 第二排：音訊、頻道、快傳、收合（與第一排垂直對齊） -->
       <div class="fake-btn-row">
         <div class="fake-btn">🎵 音訊</div>
         <div class="fake-btn">📺 頻道</div>
@@ -292,36 +314,39 @@
   </div>
 
   <div class="note">
-    <b>版面說明：</b>網路狀態元件位於「網址輸入列」正上方、「LAN 快傳伺服器卡片」下方。
-    正常狀態僅顯示靠右的精簡標籤，不佔用整列高度；離線／不穩定時展開為全寬提示列並提供「重新檢查」。
+    <b>版面說明：</b>網路狀態元件與「重整／音訊」按鈕列同排、置於最左側，按鈕仍維持靠右對齊
+    （對應 App.vue 第一排「重整、清除、刪除、設定」）。正常／檢查中時僅顯示精簡標籤，不佔額外一列；
+    離線／不穩定時，於「重整」列上方展開全寬提示列並提供「重新檢查」，不與按鈕擠在同一排。
     切換右上角「LAN 快傳」按鈕可確認：即使網際網路離線，只要快傳伺服器仍在區域網路運作，
     兩張卡片會同時獨立呈現、不互相覆蓋或合併成一則訊息。
   </div>
 
 <script>
-  const stateEl = document.getElementById('networkStatus');
+  const badgeEl = document.getElementById('networkStatus');
+  const bannerEl = document.getElementById('networkBanner');
   const frameEl = document.getElementById('phoneFrame');
   const lanCardEl = document.getElementById('lanCard');
   let currentState = 'checking';
   let checkingBusy = false;
 
-  const TEMPLATES = {
+  // 正常／檢查中：精簡標籤，顯示於「重整」列左側
+  const BADGE_TEMPLATES = {
     checking: () => `
-      <div class="ns-compact">
-        <span class="ns-badge checking">
-          <span class="ns-spinner"></span>
-          正在檢查連線
-        </span>
-      </div>
+      <span class="ns-badge checking">
+        <span class="ns-spinner"></span>
+        正在檢查連線
+      </span>
     `,
     online: () => `
-      <div class="ns-compact">
-        <span class="ns-badge online">
-          <span class="icon">●</span>
-          網路正常
-        </span>
-      </div>
+      <span class="ns-badge online">
+        <span class="icon">●</span>
+        網路正常
+      </span>
     `,
+  };
+
+  // 不穩定／離線：全寬提示列，獨立顯示於按鈕列上方
+  const BANNER_TEMPLATES = {
     degraded: () => `
       <div class="ns-banner degraded">
         <span class="icon">⚠️</span>
@@ -345,7 +370,8 @@
   };
 
   function render() {
-    stateEl.innerHTML = TEMPLATES[currentState]();
+    badgeEl.innerHTML = BADGE_TEMPLATES[currentState] ? BADGE_TEMPLATES[currentState]() : '';
+    bannerEl.innerHTML = BANNER_TEMPLATES[currentState] ? BANNER_TEMPLATES[currentState]() : '';
   }
 
   function setState(next) {

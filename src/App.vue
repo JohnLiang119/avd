@@ -51,38 +51,6 @@
           </div>
         </div>
       </div>
-      <div v-if="!isTvMode" style="margin-bottom: 12px;">
-        <div v-if="networkStatusText.compact" style="display: flex; justify-content: flex-end;">
-          <span
-            style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;"
-            :style="networkStatusState === 'online'
-              ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
-              : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
-          >
-            <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
-            <span v-else>{{ networkStatusText.icon }}</span>
-            {{ networkStatusText.main }}
-          </span>
-        </div>
-        <div
-          v-else
-          style="width: 100%; border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; border: 1px solid transparent;"
-          :style="networkStatusState === 'offline'
-            ? 'background: #fef2f2; border-color: #fecaca; color: #b91c1c;'
-            : 'background: #fffbeb; border-color: #fde68a; color: #92400e;'"
-        >
-          <span style="font-size: 18px; flex-shrink: 0; line-height: 1;">{{ networkStatusText.icon }}</span>
-          <div style="flex: 1; line-height: 1.4;">
-            <span style="font-weight: 700; display: block; margin-bottom: 1px;">{{ networkStatusText.main }}</span>
-            <span v-if="networkStatusText.sub" style="font-size: 11px; opacity: 0.85;">{{ networkStatusText.sub }}</span>
-          </div>
-          <button
-            type="button"
-            style="flex-shrink: 0; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;"
-            @click="networkStatus.recheck()"
-          >重新檢查</button>
-        </div>
-      </div>
       <van-form @submit="onSubmit" class="download-form" v-show="!isTvMode">
         <div v-if="isTauri()" style="display: flex; align-items: center; gap: 8px; margin: 0 16px;">
           <van-cell-group inset style="flex: 1; margin: 0;">
@@ -129,44 +97,79 @@
       </van-form>
 
       <div class="control-panel-wrapper" style="padding: 0 10px 10px; margin-bottom: 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
-        <!-- 第一排：重整、清除、刪除、設定 (4 顆按鈕) -->
-        <div style="display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 8px;">
-          <van-button 
-            size="small" 
-            round 
-            type="default"
-            icon="replay" 
-            @click="batchRetryDownloads" 
-            class="top-ctrl-btn"
-            title="批次重新下載失敗/中止的任務"
-          >重整</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="delete-o" 
-            @click="clearCompleted" 
-            class="top-ctrl-btn"
-            title="清除已完成紀錄"
-          >清除</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="delete" 
-            @click="deleteAllFiles" 
-            class="top-ctrl-btn"
-            title="刪除全部實體檔案"
-          >刪除</van-button>
-          <van-button 
-            size="small" 
-            round 
-            type="default" 
-            icon="setting-o" 
-            @click="showSettingsModal = true" 
-            class="top-ctrl-btn"
-            title="偏好設定"
-          >設定</van-button>
+        <!-- 網路狀態（不穩定／離線）：獨立全寬提示列，位於「重整」列上方 -->
+        <div
+          v-if="!networkStatusText.compact"
+          style="width: 100%; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; border: 1px solid transparent;"
+          :style="networkStatusState === 'offline'
+            ? 'background: #fef2f2; border-color: #fecaca; color: #b91c1c;'
+            : 'background: #fffbeb; border-color: #fde68a; color: #92400e;'"
+        >
+          <span style="font-size: 18px; flex-shrink: 0; line-height: 1;">{{ networkStatusText.icon }}</span>
+          <div style="flex: 1; line-height: 1.4;">
+            <span style="font-weight: 700; display: block; margin-bottom: 1px;">{{ networkStatusText.main }}</span>
+            <span v-if="networkStatusText.sub" style="font-size: 11px; opacity: 0.85;">{{ networkStatusText.sub }}</span>
+          </div>
+          <button
+            type="button"
+            style="flex-shrink: 0; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;"
+            @click="networkStatus.recheck()"
+          >重新檢查</button>
+        </div>
+
+        <!-- 第一排：網路狀態標籤（正常／檢查中，置左）＋ 重整、清除、刪除、設定 (4 顆按鈕，靠右) -->
+        <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-bottom: 8px;">
+          <span style="flex-shrink: 0;">
+            <span
+              v-if="networkStatusText.compact"
+              style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;"
+              :style="networkStatusState === 'online'
+                ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
+                : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
+            >
+              <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
+              <span v-else>{{ networkStatusText.icon }}</span>
+              {{ networkStatusText.main }}
+            </span>
+          </span>
+          <div style="display: flex; gap: 8px;">
+            <van-button
+              size="small"
+              round
+              type="default"
+              icon="replay"
+              @click="batchRetryDownloads"
+              class="top-ctrl-btn"
+              title="批次重新下載失敗/中止的任務"
+            >重整</van-button>
+            <van-button
+              size="small"
+              round
+              type="default"
+              icon="delete-o"
+              @click="clearCompleted"
+              class="top-ctrl-btn"
+              title="清除已完成紀錄"
+            >清除</van-button>
+            <van-button
+              size="small"
+              round
+              type="default"
+              icon="delete"
+              @click="deleteAllFiles"
+              class="top-ctrl-btn"
+              title="刪除全部實體檔案"
+            >刪除</van-button>
+            <van-button
+              size="small"
+              round
+              type="default"
+              icon="setting-o"
+              @click="showSettingsModal = true"
+              class="top-ctrl-btn"
+              title="偏好設定"
+            >設定</van-button>
+          </div>
         </div>
 
         <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->

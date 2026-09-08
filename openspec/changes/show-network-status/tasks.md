@@ -19,7 +19,8 @@
 
 ## 4. Vue 主畫面整合
 
-- [x] 4.1 依示意圖版面，在非 TV 模式主畫面的網址輸入區上方、快傳伺服器卡片下方新增網路狀態元件；`online` 為靠右小型綠色標籤，`checking` 為中性標籤，`degraded`／`offline` 展開為全寬提示列並提供「重新檢查」按鈕；所有狀態同時使用圖示與文字
+- [x] 4.1 依示意圖版面，在非 TV 模式主畫面的「重整、清除、刪除、設定」控制按鈕列新增網路狀態元件；`online`／`checking` 為緊貼該列最左側的精簡標籤（按鈕維持 `justify-content: flex-end` 靠右對齊），`degraded`／`offline` 於該按鈕列正上方展開全寬提示列並提供「重新檢查」按鈕；所有狀態同時使用圖示與文字
+- [x] 4.1a 版面調整：將元件從「網址輸入區上方獨立一列」改為併入「重整」控制列最左側，並同步更新示意圖 `mockups/network-status.html`、`design.md`、`specs/network-status/spec.md`
 - [x] 4.2 確認 TV 接收模式不渲染此元件（對應 spec 的「TV 模式不顯示一般主畫面狀態」Scenario）
 - [x] 4.3 串接 `useNetworkStatus` 至 `App.vue` 生命週期：掛載時啟動、進入前景時刷新、卸載時清理；人工核對元件不阻擋既有網址輸入、下載控制、頻道管理與快傳控制的操作
 - [x] 4.4 確認網際網路狀態提示與既有 LAN 快傳伺服器狀態卡片在畫面上為獨立區塊，兩者同時異常時各自呈現不合併（對應 spec 的「Internet 不可用但區域網路仍可用」Scenario）
@@ -34,5 +35,5 @@
 
 ## 6. 版本進版
 
-- [ ] 6.1 全面同步 avd 專案版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`）
+- [x] 6.1 全面同步 avd 專案版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`）：1.0.79 → 1.0.80（versionCode 116 → 117）
 - [ ] 6.2 確認第 5 節全部驗證通過後，建立獨立於功能修正的進版 commit
