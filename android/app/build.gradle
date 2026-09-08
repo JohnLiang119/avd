@@ -7,8 +7,8 @@ android {
         applicationId "com.mattpocock.avd"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 117
-        versionName "1.0.80"
+        versionCode 118
+        versionName "1.0.81"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
