@@ -13,7 +13,7 @@ import {
   ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
   type EnrichedItem
 } from './enrichment';
-import { classifyChannelRssError, shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
+import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES, channelRssRetryDelays } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -153,29 +153,34 @@ async function sleepUnlessCancelled(ms: number): Promise<void> {
 
 
 /**
- * 取得頻道 RSS，僅對網路層與伺服器層錯誤套用共用的指數退避。
- * `sleep` 可注入以便測試時不必實際等待 2s/4s/8s。
+ * 取得頻道 RSS，依錯誤性質套用分層的重試等待（見 `channelRssRetryDelays`）。
+ *
+ * 各層等待長度差異極大（network 0.5 秒、404 累計 1.1 秒、5xx 累計 4 秒），刻意不與
+ * yt-dlp 下載路徑的 2s→4s→8s 共用一張表 —— 那會讓每個失敗頻道白等 14 秒。
+ * `sleep` 可注入以便測試時不必實際等待；`options.noRetry` 供呼叫端在本輪已判定
+ * 為全域性故障時降級為單次嘗試。
  */
 export async function fetchChannelRssWithRetry(
   request: () => Promise<string>,
   sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  maxRetries = RATE_LIMIT_MAX_RETRIES
+  options: { noRetry?: boolean } = {}
 ): Promise<string> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  let plan: number[] | null = null;
+  for (let attempt = 0; ; attempt++) {
     try {
       const xmlText = await request();
       if (!xmlText) throw new Error('頻道 RSS 內容為空');
       return xmlText;
     } catch (error) {
-      const level = classifyChannelRssError(error);
-      const retryAttempt = attempt + 1;
-      const delay = level === 'content' ? 0 : rateLimitBackoffMs(retryAttempt, maxRetries);
+      // 時間表以「首次失敗」的錯誤性質決定，後續重試沿用同一張表，
+      // 避免中途錯誤類型改變而讓重試次數失控。
+      if (plan === null) plan = options.noRetry ? [] : channelRssRetryDelays(error);
+      const delay = plan[attempt];
       if (!delay) throw error;
-      console.warn(`[頻道 RSS] ${level} 錯誤，${delay / 1000} 秒後重試（第 ${retryAttempt} 次）`);
+      console.warn(`[頻道 RSS] 失敗，${delay} 毫秒後重試（第 ${attempt + 1}/${plan.length} 次）`);
       await sleep(delay);
     }
   }
-  throw new Error('頻道 RSS 重試流程異常');
 }
 
 /**
@@ -1358,7 +1363,7 @@ export const DownloadService = {
 
   async fetchYouTubeRss(
     channelId: string,
-    options?: { enableFallback?: boolean }
+    options?: { enableFallback?: boolean; noRetry?: boolean }
   ): Promise<MonitoredVideoResult[]> {
     try {
       const xmlText = await fetchChannelRssWithRetry(async () => {
@@ -1371,7 +1376,7 @@ export const DownloadService = {
         // Windows/桌面端調用 Rust 原生 HTTP 請求通道，繞過 WebView CORS 限制
         const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
         return invoke<string>('fetch_http_text', { url: rssUrl });
-      });
+      }, undefined, { noRetry: options?.noRetry });
 
       const parser = new DOMParser();
       const doc = parser.parseFromString(xmlText, 'application/xml');

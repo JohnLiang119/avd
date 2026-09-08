@@ -75,6 +75,45 @@ export function classifyChannelRssError(error: unknown): ChannelRssErrorLevel {
   return 'content';
 }
 
+/** 從 `HTTP_STATUS:<code>:` 前綴取出 HTTP 狀態碼；非伺服器層錯誤回傳 0。 */
+export function channelRssHttpStatus(error: unknown): number {
+  const match = /HTTP_STATUS:(\d+):/i.exec(errorMessageOf(error));
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * 頻道 RSS 各類錯誤的重試等待時間表（毫秒陣列，長度即重試次數，空陣列代表不重試）。
+ *
+ * 刻意**不**沿用 `RATE_LIMIT_BASE_DELAY_MS` 那組 2s→4s→8s —— 那是 yt-dlp 下載/解析
+ * 路徑面對來源限流（429/412）的時間尺度，套到頻道 RSS 上會讓每個失敗頻道白等 14 秒。
+ * 2026-09-08 實測：11 個頻道全數失敗的一輪耗時約 160 秒，其中絕大部分是這段等待。
+ *
+ * 分層依據（各層的錯誤性質完全不同，不該共用同一張表）：
+ * - `network`：DNS 解析失敗／連線被拒幾乎即刻拋出，重試多次無望；但保留一次短重試以
+ *   容忍 Wi-Fi 重連之類的瞬斷。
+ * - 404／410：實測證實 YouTube RSS 端點會回**隨機的假 404**，重試 1-2 次即可取得 200，
+ *   所以重試方向正確，錯的只是等待長度 —— 壓到累計約 1.1 秒。
+ * - 其餘伺服器層（5xx、403、逾時）：較可能是真的暫時性狀況，值得多等一些。
+ * - `content`：XML 解析失敗屬單一頻道的資料問題，重試不會有不同結果。
+ */
+export const CHANNEL_RSS_RETRY_DELAYS_MS = {
+  network: [500],
+  notFound: [300, 800],
+  server: [1000, 3000],
+  content: [] as number[],
+} as const;
+
+/** 依錯誤決定本次應採用的重試等待時間表。 */
+export function channelRssRetryDelays(error: unknown): number[] {
+  const level = classifyChannelRssError(error);
+  if (level === 'network') return [...CHANNEL_RSS_RETRY_DELAYS_MS.network];
+  if (level === 'content') return [...CHANNEL_RSS_RETRY_DELAYS_MS.content];
+  const status = channelRssHttpStatus(error);
+  return status === 404 || status === 410
+    ? [...CHANNEL_RSS_RETRY_DELAYS_MS.notFound]
+    : [...CHANNEL_RSS_RETRY_DELAYS_MS.server];
+}
+
 /** 依頻道 RSS 失敗層級產生通知文案；network 不提供無效的備援建議。 */
 export function describeChannelRssFailure(
   level: ChannelRssErrorLevel,
@@ -99,6 +138,20 @@ export function describeChannelRssFailure(
  */
 export function describeEarlyStop(skippedCount: number): string {
   return `本輪已提早結束，尚有 ${skippedCount} 個頻道未檢查（裝置目前無法連線）`;
+}
+
+/**
+ * 本輪連續失敗達門檻後改為「單次嘗試」模式的門檻值。
+ *
+ * 刻意用「降級」而非 `break` 整輪停止：若使用者清單前段有數個永久失效的頻道，
+ * 整輪停止會讓後段健康的頻道每一輪都檢查不到（被餓死）。降級後所有頻道仍被走訪，
+ * 只是不再為每個失敗頻道支付重試等待。
+ */
+export const CHANNEL_CHECK_DEGRADE_AFTER_FAILURES = 2;
+
+/** 本輪已降級為單次嘗試時的補充說明，接在失敗總結之後。 */
+export function describeDegradedRound(degradedCount: number): string {
+  return `已改為快速模式檢查其餘 ${degradedCount} 個頻道（不重試）`;
 }
 
 /** 判定一則錯誤訊息是否為**明確**的來源限流（帶 HTTP 狀態碼）。 */

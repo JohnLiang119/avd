@@ -914,7 +914,7 @@ import {
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
-import { classifyChannelRssError, describeChannelRssFailure, describeEarlyStop, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
+import { classifyChannelRssError, describeChannelRssFailure, describeEarlyStop, describeDegradedRound, CHANNEL_CHECK_DEGRADE_AFTER_FAILURES, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
@@ -1634,16 +1634,24 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   let failedCount = 0;
   const failedLevels: ChannelRssErrorLevel[] = [];
   const now = Date.now();
-  // 提早停止：一偵測到裝置網路層錯誤即中止本輪，不逐一等待剩餘頻道各自重試耗盡。
+  // 提早停止：偵測到裝置網路層錯誤即中止本輪（裝置連不上網，剩餘頻道不可能有不同結果）。
   let stoppedEarly = false;
   let skippedChannelCount = 0;
+  // 降級：連續失敗達門檻後，本輪其餘頻道改為單次嘗試（不重試）。
+  // 刻意不用 break —— 若清單前段有數個永久失效的頻道，整輪停止會讓後段健康頻道每輪都被餓死。
+  let consecutiveFailures = 0;
+  let degraded = false;
+  let degradedChannelCount = 0;
 
   for (let i = 0; i < enabledChannels.length; i++) {
     const channel = enabledChannels[i];
     try {
+      if (degraded) degradedChannelCount++;
       const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
-        enableFallback: monitorConfig.value.enableYtDlpFallback
+        enableFallback: monitorConfig.value.enableYtDlpFallback,
+        noRetry: degraded
       });
+      consecutiveFailures = 0;
       if (!videos || videos.length === 0) continue;
 
       const channelLastPub = channelBaseline(channel);
@@ -1704,10 +1712,18 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       } catch { /* 記錄失敗不得影響檢查流程 */ }
 
       if (level === 'network') {
-        // 裝置端網路層錯誤：這台裝置現在確定連不上網，剩餘頻道逐一重試也不會有不同結果。
-        stoppedEarly = true;
+        // 裝置端網路層錯誤：這台裝置現在確定連不上網，剩餘頻道逐一嘗試也不會有不同結果。
         skippedChannelCount = enabledChannels.length - (i + 1);
+        // 停在最後一個頻道等於本輪其實已跑完 —— 不是提早結束，不可宣稱有頻道未檢查。
+        stoppedEarly = skippedChannelCount > 0;
         break;
+      }
+
+      consecutiveFailures++;
+      if (!degraded && consecutiveFailures >= CHANNEL_CHECK_DEGRADE_AFTER_FAILURES) {
+        // 連續失敗到達門檻：視為全域性故障，本輪其餘頻道不再支付重試等待，但仍逐一走訪。
+        degraded = true;
+        console.warn(`[自動追蹤] 連續 ${consecutiveFailures} 個頻道失敗，本輪其餘頻道改為單次嘗試`);
       }
     }
   }
@@ -1748,8 +1764,9 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     // 全部失敗
     if (isManual) {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
+      const degradedHint = degradedChannelCount > 0 ? `（${describeDegradedRound(degradedChannelCount)}）` : '';
       showToast({
-        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}`,
+        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}${degradedHint}`,
         duration: 5000,
         closeOnClick: true
       });

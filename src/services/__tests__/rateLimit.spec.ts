@@ -9,6 +9,10 @@ import {
   classifyChannelRssError,
   describeChannelRssFailure,
   describeEarlyStop,
+  describeDegradedRound,
+  channelRssHttpStatus,
+  channelRssRetryDelays,
+  CHANNEL_CHECK_DEGRADE_AFTER_FAILURES,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_BASE_DELAY_MS
 } from '../rateLimit';
@@ -183,5 +187,47 @@ describe('頻道 RSS 錯誤分類與提示', () => {
     expect(describeEarlyStop(10)).toContain('10 個頻道未檢查');
     expect(describeEarlyStop(1)).not.toContain('失敗');
     expect(describeEarlyStop(1)).not.toBe(describeChannelRssFailure('network', {}));
+  });
+});
+
+describe('頻道 RSS 分層重試時間表', () => {
+  it('從 HTTP_STATUS 前綴取出狀態碼，非伺服器層回 0', () => {
+    expect(channelRssHttpStatus('HTTP_STATUS:404:無法獲取頻道 RSS')).toBe(404);
+    expect(channelRssHttpStatus(new Error('官方 RSS 連線失敗: HTTP_STATUS:500:x'))).toBe(500);
+    expect(channelRssHttpStatus('NETWORK_ERROR:unable to resolve host')).toBe(0);
+    expect(channelRssHttpStatus('頻道 RSS XML 解析失敗')).toBe(0);
+  });
+
+  it('各層等待長度依錯誤性質分開，不共用 yt-dlp 的 2s→4s→8s', () => {
+    // network：只容忍瞬斷，不為必然無望的 DNS 失敗白等
+    expect(channelRssRetryDelays('NETWORK_ERROR:unable to resolve host')).toEqual([500]);
+    // 404/410：來源會回隨機假 404，重試 1-2 次即可取得 200，但等待要短
+    expect(channelRssRetryDelays('HTTP_STATUS:404:無法獲取頻道 RSS')).toEqual([300, 800]);
+    expect(channelRssRetryDelays('HTTP_STATUS:410:gone')).toEqual([300, 800]);
+    // 其餘伺服器層較可能是真的暫時性狀況，值得多等
+    expect(channelRssRetryDelays('HTTP_STATUS:500:server unavailable')).toEqual([1000, 3000]);
+    expect(channelRssRetryDelays('HTTP_STATUS:403:forbidden')).toEqual([1000, 3000]);
+    // content：單一頻道的資料問題，重試不會有不同結果
+    expect(channelRssRetryDelays('頻道 RSS XML 解析失敗')).toEqual([]);
+  });
+
+  it('任一層的累計等待都遠低於原本的 14 秒', () => {
+    const total = (delays: number[]) => delays.reduce((sum, d) => sum + d, 0);
+    for (const msg of [
+      'NETWORK_ERROR:x',
+      'HTTP_STATUS:404:x',
+      'HTTP_STATUS:500:x',
+      '頻道 RSS XML 解析失敗',
+    ]) {
+      expect(total(channelRssRetryDelays(msg)), msg).toBeLessThanOrEqual(4000);
+    }
+    // 對照：yt-dlp 下載路徑的限流退避維持原樣，不受本次分層影響
+    expect(totalBackoffMs()).toBe(14000);
+  });
+
+  it('降級門檻為連續 2 次失敗，且文案說明改為快速模式', () => {
+    expect(CHANNEL_CHECK_DEGRADE_AFTER_FAILURES).toBe(2);
+    expect(describeDegradedRound(8)).toContain('8');
+    expect(describeDegradedRound(8)).toContain('不重試');
   });
 });
