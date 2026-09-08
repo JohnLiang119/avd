@@ -117,102 +117,104 @@
           >重新檢查</button>
         </div>
 
-        <!-- 第一排：網路狀態標籤（正常／檢查中，置左）＋ 重整、清除、刪除、設定 (4 顆按鈕，靠右) -->
-        <div style="display: flex; align-items: center; gap: 8px; justify-content: space-between; margin-bottom: 8px;">
-          <span style="flex-shrink: 0;">
+        <!-- 網路狀態標籤（正常／檢查中，置左，與右側兩排按鈕等高）＋ 重整/清除/刪除/設定、音訊/頻道/快傳/收合 -->
+        <div style="display: flex; align-items: stretch; gap: 8px;">
+          <div v-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <span
-              v-if="networkStatusText.compact"
               style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;"
               :style="networkStatusState === 'online'
                 ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
                 : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
             >
               <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
-              <span v-else>{{ networkStatusText.icon }}</span>
               {{ networkStatusText.main }}
             </span>
-          </span>
-          <div style="display: flex; gap: 8px;">
-            <van-button
-              size="small"
-              round
-              type="default"
-              icon="replay"
-              @click="batchRetryDownloads"
-              class="top-ctrl-btn"
-              title="批次重新下載失敗/中止的任務"
-            >重整</van-button>
-            <van-button
-              size="small"
-              round
-              type="default"
-              icon="delete-o"
-              @click="clearCompleted"
-              class="top-ctrl-btn"
-              title="清除已完成紀錄"
-            >清除</van-button>
-            <van-button
-              size="small"
-              round
-              type="default"
-              icon="delete"
-              @click="deleteAllFiles"
-              class="top-ctrl-btn"
-              title="刪除全部實體檔案"
-            >刪除</van-button>
-            <van-button
-              size="small"
-              round
-              type="default"
-              icon="setting-o"
-              @click="showSettingsModal = true"
-              class="top-ctrl-btn"
-              title="偏好設定"
-            >設定</van-button>
           </div>
-        </div>
 
-        <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->
-        <div style="display: flex; gap: 8px; justify-content: flex-end;">
-          <van-button 
-            size="small" 
-            round 
-            type="default"
-            :class="['top-ctrl-btn', { 'btn-active': mp3Mode }]"
-            :icon="mp3Mode ? 'music' : 'music-o'" 
-            @click="mp3Mode = !mp3Mode" 
-            :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
-          >音訊</van-button>
-          
-          <van-button 
-            size="small" 
-            round 
-            type="default"
-            class="top-ctrl-btn"
-            icon="bullhorn-o" 
-            @click="showChannelModal = true" 
-            :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
-          >頻道</van-button>
+          <div style="display: flex; flex-direction: column; gap: 8px; flex: 1;">
+            <!-- 第一排：重整、清除、刪除、設定 (4 顆按鈕) -->
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <van-button
+                size="small"
+                round
+                type="default"
+                icon="replay"
+                @click="batchRetryDownloads"
+                class="top-ctrl-btn"
+                title="批次重新下載失敗/中止的任務"
+              >重整</van-button>
+              <van-button
+                size="small"
+                round
+                type="default"
+                icon="delete-o"
+                @click="clearCompleted"
+                class="top-ctrl-btn"
+                title="清除已完成紀錄"
+              >清除</van-button>
+              <van-button
+                size="small"
+                round
+                type="default"
+                icon="delete"
+                @click="deleteAllFiles"
+                class="top-ctrl-btn"
+                title="刪除全部實體檔案"
+              >刪除</van-button>
+              <van-button
+                size="small"
+                round
+                type="default"
+                icon="setting-o"
+                @click="showSettingsModal = true"
+                class="top-ctrl-btn"
+                title="偏好設定"
+              >設定</van-button>
+            </div>
 
-          <van-button 
-            size="small" 
-            round 
-            type="default"
-            :class="['top-ctrl-btn', { 'btn-active': serverStatus.isActive }]"
-            :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'" 
-            @click="toggleLocalServer" 
-            title="開啟/關閉 快傳伺服器"
-          >快傳</van-button>
+            <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <van-button
+                size="small"
+                round
+                type="default"
+                :class="['top-ctrl-btn', { 'btn-active': mp3Mode }]"
+                :icon="mp3Mode ? 'music' : 'music-o'"
+                @click="mp3Mode = !mp3Mode"
+                :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
+              >音訊</van-button>
 
-          <van-button 
-            size="small" 
-            round 
-            type="default"
-            :icon="isAllExpanded ? 'arrow-up' : 'arrow-down'" 
-            @click="toggleExpandAll" 
-            class="top-ctrl-btn"
-            :title="isAllExpanded ? '全部收合' : '全部展開'"
-          >{{ isAllExpanded ? '收合' : '展開' }}</van-button>
+              <van-button
+                size="small"
+                round
+                type="default"
+                class="top-ctrl-btn"
+                icon="bullhorn-o"
+                @click="showChannelModal = true"
+                :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
+              >頻道</van-button>
+
+              <van-button
+                size="small"
+                round
+                type="default"
+                :class="['top-ctrl-btn', { 'btn-active': serverStatus.isActive }]"
+                :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'"
+                @click="toggleLocalServer"
+                title="開啟/關閉 快傳伺服器"
+              >快傳</van-button>
+
+              <van-button
+                size="small"
+                round
+                type="default"
+                :icon="isAllExpanded ? 'arrow-up' : 'arrow-down'"
+                @click="toggleExpandAll"
+                class="top-ctrl-btn"
+                :title="isAllExpanded ? '全部收合' : '全部展開'"
+              >{{ isAllExpanded ? '收合' : '展開' }}</van-button>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -105,8 +105,10 @@
     font-size: 11px; color: #6b7280; margin-left: auto; font-family: monospace;
   }
 
-  /* ===== 新增：網路狀態元件（位於「重整／音訊」按鈕列，靠左） ===== */
-  .network-status { display: flex; align-items: center; }
+  /* ===== 新增：網路狀態元件（置左，與「重整」「音訊」兩排等高） ===== */
+  .ctrl-rows { display: flex; align-items: stretch; gap: 8px; }
+  .network-status { display: flex; align-items: center; flex-shrink: 0; }
+  .ctrl-rows-inner { display: flex; flex-direction: column; gap: 8px; flex: 1; }
 
   .ns-badge {
     display: inline-flex;
@@ -127,7 +129,6 @@
     color: #6b7280;
     border: 1px solid #e5e7eb;
   }
-  .ns-badge .icon { font-size: 12px; line-height: 1; }
   .ns-spinner {
     width: 9px; height: 9px;
     border: 2px solid #9ca3af;
@@ -197,7 +198,6 @@
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 8px;
-    margin-bottom: 16px;
   }
   .fake-btn {
     background: #fff;
@@ -208,13 +208,11 @@
     font-size: 11px;
     color: #6b7280;
   }
-  /* 第一排：左側放網路狀態標籤，右側維持按鈕靠右對齊，對應 App.vue 的 justify-content: flex-end */
+  /* 第一排：重整、清除、刪除、設定，靠右對齊，對應 App.vue 的 justify-content: flex-end */
   .fake-btn-row-2 {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
     gap: 8px;
-    margin-bottom: 8px;
+    justify-content: flex-end;
   }
   .fake-btn-inline {
     background: #fff;
@@ -289,36 +287,40 @@
 
       <div class="fake-url-input">貼上 YouTube / TikTok 網址…</div>
 
-      <!-- 異常時（degraded/offline）：全寬提示列，獨立一排，位於按鈕列上方 -->
+      <!-- 異常時（degraded/offline）：全寬提示列，獨立一排，位於兩排按鈕上方 -->
       <div id="networkBanner"></div>
 
-      <!-- 第一排：重整、清除、刪除、設定；正常/檢查中時，網路狀態標籤與「重整」同排、置左 -->
-      <div class="fake-btn-row-2">
+      <!-- 網路狀態標籤（正常/檢查中，置左，與右側「重整」「音訊」兩排等高）＋ 兩排按鈕 -->
+      <div class="ctrl-rows">
         <div class="network-status" id="networkStatus"></div>
-        <div class="fake-btn-inline">↻ 重整</div>
-        <div class="fake-btn-inline">🗑 清除</div>
-        <div class="fake-btn-inline">❌ 刪除</div>
-        <div class="fake-btn-inline">⚙ 設定</div>
+        <div class="ctrl-rows-inner">
+          <!-- 第一排：重整、清除、刪除、設定 -->
+          <div class="fake-btn-row-2">
+            <div class="fake-btn-inline">↻ 重整</div>
+            <div class="fake-btn-inline">🗑 清除</div>
+            <div class="fake-btn-inline">❌ 刪除</div>
+            <div class="fake-btn-inline">⚙ 設定</div>
+          </div>
+          <!-- 第二排：音訊、頻道、快傳、收合（與第一排垂直對齊） -->
+          <div class="fake-btn-row">
+            <div class="fake-btn">🎵 音訊</div>
+            <div class="fake-btn">📺 頻道</div>
+            <div class="fake-btn">📡 快傳</div>
+            <div class="fake-btn">▾ 收合</div>
+          </div>
+        </div>
       </div>
 
-      <!-- 第二排：音訊、頻道、快傳、收合（與第一排垂直對齊） -->
-      <div class="fake-btn-row">
-        <div class="fake-btn">🎵 音訊</div>
-        <div class="fake-btn">📺 頻道</div>
-        <div class="fake-btn">📡 快傳</div>
-        <div class="fake-btn">▾ 收合</div>
-      </div>
-
-      <div class="fake-task">（下方為任務佇列，示意圖不呈現）</div>
+      <div class="fake-task" style="margin-top: 16px;">（下方為任務佇列，示意圖不呈現）</div>
     </div>
   </div>
 
   <div class="note">
-    <b>版面說明：</b>網路狀態元件與「重整／音訊」按鈕列同排、置於最左側，按鈕仍維持靠右對齊
-    （對應 App.vue 第一排「重整、清除、刪除、設定」）。正常／檢查中時僅顯示精簡標籤，不佔額外一列；
-    離線／不穩定時，於「重整」列上方展開全寬提示列並提供「重新檢查」，不與按鈕擠在同一排。
-    切換右上角「LAN 快傳」按鈕可確認：即使網際網路離線，只要快傳伺服器仍在區域網路運作，
-    兩張卡片會同時獨立呈現、不互相覆蓋或合併成一則訊息。
+    <b>版面說明：</b>網路狀態元件置於「重整／音訊」兩排按鈕最左側，高度與該兩排等高（垂直置中），
+    按鈕仍維持靠右對齊。「網路正常」僅顯示文字，不加綠色圓點或其他圖示；「檢查中」保留小型轉圈動畫；
+    以上兩者皆不佔額外一列。離線／不穩定時，於兩排按鈕上方展開全寬提示列並提供「重新檢查」，
+    不與按鈕擠在同一排。切換右上角「LAN 快傳」按鈕可確認：即使網際網路離線，只要快傳伺服器仍在
+    區域網路運作，兩張卡片會同時獨立呈現、不互相覆蓋或合併成一則訊息。
   </div>
 
 <script>
@@ -339,7 +341,6 @@
     `,
     online: () => `
       <span class="ns-badge online">
-        <span class="icon">●</span>
         網路正常
       </span>
     `,
