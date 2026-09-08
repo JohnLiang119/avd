@@ -121,13 +121,13 @@
         <div style="display: flex; align-items: stretch; gap: 8px;">
           <div v-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <span
-              style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;"
+              style="display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; font-weight: 600; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px;"
               :style="networkStatusState === 'online'
                 ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
                 : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
             >
               <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
-              {{ networkStatusText.main }}
+              <span v-for="(line, i) in networkStatusBadgeLines" :key="i">{{ line }}</span>
             </span>
           </div>
 
@@ -1122,6 +1122,15 @@ const networkStatus = useNetworkStatus({
 });
 const networkStatusState = networkStatus.state;
 const networkStatusText = computed(() => describeNetworkStatus(networkStatusState.value));
+/** 精簡標籤佔滿「重整／音訊」兩排高度，文字改為每兩字一行堆疊呈現（如「網路」／「正常」）。 */
+const networkStatusBadgeLines = computed(() => {
+  const chars = Array.from(networkStatusText.value.main);
+  const lines: string[] = [];
+  for (let i = 0; i < chars.length; i += 2) {
+    lines.push(chars.slice(i, i + 2).join(''));
+  }
+  return lines;
+});
 
 const targetTvIp = storage.defineSetting('avd_target_tv_ip', '');
 

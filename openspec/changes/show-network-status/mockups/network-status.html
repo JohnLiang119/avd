@@ -110,14 +110,20 @@
   .network-status { display: flex; align-items: center; flex-shrink: 0; }
   .ctrl-rows-inner { display: flex; flex-direction: column; gap: 8px; flex: 1; }
 
+  /* 文字每兩字一行堆疊，佔滿「重整」「音訊」兩排的高度 */
   .ns-badge {
     display: inline-flex;
+    flex-direction: column;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    gap: 2px;
+    min-width: 34px;
     font-size: 11px;
     font-weight: 600;
-    padding: 4px 10px;
-    border-radius: 999px;
+    line-height: 1.3;
+    text-align: center;
+    padding: 4px 6px;
+    border-radius: 10px;
   }
   .ns-badge.online {
     background: #ecfdf5;
@@ -317,7 +323,8 @@
 
   <div class="note">
     <b>版面說明：</b>網路狀態元件置於「重整／音訊」兩排按鈕最左側，高度與該兩排等高（垂直置中），
-    按鈕仍維持靠右對齊。「網路正常」僅顯示文字，不加綠色圓點或其他圖示；「檢查中」保留小型轉圈動畫；
+    按鈕仍維持靠右對齊。標籤文字改為每兩字一行堆疊呈現（如「網路」／「正常」），實際填滿兩排高度而非
+    僅在中間浮一顆小圓標籤；「網路正常」不加綠色圓點或其他圖示，「檢查中」保留小型轉圈動畫。
     以上兩者皆不佔額外一列。離線／不穩定時，於兩排按鈕上方展開全寬提示列並提供「重新檢查」，
     不與按鈕擠在同一排。切換右上角「LAN 快傳」按鈕可確認：即使網際網路離線，只要快傳伺服器仍在
     區域網路運作，兩張卡片會同時獨立呈現、不互相覆蓋或合併成一則訊息。
@@ -331,17 +338,27 @@
   let currentState = 'checking';
   let checkingBusy = false;
 
-  // 正常／檢查中：精簡標籤，顯示於「重整」列左側
+  // 每兩字一行堆疊，對應 App.vue 的 networkStatusBadgeLines
+  function splitLines(text) {
+    const chars = Array.from(text);
+    let html = '';
+    for (let i = 0; i < chars.length; i += 2) {
+      html += `<span>${chars.slice(i, i + 2).join('')}</span>`;
+    }
+    return html;
+  }
+
+  // 正常／檢查中：精簡標籤，與「重整」「音訊」兩排等高、置左
   const BADGE_TEMPLATES = {
     checking: () => `
       <span class="ns-badge checking">
         <span class="ns-spinner"></span>
-        正在檢查連線
+        ${splitLines('正在檢查連線')}
       </span>
     `,
     online: () => `
       <span class="ns-badge online">
-        網路正常
+        ${splitLines('網路正常')}
       </span>
     `,
   };
