@@ -91,6 +91,16 @@ export function describeChannelRssFailure(
     : '官方 RSS 連線異常 (可於設定中開啟 yt-dlp 備援)';
 }
 
+/**
+ * 頻道檢查因裝置網路層錯誤提早停止時的總結文案。
+ *
+ * 與 `describeChannelRssFailure` 刻意分開、措辭不同：後者代表「已檢查、確認失敗」，
+ * 這裡代表「尚未檢查」——兩者混用會讓使用者誤以為被跳過的頻道也實際檢查過。
+ */
+export function describeEarlyStop(skippedCount: number): string {
+  return `本輪已提早結束，尚有 ${skippedCount} 個頻道未檢查（裝置目前無法連線）`;
+}
+
 /** 判定一則錯誤訊息是否為**明確**的來源限流（帶 HTTP 狀態碼）。 */
 export function isRateLimited(message: string): boolean {
   const lower = (message || '').toLowerCase();

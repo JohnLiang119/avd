@@ -914,7 +914,7 @@ import {
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
-import { classifyChannelRssError, describeChannelRssFailure, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
+import { classifyChannelRssError, describeChannelRssFailure, describeEarlyStop, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
@@ -1634,8 +1634,12 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   let failedCount = 0;
   const failedLevels: ChannelRssErrorLevel[] = [];
   const now = Date.now();
+  // 提早停止：一偵測到裝置網路層錯誤即中止本輪，不逐一等待剩餘頻道各自重試耗盡。
+  let stoppedEarly = false;
+  let skippedChannelCount = 0;
 
-  for (const channel of enabledChannels) {
+  for (let i = 0; i < enabledChannels.length; i++) {
+    const channel = enabledChannels[i];
     try {
       const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
         enableFallback: monitorConfig.value.enableYtDlpFallback
@@ -1687,7 +1691,8 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       applyChannelAnchor(channel, nextChannelBaseline(videos, channelLastPub, unhandledVideoIds), now);
     } catch (err) {
       failedCount++;
-      failedLevels.push(classifyChannelRssError(err));
+      const level = classifyChannelRssError(err);
+      failedLevels.push(level);
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
       // 只記入日誌、不逐頻道彈提示 —— 迴圈結束後由總結提示統一告知。
       try {
@@ -1697,6 +1702,13 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           message: (err as any)?.message || String(err)
         });
       } catch { /* 記錄失敗不得影響檢查流程 */ }
+
+      if (level === 'network') {
+        // 裝置端網路層錯誤：這台裝置現在確定連不上網，剩餘頻道逐一重試也不會有不同結果。
+        stoppedEarly = true;
+        skippedChannelCount = enabledChannels.length - (i + 1);
+        break;
+      }
     }
   }
 
@@ -1710,7 +1722,29 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       ? 'server'
       : 'content';
 
-  if (failedCount > 0 && failedCount >= enabledChannels.length) {
+  if (stoppedEarly) {
+    // 提早停止優先於下方既有四分支：failedCount 只計入實際跑過的頻道，
+    // 硬套現有判斷會誤入「部分失敗」分支，讓使用者誤以為被跳過的頻道也檢查過。
+    try {
+      errorLog.value = appendErrorEntry(errorLog.value, {
+        time: Date.now(),
+        context: '頻道檢查（提早結束）',
+        message: describeEarlyStop(skippedChannelCount)
+      });
+    } catch { /* 記錄失敗不得影響檢查流程 */ }
+
+    if (newVideoCount > 0) {
+      const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
+      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！（⚠️ ${describeEarlyStop(skippedChannelCount)}）`);
+      processQueue();
+    } else if (isManual) {
+      showToast({
+        message: `⚠️ ${describeEarlyStop(skippedChannelCount)}`,
+        duration: 5000,
+        closeOnClick: true
+      });
+    }
+  } else if (failedCount > 0 && failedCount >= enabledChannels.length) {
     // 全部失敗
     if (isManual) {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。

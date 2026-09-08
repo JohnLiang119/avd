@@ -8,6 +8,7 @@ import {
   describeRateLimit,
   classifyChannelRssError,
   describeChannelRssFailure,
+  describeEarlyStop,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_BASE_DELAY_MS
 } from '../rateLimit';
@@ -175,5 +176,12 @@ describe('頻道 RSS 錯誤分類與提示', () => {
     expect(describeChannelRssFailure('network', { fallbackEnabled: true })).not.toContain('備援');
     expect(describeChannelRssFailure('server', { fallbackEnabled: false })).toContain('開啟 yt-dlp 備援');
     expect(describeChannelRssFailure('content', { fallbackEnabled: false })).toContain('開啟 yt-dlp 備援');
+  });
+
+  it('提早停止文案標註「未檢查」，且與「已檢查但失敗」的措辭不同', () => {
+    expect(describeEarlyStop(1)).toContain('1 個頻道未檢查');
+    expect(describeEarlyStop(10)).toContain('10 個頻道未檢查');
+    expect(describeEarlyStop(1)).not.toContain('失敗');
+    expect(describeEarlyStop(1)).not.toBe(describeChannelRssFailure('network', {}));
   });
 });
