@@ -27,5 +27,5 @@
 
 ## 4. 版本進版
 
-- [x] 4.1 全面同步 avd 專案版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`）：1.0.82 → 1.0.83（versionCode 119 → 120）
+- [x] 4.1 全面同步 avd 專案版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`）：1.0.82 → 1.0.83 → 1.0.84（versionCode 119 → 120 → 121）
 - [ ] 4.2 確認第 3 節全部驗證通過後，建立獨立於功能修正的進版 commit
