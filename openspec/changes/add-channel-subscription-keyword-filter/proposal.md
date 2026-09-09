@@ -21,7 +21,7 @@
 
 ### Modified Capabilities
 
-- `channel-auto-monitor`: 頻道訂閱可設定多個標題關鍵字，且所有自動、手動與模擬檢查在建立下載任務前套用相同篩選與錨點規則；新片判定條件由兩項擴為三項，錨點守門改為不得越過任何未處理影片。
+- `channel-auto-monitor`: 頻道訂閱可設定多個標題關鍵字，且所有自動、手動與模擬檢查在建立下載任務前套用相同篩選與錨點規則；新片判定條件由兩項擴為三項，錨點守門改為不得越過任何未處理影片。同時修改 `fix-live-stream-handling` 歸檔時新增的 `時間錨點的推進邊界`，使「未處理影片」的定義排除未命中關鍵字者，並將「取已處理影片中最新者」改為上限式計算。
 - `channel-backup-restore`: 頻道備份與還原需完整保存關鍵字，並相容於不含關鍵字欄位的舊備份；覆蓋還原不得使本機錨點前進。
 - `auto-check-filtering`: 直播二次驗證的對象由「所有新發現影片」收斂為「通過關鍵字篩選的候選影片」，並明訂關鍵字篩選先於直播查詢的順序。
 - `channel-check-feedback`: 檢查結果提示須區分「真的沒有新影片」與「有新影片但全部被關鍵字篩除」，避免製造該能力本要防止的假陽性。
@@ -36,8 +36,11 @@
 
 ## 與其他 change 的依賴
 
-- **`fix-live-stream-handling`（尚未歸檔）已對 `auto-check-filtering` 的同一條 Requirement 提出 MODIFIED。** 本 change 的
-  `auto-check-filtering` delta 以該版本文字為基底撰寫；兩者歸檔順序若顛倒，後歸檔者會覆寫先歸檔者的修改。建議先歸檔
-  `fix-live-stream-handling`，再歸檔本 change；若順序相反，本 change 的 delta 須先重新對齊主規格的實際文字。
+- **`fix-live-stream-handling` 已於 2026-09-09 歸檔（風險已解除）。** 本 change 的 `auto-check-filtering` delta
+  以其歸檔後的主規格文字為基底，已逐條核對一致，不再有歸檔順序覆寫的疑慮。
+- **該次歸檔為 `channel-auto-monitor` 新增了 `時間錨點的推進邊界` 這條獨立需求**，其原文「錨點 MUST 推進至本次
+  已處理完畢的影片中最新者」與「若本次沒有任何影片被處理，錨點 MUST 維持不變」與本 change 的關鍵字規則直接抵觸
+  （前者正是【D-B】要修掉的漏抓成因；後者會使「全部未命中關鍵字」的情形錯誤地凍結錨點）。本 change 已將該需求
+  一併列入 Modified，避免歸檔後主規格自相矛盾。
 - **不修改 `windows-native-http-fetch`**：其情境以「加入下載佇列」作為桌面版抓取成功的代理指標，設有關鍵字而全數未命中時該敘述不再成立，
   但該需求的真正意圖是 CORS 通道可用性，入列與否交由 `channel-auto-monitor` 的關鍵字規則決定，故不列為 Modified。
