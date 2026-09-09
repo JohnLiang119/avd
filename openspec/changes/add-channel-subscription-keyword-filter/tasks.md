@@ -82,7 +82,13 @@
   - commit `<pending>`：功能與測試（`useChannelMatching.ts`、其 spec、`App.vue`）與本檔進度。
   - 依使用者指示於 5.6～5.12 人工驗證前先行提交與進版。
 - [x] 6.2 將 avd 下一版版號同步更新至 `package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處版號一致
-  - 七處已跨檔比對一致：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`cargo update --workspace --offline`）、`android/app/build.gradle`（`versionCode` 121→122、`versionName` 1.0.85）。
+  - 七處已跨檔比對一致：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`cargo update --workspace --offline`）、`android/app/build.gradle`（`versionCode` 123、`versionName` 1.0.86）。
   - `avd_s/publish_all.ps1` 的預設 `$Message` 已換為描述本次改動且版號正確的新文字；該檔屬工作區 repo，另行提交。
+  - **1.0.85 作廢**：進版至 1.0.85 期間，使用者併行執行了 `publish_all.ps1`，其版號防呆在腳本啟動時讀取 `package.json`
+    與 `$Message`（兩者當時皆為 1.0.84）而通過檢查，但打包與提交發生在數十秒後、抓到的是已改為 1.0.85 的工作區 —— 屬 TOCTOU 競態。
+    結果：commit `bdf5c51` 內容為 1.0.85 版號變更卻沿用 v1.0.84 的舊發布說明，tag `v1.0.85` 的 Release 說明與 APK 檔名
+    （`AVD_1.0.84_arm64-v8a.apk`）皆為 1.0.84。故改以 1.0.86 重新發布一版乾淨的。
+  - **避免重演的作法**：進版與驗證全部提交完畢、工作區保持乾淨後，才由使用者執行發布腳本；
+    如此 `all.ps1` 以正確版號打包、`commit_avd.ps1` 無變更可提交，競態視窗消失。
 - [x] 6.3 重新執行五項建置驗證 —— `npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check --manifest-path src-tauri/Cargo.toml`、`gradlew :app:compileDebugJavaWithJavac` —— 全數通過後建立獨立的版本進版 commit（與 6.1 分開，保留可單獨 revert 的空間），確認發布腳本的預設訊息版號與 `package.json` 一致；發布腳本仍由使用者手動執行，進版後主動告知使用者可以發布
-  - 1.0.85 下五項驗證全數通過：`npm run build`、`npm test`（253）、`vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac`。
+  - 1.0.86 下五項驗證全數通過：`npm run build`、`npm test`（253）、`vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac`。
