@@ -20,7 +20,9 @@
 
 ### Modified Capabilities
 
-- `channel-auto-monitor`: `Optional Fallback Mechanism and Source Transparency` —— 通道由兩層變三層且順序為 API 優先；來源標註須涵蓋第三種來源；「RSS 失敗且未開備援」的情境在已填 API key 時不再成立。
+- `channel-auto-monitor`: 兩條 Requirement。
+  - `Optional Fallback Mechanism and Source Transparency` —— 通道由兩層變三層且順序為 API 優先；來源標註須涵蓋第三種來源；「RSS 失敗且未開備援」的情境在已填 API key 時不再成立。
+  - `Periodic Check & New Video Matching` —— **【實作階段追加】**候選視窗上限的判定條件由「取回筆數是否達該來源每輪上限」改為「本輪最舊影片是否仍晚於目前錨點」。原條件套到官方 RSS 上會造成錨點永久停滯（RSS 固定約 15 筆且橫跨數月，以筆數判定使上限恆成立，而上限早於現有錨點），每輪重新比對整個 Feed。新條件與來源及筆數無關，自動涵蓋三種通道。
 - `yt-dlp-rss-fallback`: `yt-dlp RSS 備援擷取` —— 觸發條件由「官方 RSS 失敗」改為「其前序通道皆失敗」，yt-dlp 由第二順位降為最後順位。
 
 ### Added-only Capabilities
@@ -48,10 +50,13 @@
 ## 與其他 change 的依賴
 
 - **`add-channel-subscription-keyword-filter` 尚未歸檔，且已對 `channel-auto-monitor`、`auto-check-filtering`、`channel-check-feedback` 提出 delta —— 正是本 change 五個 Modified 中的三個。** 該 change 的程式已實作完成並通過五項建置驗證，僅待人工驗證。本 change 的 delta MUST 以其歸檔後的主規格文字為基底撰寫；**建議先歸檔該 change，再實作本 change**。若順序顛倒，兩者會互相覆寫對方在同一條 Requirement 上的修改。
-- **本 change 刻意不修改該 change 擁有的 Requirement**，以避免覆寫：`Periodic Check & New Video Matching`、
-  `時間錨點的推進邊界`、`Exclude Live Streams from Queue`、`頻道檢查結果須區分成功與失敗狀態` 四條皆不列入本 change 的 delta。
-- 錨點的候選視窗規則本身是**通用**的（「本輪取回筆數已達該資料來源每輪候選上限時」），故本 change 只需在新能力中
-  宣告「API 通道每輪候選上限為 50 筆」，既有規則即自動適用，無須重寫該條。
-  唯一遺留：該條括號內列舉的來源（「備援來源每輪 2 筆、官方 RSS 約 15 筆」）會少了 API 一級。
-  這屬文件完整性而非行為缺口，**待 keyword change 歸檔後另以一行 MODIFIED 補上**，已列入 tasks。
+- 本 change 原計畫完全不修改該 change 擁有的 Requirement。**實作階段發現必須修改其中一條**：
+  `Periodic Check & New Video Matching` 的候選視窗上限規則以「取回筆數是否達該來源每輪上限」為條件，
+  該條件套到官方 RSS 上會使錨點永久停滯（見上方 Modified Capabilities 的說明）。該 change 的規格與其
+  任務 1.7 本身即互相矛盾（規格要求 RSS 套用、任務寫明不套用），實作照任務做故未引爆；本 change 需要
+  新增 API 一級時無法迴避，故一併修正。
+- 其餘三條仍**不**列入本 change 的 delta：`時間錨點的推進邊界`、`Exclude Live Streams from Queue`、
+  `頻道檢查結果須區分成功與失敗狀態`。新增的關切改以 ADDED 承載。
+- 因此本 change 的 `channel-auto-monitor` delta 以該 change 歸檔後的文字為基底撰寫，
+  **歸檔順序不可顛倒** —— tasks 第 0 節已列為阻擋性前置條件。
 - 該 change 也把直播狀態驗證的對象收斂為「通過關鍵字篩選的候選影片」；本 change 的批次查詢 MUST 沿用該收斂，只批次查詢命中關鍵字的候選影片。

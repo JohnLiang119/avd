@@ -52,6 +52,19 @@
 
 **Alternatives:** 新增獨立的 Rust 指令 —— 會出現兩個幾乎相同的 HTTP 通道，日後修 bug（例如 timeout、UA、query string 遮蔽）要記得改兩處。
 
+**【實作階段補充】桌面端看不到錯誤回應的 body。** 接線時才發現：`ureq::Error::Status` 的
+`to_string()` 只給「網址 + status code N」，**不含回應 body**，而區分配額耗盡
+（`quotaExceeded`）與金鑰無效（`accessNotConfigured` / `API key not valid`）所需的 reason
+全在 body 的 JSON 裡 —— 單看狀態碼不夠，403 兩者皆可能。Android 端無此問題（`fetch()`
+在任何狀態碼下都能讀 body）。
+
+解法：`fetch_http_text` 於 `Error::Status` 時檢查 `Content-Type`，**僅在其為 JSON 時**把
+截斷後（500 字元）的 body 附加到錯誤訊息。Google 的 API 錯誤是 JSON，而 YouTube RSS 的
+404 是整頁 HTML 錯誤頁 —— 以 Content-Type 作判別，API 路徑拿到所需資訊，RSS 的錯誤訊息
+完全不變、不會把 HTML 灌進錯誤日誌。截斷長度同時防止任何來源的巨大 body 灌爆日誌。
+
+此舉不影響前綴語意，`channelRssRetryDelays` 的分層重試不受影響。
+
 ### 3.【D-C】Android 端直接用 WebView `fetch()`，不新增原生外掛方法
 
 **Decision:** Android 端的 API 請求以 WebView 的 `fetch()` 發出，不新增 `@PluginMethod`。

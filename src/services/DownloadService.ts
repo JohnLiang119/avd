@@ -15,6 +15,13 @@ import {
 } from './enrichment';
 import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES, channelRssRetryDelays } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
+import {
+  selectFirstChannel,
+  fetchChannelVideosViaApi,
+  classifyApiError,
+  type ApiRequest,
+  type ApiErrorKind,
+} from './youtubeDataApi';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
 const _t2cn = OpenCC.Converter({ from: 't', to: 'cn' });
@@ -357,7 +364,12 @@ export interface MonitoredVideoResult {
    */
   publishedTime: number;
   url: string;
-  source: 'rss' | 'fallback';
+  /**
+   * 資料來源通道。三者的候選視窗與發布時間精確度並不相同：
+   * `api` 每輪 50 筆且帶精確時間、`rss` 約 15 筆帶精確時間、
+   * `fallback` 每輪僅 2 筆且不帶精確時間。錨點守門依此決定上限。
+   */
+  source: 'api' | 'rss' | 'fallback';
 }
 
 /**
@@ -432,6 +444,34 @@ function parseFallbackNdjson(ndjson: string, limit = 2): MonitoredVideoResult[] 
     .map(mapFallbackEntry)
     .sort((a, b) => b.publishedTime - a.publishedTime)
     .slice(0, limit);
+}
+
+/**
+ * 執行一次 API 請求並回傳解析後的 JSON。
+ *
+ * 這是 API 通道**唯一**的平台分支。Android 端直接用 WebView 的 `fetch()` ——
+ * 實測 `googleapis.com` 的 OPTIONS 預檢回 200 且明確允許 `x-goog-api-key`，
+ * CORS 不成立阻擋，故不需新增原生外掛方法。
+ *
+ * 兩條路徑的錯誤都以 `HTTP_STATUS:{code}:{body}` 形式拋出，使
+ * `classifyApiError` 能自 body 的 JSON 區分配額耗盡與金鑰無效 ——
+ * 單看狀態碼不足，403 兩者皆可能。
+ */
+async function fetchApiJson(request: ApiRequest): Promise<any> {
+  if (isTauri()) {
+    const text = await invoke<string>('fetch_http_text', {
+      url: request.url,
+      headers: request.headers,
+    });
+    return JSON.parse(text);
+  }
+
+  const res = await fetch(request.url, { headers: request.headers });
+  const body = await res.text();
+  if (!res.ok) {
+    throw new Error(`HTTP_STATUS:${res.status}:${body.slice(0, 500)}`);
+  }
+  return JSON.parse(body);
 }
 
 export const DownloadService = {
@@ -1361,10 +1401,59 @@ export const DownloadService = {
     }
   },
 
-  async fetchYouTubeRss(
+  /**
+   * 取得頻道最新影片，內部封裝三層降級鏈：
+   * **YouTube Data API → 官方 RSS → yt-dlp 備援**。
+   *
+   * 上層只看回傳陣列與其 `source` 標記，不需知道實際走了哪條通道。
+   * 未提供 `api` 選項或其金鑰為空時，MUST NOT 發出任何 API 請求 ——
+   * 那是完全正常的預設狀態，行為與導入 API 通道前逐位元相同。
+   */
+  async fetchChannelVideos(
     channelId: string,
-    options?: { enableFallback?: boolean; noRetry?: boolean }
+    options?: {
+      enableFallback?: boolean;
+      noRetry?: boolean;
+      api?: {
+        apiKey: string;
+        now?: number;
+        /** 配額耗盡的抑制解除時點 */
+        quotaSuppressedUntil?: number;
+        /** 被拒金鑰的指紋；與當前金鑰相符時跳過 API */
+        rejectedKeyFingerprint?: string;
+        /** 已知的 uploads 播放清單識別碼（快取），省去推導與後備查詢 */
+        uploadsPlaylistId?: string;
+        /** API 成功時回報確定的 uploads 清單識別碼，供呼叫端快取 */
+        onResolved?: (uploadsPlaylistId: string) => void;
+        /** API 失敗時回報錯誤類別，供呼叫端寫入抑制狀態與回饋 */
+        onError?: (kind: ApiErrorKind) => void;
+      };
+    }
   ): Promise<MonitoredVideoResult[]> {
+    const api = options?.api;
+    const useApi = !!api && selectFirstChannel({
+      apiKey: api.apiKey,
+      now: api.now ?? Date.now(),
+      quotaSuppressedUntil: api.quotaSuppressedUntil,
+      rejectedKeyFingerprint: api.rejectedKeyFingerprint,
+    }) === 'api';
+
+    if (api && useApi) {
+      try {
+        const { videos, uploadsPlaylistId } = await fetchChannelVideosViaApi(
+          channelId, api.apiKey, fetchApiJson, api.uploadsPlaylistId
+        );
+        api.onResolved?.(uploadsPlaylistId);
+        return videos;
+      } catch (e: any) {
+        // 分類後交由呼叫端決定抑制與回饋；本輪一律降級續走 RSS → yt-dlp。
+        // 刻意不記錄 request 物件 —— 金鑰在標頭中，不得被順帶寫進日誌。
+        const kind = classifyApiError(e);
+        api.onError?.(kind);
+        console.warn(`YouTube Data API 失敗 (${channelId}, ${kind})，降級至官方 RSS`, e?.message || e);
+      }
+    }
+
     try {
       const xmlText = await fetchChannelRssWithRetry(async () => {
         if (!isTauri()) {

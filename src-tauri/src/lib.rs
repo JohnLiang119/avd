@@ -141,26 +141,77 @@ fn probe_internet_connectivity(timeout_ms: u64) -> bool {
 }
 
 #[tauri::command]
-fn fetch_http_text(url: String) -> Result<String, String> {
+fn fetch_http_text(
+    url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<String, String> {
     use std::time::Duration;
+
+    // 錯誤訊息 MUST NOT 帶出網址的 query string。
+    //
+    // 該處可能含機密（例如 YouTube Data API 金鑰），而 ureq 的錯誤字串會嵌入
+    // 完整網址；這些訊息經 reportError 寫入 avd_error_log，而錯誤日誌的設計
+    // 目的就是讓使用者複製出來求助 —— 機密一旦寫入其中，貼出日誌即等同公開。
+    //
+    // 前綴（HTTP_STATUS: / NETWORK_ERROR:）刻意保留不變：channelRssRetryDelays
+    // 依該前綴分層決定重試時間表，破壞它會使重試策略失效。
+    let query = url.find('?').map(|i| url[i..].to_string());
+    let redact = |message: String| match &query {
+        Some(q) => message.replace(q.as_str(), ""),
+        None => message,
+    };
 
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(10))
         .build();
 
-    let response = agent
-        .get(&url)
-        .set(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
+    let mut request = agent.get(&url).set(
+        "User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    );
+
+    // 選填標頭：供需要以標頭傳送認證的通道使用（YouTube Data API 的
+    // X-goog-api-key）。金鑰因此不必進入網址，從結構上避免經錯誤訊息外流，
+    // 而非只倚賴上方的遮蔽。未傳此參數時行為與加入前完全一致。
+    if let Some(map) = &headers {
+        for (key, value) in map {
+            request = request.set(key, value);
+        }
+    }
+
+    let response = request
         .call()
         .map_err(|e| {
-            let message = e.to_string();
+            let message = redact(e.to_string());
             match e {
-                ureq::Error::Status(status, _) => {
-                    format!("HTTP_STATUS:{}:{}", status, message)
+                ureq::Error::Status(status, response) => {
+                    // 狀態碼不足以區分 API 的錯誤原因：403 可能是配額耗盡
+                    // （quotaExceeded），也可能是服務未啟用（accessNotConfigured），
+                    // 兩者的處置完全不同 —— 前者等待每日重置，後者要使用者修正金鑰。
+                    // reason 只在回應 body 的 JSON 中，故於此附上。
+                    //
+                    // 只在 Content-Type 為 JSON 時附上：Google 的 API 錯誤是 JSON，
+                    // 而 YouTube RSS 的 404 是整頁 HTML 錯誤頁 —— 附上只會把它塞進
+                    // 錯誤日誌。截斷長度避免任何來源的巨大 body 灌爆日誌。
+                    let is_json = response
+                        .header("Content-Type")
+                        .map(|value| value.to_lowercase().contains("json"))
+                        .unwrap_or(false);
+
+                    let detail = if is_json {
+                        match response.into_string() {
+                            Ok(body) => {
+                                let excerpt: String = body.chars().take(500).collect();
+                                format!("{} {}", message, redact(excerpt))
+                            }
+                            Err(_) => message,
+                        }
+                    } else {
+                        message
+                    };
+
+                    format!("HTTP_STATUS:{}:{}", status, detail)
                 }
                 ureq::Error::Transport(_) => format!("NETWORK_ERROR:{}", message),
             }

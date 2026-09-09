@@ -129,8 +129,10 @@ describe('selectNewVideos', () => {
 });
 
 describe('nextChannelBaseline', () => {
-  it('有精確發布時間時推進至最新者', () => {
-    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], OLDEST);
+  it('有精確發布時間時推進至最新者（視窗已回溯至錨點之前）', () => {
+    // 現實的 RSS 形狀：回傳的最舊影片早於目前錨點，代表視窗完整覆蓋
+    // 「錨點到現在」的缺口，不存在未經比對的較舊影片，故錨點推進至最新者。
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER), vid('n3', OLDEST)], OLDER);
     expect(got).toEqual({ publishedTime: NEWER, videoId: 'n1', title: '影片 n1' });
   });
 
@@ -372,9 +374,10 @@ describe('nextChannelBaseline —— 錨點守門為上限而非排除', () => {
 });
 
 describe('nextChannelBaseline —— 備援候選視窗上限', () => {
-  it('備援達每輪上限時錨點取本輪最舊者', () => {
-    // 可能還有更舊的影片未被取回也未經比對，錨點不得跨過本輪最舊者
-    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0);
+  it('備援視窗未回溯至錨點時，錨點取本輪最舊者', () => {
+    // 備援每輪僅 2 筆，兩筆都比錨點新 —— 錨點與本輪最舊者之間可能還有
+    // 未被取回也未經比對的影片，故錨點不得跨過本輪最舊者。
+    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], OLDEST);
     expect(got?.videoId).toBe('n2');
     expect(got?.publishedTime).toBe(OLDER);
   });
@@ -384,8 +387,35 @@ describe('nextChannelBaseline —— 備援候選視窗上限', () => {
     expect(got?.videoId).toBe('n1');
   });
 
-  it('官方 RSS 來源不受視窗上限影響', () => {
-    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], 0);
+  it('視窗上限與來源無關 —— 取決於是否回溯至錨點', () => {
+    // 同樣 2 筆、同樣時間，只因來源不同而有不同結果是錯的規則。
+    // 兩者皆未回溯至錨點，故皆設限；皆已回溯，則皆不設限。
+    for (const make of [vid, fb]) {
+      expect(nextChannelBaseline([make('n1', NEWER), make('n2', OLDER)], OLDEST)?.videoId).toBe('n2');
+      expect(
+        nextChannelBaseline([make('n1', NEWER), make('n2', OLDER), make('n3', OLDEST)], OLDER)?.videoId
+      ).toBe('n1');
+    }
+  });
+
+  it('官方 RSS 的實際形狀不會被上限鎖住錨點', () => {
+    // 這是採「取回筆數達來源上限即設限」會踩到的故障：RSS 固定約 15 筆且
+    // 橫跨數月，以筆數判定會使上限恆成立，而上限（最舊者）早於現有錨點，
+    // 錨點將永遠無法推進、每輪重新比對整個 Feed。
+    const feed = Array.from({ length: 15 }, (_, i) => vid(`r${i}`, NEWER - i * 86400000));
+    const baseline = NEWER - 2 * 86400000;   // 錨點在近兩天內，遠晚於最舊那筆
+    const got = nextChannelBaseline(feed, baseline);
+    expect(got?.videoId).toBe('r0');
+    expect(got?.publishedTime).toBe(NEWER);
+  });
+
+  it('尚未建立錨點時不設限 —— 首次追蹤不存在可跳過的缺口', () => {
+    expect(nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0)?.videoId).toBe('n1');
+    expect(nextChannelBaseline([vid('n1', NEWER)], 0)?.videoId).toBe('n1');
+  });
+
+  it('本輪最舊影片恰等於錨點時視為已覆蓋，不設限', () => {
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], OLDER);
     expect(got?.videoId).toBe('n1');
   });
 

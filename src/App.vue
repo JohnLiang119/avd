@@ -761,6 +761,23 @@
             </div>
             <van-switch v-model="monitorConfig.enableYtDlpFallback" size="18px" />
           </div>
+          <!-- YouTube Data API 金鑰（選填）。未設定時完全維持 RSS → yt-dlp 行為 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+            <div style="flex: 1; min-width: 0; margin-right: 8px;">
+              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">
+                YouTube Data API 金鑰
+                <span
+                  :style="{ fontSize: '10px', marginLeft: '6px', color: youtubeApiKey.trim() ? '#16a34a' : '#94a3b8' }"
+                >{{ youtubeApiKey.trim() ? '● 已設定' : '○ 未設定' }}</span>
+              </div>
+              <div style="font-size: 10px; color: #94a3b8;">
+                設定後改以官方 API 為第一通道，最穩定；未設定則維持 RSS → yt-dlp（選填）
+              </div>
+            </div>
+            <van-button size="mini" plain round @click="openApiKeyEditor" style="padding: 0 10px; height: 22px; font-size: 10px; flex-shrink: 0;">
+              設定
+            </van-button>
+          </div>
 
           <div style="display: flex; gap: 8px;">
             <van-button size="small" type="primary" plain block icon="replay" :loading="isCheckingChannels" @click="checkAllMonitoredChannels(true)">
@@ -949,6 +966,61 @@
       </div>
     </van-dialog>
 
+    <!-- YouTube Data API 金鑰編輯（草稿式：確認才寫回，取消不影響） -->
+    <van-dialog
+      v-model:show="showApiKeyDialog"
+      title="🔑 YouTube Data API 金鑰"
+      show-cancel-button
+      confirm-button-text="儲存"
+      cancel-button-text="取消"
+      :before-close="onApiKeyDialogBeforeClose"
+    >
+      <div style="padding: 14px 16px; max-height: 60vh; overflow-y: auto;">
+        <p style="font-size: 12px; color: #64748b; line-height: 1.6; margin: 0 0 10px;">
+          設定金鑰後，頻道追蹤改以 <b>YouTube Data API</b> 為第一通道 —— 官方 RSS 端點會回傳隨機的假 404，API 則有服務水準保證，且回傳精確發布時間與更寬的候選範圍。
+        </p>
+        <p style="font-size: 11px; color: #94a3b8; line-height: 1.7; margin: 0 0 12px;">
+          <b>免費，不需信用卡</b>：每個 Google Cloud 專案每日 10,000 單位額度，本應用程式的用量約 5%。<br>
+          需自行於 Google Cloud Console 建立專案、啟用「YouTube Data API v3」並產生 API 金鑰。<br>
+          金鑰只存在本機，<b>不會</b>寫入頻道備份，也不會出現在錯誤日誌中。<br>
+          留空即停用 API 通道，回到 RSS → yt-dlp。
+        </p>
+
+        <van-field
+          v-model="apiKeyDraft"
+          :type="apiKeyVisible ? 'text' : 'password'"
+          placeholder="貼上 API 金鑰（AIza...）"
+          clearable
+          style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px;"
+        />
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+          <span
+            style="font-size: 11px; color: #64748b; cursor: pointer;"
+            @click="apiKeyVisible = !apiKeyVisible"
+          >
+            {{ apiKeyVisible ? '🙈 隱藏金鑰' : '👁 顯示金鑰' }}
+          </span>
+          <span
+            v-if="apiKeyDraft.trim()"
+            style="font-size: 11px; color: #ef4444; cursor: pointer;"
+            @click="apiKeyDraft = ''"
+          >
+            清除
+          </span>
+        </div>
+
+        <div v-if="monitorConfig.apiQuotaSuppressedUntil && Date.now() < monitorConfig.apiQuotaSuppressedUntil"
+             style="margin-top: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400e; line-height: 1.6;">
+          ⚠️ 今日配額已用盡，目前暫時改用官方 RSS。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
+        </div>
+        <div v-else-if="monitorConfig.apiRejectedKeyFingerprint"
+             style="margin-top: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #b91c1c; line-height: 1.6;">
+          ⚠️ 目前的金鑰被 API 拒絕（無效、已撤銷，或該專案未啟用 YouTube Data API v3）。請確認後更換金鑰。
+        </div>
+      </div>
+    </van-dialog>
+
     <YouTubeBatchModal
       v-model:show="showPlaylistModal"
       :channel-title="parsedChannelTitle"
@@ -999,11 +1071,19 @@ import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
 import {
+  nextQuotaResetTime,
+  apiKeyFingerprint,
+  describeApiQuotaDegraded,
+  describeApiKeyRejected,
+  type ApiErrorKind,
+} from './services/youtubeDataApi';
+import {
   channelBaseline,
   isFirstTimeTracking,
   selectNewVideos,
   nextChannelBaseline,
   buildChannelVideoTask,
+  channelSourceLabel,
   normalizeChannelKeywords,
   channelKeywords,
   partitionByKeywords,
@@ -1431,6 +1511,12 @@ interface MonitoredChannel {
   lastKnownVideoId?: string;
   lastVideoTitle?: string;
   /**
+   * 該頻道的 uploads 播放清單識別碼（API 通道用）。
+   * 終生不變，故查得後即快取，之後不再查詢。非機密（可由頻道 ID 推得），
+   * 無須遮蔽；舊備份缺此欄位時回到前綴推導。
+   */
+  uploadsPlaylistId?: string;
+  /**
    * 標題關鍵字篩選。空陣列代表無篩選（全量追蹤）。
    *
    * 頻道物件有三個建構點（頻道管理彈窗新增、網址列自動加入追蹤、還原匯入）
@@ -1445,6 +1531,19 @@ interface ChannelMonitorConfig {
   checkIntervalMinutes: number;
   lastGlobalCheckTime: number;
   enableYtDlpFallback?: boolean;
+  /**
+   * API 配額耗盡的抑制解除時點（下一個太平洋時間午夜）。
+   * 此時點之前一律跳過 API 通道直接走 RSS —— 配額耗盡後在重置前的每次
+   * 請求都必然失敗，不抑制的話每個頻道每輪都要白付一次失敗往返。
+   * 必須持久化：app 重啟頻繁，只放記憶體會讓抑制失效而恢復白打。
+   */
+  apiQuotaSuppressedUntil?: number;
+  /**
+   * 被 API 拒絕的金鑰指紋。與當前金鑰指紋相符時跳過 API。
+   * 綁定金鑰內容而非時間 —— 無效金鑰不會因時間而變有效，
+   * 但「使用者換了金鑰」是明確可偵測的解除條件。存指紋而非金鑰本身。
+   */
+  apiRejectedKeyFingerprint?: string;
 }
 
 const monitoredChannels = storage.defineSetting<MonitoredChannel[]>('avd_monitored_channels', [], {
@@ -1476,6 +1575,90 @@ const monitorConfig = storage.defineSetting<ChannelMonitorConfig>('avd_monitor_c
   },
 });
 
+// API 金鑰刻意存為獨立設定鍵，不放進 ChannelMonitorConfig：
+// 規格要求金鑰 MUST NOT 出現在頻道備份中。頻道匯出目前只序列化
+// monitoredChannels，所以放 monitorConfig 目前也不會被帶出 —— 但那是巧合
+// 而非保證，日後若有人把設定納入備份或雲端同步就會順帶外洩，且不會有任何
+// 測試失敗來提醒。獨立鍵讓「不得匯出」成為結構性事實。
+const youtubeApiKey = storage.defineSetting('avd_youtube_api_key', '');
+
+// 本輪 API 通道的狀態，供檢查結果回饋使用（每輪開始時重設）
+let apiQuotaDegradedThisRound = false;
+let apiKeyRejectedThisRound = false;
+
+/**
+ * 產生傳給 `fetchChannelVideos` 的 API 選項。
+ *
+ * 四個呼叫點（檢查迴圈、加入頻道、單頻道模擬、全頻道模擬）共用同一份，
+ * 使抑制狀態一致 —— 否則模擬入口會在配額已耗盡時仍逐一白打 API。
+ * 金鑰為空時回傳 `undefined`，`fetchChannelVideos` 因此完全不觸碰 API。
+ */
+const buildApiOptions = (channel?: MonitoredChannel) => {
+  const apiKey = youtubeApiKey.value.trim();
+  if (!apiKey) return undefined;
+
+  return {
+    apiKey,
+    now: Date.now(),
+    quotaSuppressedUntil: monitorConfig.value.apiQuotaSuppressedUntil,
+    rejectedKeyFingerprint: monitorConfig.value.apiRejectedKeyFingerprint,
+    uploadsPlaylistId: channel?.uploadsPlaylistId,
+    onResolved: (uploadsPlaylistId: string) => {
+      if (channel) channel.uploadsPlaylistId = uploadsPlaylistId;
+      // 成功即代表金鑰可用，清掉可能殘留的被拒指紋
+      if (monitorConfig.value.apiRejectedKeyFingerprint) {
+        monitorConfig.value.apiRejectedKeyFingerprint = undefined;
+      }
+    },
+    onError: (kind: ApiErrorKind) => {
+      if (kind === 'quota') {
+        // 配額為每日額度，重置前的每次請求都必然失敗 —— 抑制到下一個
+        // 太平洋時間午夜，並持久化以免重啟後恢復白打
+        monitorConfig.value.apiQuotaSuppressedUntil = nextQuotaResetTime(Date.now());
+        apiQuotaDegradedThisRound = true;
+      } else if (kind === 'key') {
+        // 綁定金鑰指紋而非時間：無效金鑰不會因時間而變有效
+        monitorConfig.value.apiRejectedKeyFingerprint = apiKeyFingerprint(apiKey);
+        apiKeyRejectedThisRound = true;
+      }
+      // 'other'（5xx、網路錯誤）不抑制 —— 那是暫時性狀況，下輪值得再試
+    },
+  };
+};
+
+// ---- YouTube Data API 金鑰編輯（草稿式） ----
+//
+// 與關鍵字編輯器同形式：編輯期間只改草稿，按「儲存」才寫回設定，
+// 「取消」有明確語意。金鑰預設以 password 型態顯示 —— 規格要求
+// MUST NOT 預設以明文完整顯示，使用者可自行切換為可見。
+const showApiKeyDialog = ref(false);
+const apiKeyDraft = ref('');
+const apiKeyVisible = ref(false);
+
+const openApiKeyEditor = () => {
+  apiKeyDraft.value = youtubeApiKey.value;
+  apiKeyVisible.value = false;
+  showApiKeyDialog.value = true;
+};
+
+const onApiKeyDialogBeforeClose = (action: string): boolean => {
+  // 取消：草稿丟棄，設定不受影響
+  if (action !== 'confirm') return true;
+
+  const next = apiKeyDraft.value.trim();
+  const changed = next !== youtubeApiKey.value.trim();
+  youtubeApiKey.value = next;
+
+  if (changed) {
+    // 換了金鑰即解除「金鑰無效」的抑制；配額抑制與金鑰無關，刻意不動
+    monitorConfig.value.apiRejectedKeyFingerprint = undefined;
+    apiKeyRejectedThisRound = false;
+  }
+
+  showToast(next ? '已儲存 API 金鑰，下次檢查將以 API 為第一通道' : '已清除 API 金鑰，回到 RSS → yt-dlp');
+  return true;
+};
+
 const showChannelModal = ref(false);
 const isAddingManualChannel = ref(false);
 const isCheckingChannels = ref(false);
@@ -1504,8 +1687,11 @@ const addManualChannel = async () => {
     let latestTitle = '';
     let latestPubTime = 0;
     try {
-      const rss = await DownloadService.fetchYouTubeRss(res.channelId, {
-        enableFallback: monitorConfig.value.enableYtDlpFallback
+      // 尚未建立頻道物件，故不帶快取的 uploads 清單識別碼；
+      // 首次成功後由檢查迴圈的 onResolved 寫入該頻道並快取。
+      const rss = await DownloadService.fetchChannelVideos(res.channelId, {
+        enableFallback: monitorConfig.value.enableYtDlpFallback,
+        api: buildApiOptions()
       });
       if (rss && rss.length > 0) {
         latestVid = rss[0].videoId;
@@ -1842,6 +2028,9 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   isCheckingChannels.value = true;
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
+  apiQuotaDegradedThisRound = false;
+  apiKeyRejectedThisRound = false;
+
   let newVideoCount = 0;
   // 符合既有新片條件、但未命中關鍵字而未建立任務的影片數（K）。
   // 與 newVideoCount（N）互斥：命中但因直播／狀態未知而未處理者兩者皆不計入。
@@ -1863,9 +2052,10 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     const channel = enabledChannels[i];
     try {
       if (degraded) degradedChannelCount++;
-      const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
+      const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
         enableFallback: monitorConfig.value.enableYtDlpFallback,
-        noRetry: degraded
+        noRetry: degraded,
+        api: buildApiOptions(channel)
       });
       consecutiveFailures = 0;
       if (!videos || videos.length === 0) continue;
@@ -1891,7 +2081,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       const unhandledVideoIds = new Set<string>();
 
       // 關鍵字篩選必須先於直播狀態驗證 —— 未命中的影片不得觸發任何直播查詢
-      // 或額外的影片資訊擷取。fetchYouTubeRss 已把官方 RSS 與 yt-dlp 備援
+      // 或額外的影片資訊擷取。fetchChannelVideos 已把官方 RSS 與 yt-dlp 備援
       // 併為一條帶 source 標記的陣列，因此兩種來源自動共用這條篩選路徑。
       const newVideos = selectNewVideos(videos, channelLastPub, tasks.value);
       const { matched, missed } = partitionByKeywords(newVideos, channelKeywords(channel));
@@ -1957,6 +2147,15 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   monitorConfig.value.lastGlobalCheckTime = now;
   isCheckingChannels.value = false;
 
+  // 本輪 API 狀態片段。金鑰無效優先於配額耗盡 —— 前者需使用者修正，
+  // 後者只需等待重置。抑制生效後續輪不再呼叫 API，故 onError 不再觸發，
+  // 此片段自然只出現一次，不會每輪或每頻道重複騷擾。
+  const apiHint = apiKeyRejectedThisRound
+    ? describeApiKeyRejected()
+    : apiQuotaDegradedThisRound
+      ? describeApiQuotaDegraded()
+      : '';
+
   const isFallbackEnabled = !!monitorConfig.value.enableYtDlpFallback;
   const failureLevel: ChannelRssErrorLevel = failedLevels.every(level => level === 'network')
     ? 'network'
@@ -1977,14 +2176,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
     if (newVideoCount > 0) {
       const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
-      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）`);
+      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）${apiHint}`);
       processQueue();
     } else if (isManual) {
       const filteredHint = keywordFilteredCount > 0
         ? `${describeKeywordFilteredRound(keywordFilteredCount)}　`
         : '';
       showToast({
-        message: `${filteredHint}⚠️ ${describeEarlyStop(skippedChannelCount)}`,
+        message: `${filteredHint}⚠️ ${describeEarlyStop(skippedChannelCount)}${apiHint}`,
         duration: 5000,
         closeOnClick: true
       });
@@ -1995,7 +2194,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
       const degradedHint = degradedChannelCount > 0 ? `（${describeDegradedRound(degradedChannelCount)}）` : '';
       showToast({
-        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}${degradedHint}`,
+        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}${degradedHint}${apiHint}`,
         duration: 5000,
         closeOnClick: true
       });
@@ -2004,12 +2203,12 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     // 有新影片但部分失敗
     const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
     const failHint = `⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}`;
-    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）`);
+    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）${apiHint}`);
     processQueue();
   } else if (newVideoCount > 0) {
     // 全部成功且有新影片
     const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 包含 ${fallbackVideoCount} 部 yt-dlp 備援抓取)` : ' [官方 RSS]';
-    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}`);
+    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}${apiHint}`);
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
@@ -2017,21 +2216,22 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     const noNewHint = keywordFilteredCount > 0
       ? describeKeywordFilteredRound(keywordFilteredCount)
       : '已檢查完成，目前沒有新影片';
-    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）`);
+    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）${apiHint}`);
   } else if (isManual) {
     // 全部成功且沒新片。K 大於零代表「有新片但被自己的關鍵字篩掉」，
     // 與「真的沒有新片」是兩回事，MUST 以不同文案區分。
-    showToast(keywordFilteredCount > 0
+    showToast((keywordFilteredCount > 0
       ? describeKeywordFilteredRound(keywordFilteredCount)
-      : '已檢查完成 [官方 RSS]，目前沒有新影片');
+      : '已檢查完成 [官方 RSS]，目前沒有新影片') + apiHint);
   }
 };
 
 const simulateNewVideo = async (channel: MonitoredChannel) => {
   showLoadingToast({ message: '正在模擬抓取最新影片...', forbidClick: true });
   try {
-    const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
-      enableFallback: monitorConfig.value.enableYtDlpFallback
+    const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
+      enableFallback: monitorConfig.value.enableYtDlpFallback,
+      api: buildApiOptions(channel)
     });
     closeToast();
     if (!videos || videos.length === 0) {
@@ -2049,7 +2249,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
 
     const latestVideo = matched[0];
     const pubTimeStr = formatPublishTime(latestVideo.publishedTime) || formatPublishTime(Date.now());
-    const sourceLabel = latestVideo.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
+    const sourceLabel = `【測試模式 (${channelSourceLabel(latestVideo.source)})】`;
     const testTitle = `[測試模擬] ${buildTaskDisplayTitle(latestVideo.title, channel.title, pubTimeStr)}`;
 
     const testTask: DownloadTask = {
@@ -2098,8 +2298,9 @@ const simulateGlobalNewVideo = async () => {
   try {
     for (const channel of enabledChannels) {
       try {
-        const videos = await DownloadService.fetchYouTubeRss(channel.channelId, {
-          enableFallback: monitorConfig.value.enableYtDlpFallback
+        const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
+          enableFallback: monitorConfig.value.enableYtDlpFallback,
+          api: buildApiOptions(channel)
         });
         if (!videos || videos.length === 0) continue;
 
@@ -2115,7 +2316,7 @@ const simulateGlobalNewVideo = async () => {
         for (const vid of topVideos.reverse()) {
           const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
           const taskTitle = `[測試模擬] ${buildTaskDisplayTitle(vid.title, channel.title, pubTimeStr)}`;
-          const sourceLabel = vid.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
+          const sourceLabel = `【測試模式 (${channelSourceLabel(vid.source)})】`;
 
           const testTask: DownloadTask = {
             id: taskStore.nextTaskId(),

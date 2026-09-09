@@ -8,7 +8,7 @@
  *
  * 本模組刻意只有無狀態純函式 —— 不提供 `createXxx()` 工廠（沒有需要
  * 持有的狀態），也不依賴 `useTaskStore`（任務 id 由呼叫端傳入）。
- * 網路呼叫（`fetchYouTubeRss`、`checkVideoLiveStatus`）留在 `App.vue`
+ * 網路呼叫（`fetchChannelVideos`、`checkVideoLiveStatus`）留在 `App.vue`
  * 的迴圈中，不進入本模組。
  */
 
@@ -38,7 +38,7 @@ export interface MatchableVideo {
   /** `0` 表示來源未提供精確發布時間 —— 不得以當下時間替代 */
   publishedTime: number;
   url: string;
-  source: 'rss' | 'fallback';
+  source: 'api' | 'rss' | 'fallback';
 }
 
 /** 每個頻道的關鍵字數量上限。 */
@@ -46,14 +46,6 @@ export const KEYWORD_MAX_COUNT = 20;
 
 /** 單一關鍵字的長度上限（以 Unicode 碼位計，非 UTF-16 單元）。 */
 export const KEYWORD_MAX_LENGTH = 100;
-
-/**
- * yt-dlp 備援每輪取回的影片數上限。
- *
- * 對應 `src-tauri` 以 `--playlist-end 2` 限制的解析數量。官方 RSS 每輪
- * 約 15 筆，不套用此上限。
- */
-export const FALLBACK_ROUND_LIMIT = 2;
 
 /**
  * 是否為首次追蹤。
@@ -165,10 +157,24 @@ export function nextChannelBaseline(
     .map(v => v.publishedTime);
   const exclusiveCap = unhandledTimes.length ? Math.min(...unhandledTimes) : Infinity;
 
-  // 守門 3：候選視窗達上限時，錨點至多等於本輪最舊影片的發布時間。
-  const windowCapped =
-    timed.length >= FALLBACK_ROUND_LIMIT && list.every(v => v.source === 'fallback');
-  const inclusiveCap = windowCapped ? Math.min(...timed.map(v => v.publishedTime)) : Infinity;
+  // 守門 3：本輪視窗未覆蓋到錨點時，錨點至多等於本輪最舊影片的發布時間。
+  //
+  // 上限的目的是防止錨點跳過「本輪沒取到、也未經比對的更舊影片」。若本輪最舊
+  // 影片已早於或等於目前錨點，代表視窗完整覆蓋了「錨點到現在」這段缺口，
+  // 不存在未經比對的較舊影片，就不需要上限。
+  //
+  // 刻意**不**以「取回筆數是否達該來源每輪上限」為條件：官方 RSS 固定回傳
+  // 約 15 筆且通常橫跨數月，以筆數判定會使上限恆成立，而算出的上限（15 筆中
+  // 最舊者）早於現有錨點，`anchor.publishedTime <= currentBaseline` 隨即成立
+  // 而回傳 null —— 錨點將永遠無法推進，每輪重新比對整個 Feed。
+  //
+  // 此規則自動涵蓋三種通道：RSS 視窗夠寬故通常不設限；備援每輪僅 2 筆，
+  // 兩筆都比錨點新時即設限；API 每輪 50 筆同理。
+  // `currentBaseline` 為 0 代表尚未建立錨點：此時不存在「錨點與最舊影片之間」
+  // 的缺口，本就無從跳過任何影片，故不設限（首次追蹤即走此路徑）。
+  const oldestFetched = timed.length ? Math.min(...timed.map(v => v.publishedTime)) : 0;
+  const inclusiveCap =
+    currentBaseline > 0 && oldestFetched > currentBaseline ? oldestFetched : Infinity;
 
   const anchor = timed
     .filter(v =>
@@ -188,6 +194,19 @@ export function nextChannelBaseline(
     videoId: anchor.videoId,
     title: anchor.title,
   };
+}
+
+/**
+ * 資料來源通道的顯示名稱。
+ *
+ * 集中在此一處，使任務狀態文字、模擬任務與通知不會各寫一份三元判斷
+ * 而在新增通道時漏改 —— 加入 API 通道時 `'api'` 就是漏在
+ * `source === 'fallback' ? ... : ...` 這種非窮盡判斷裡的那一個。
+ */
+export function channelSourceLabel(source: MatchableVideo['source']): string {
+  if (source === 'api') return 'YouTube API';
+  if (source === 'fallback') return 'yt-dlp 備援';
+  return 'RSS';
 }
 
 /**
@@ -217,9 +236,7 @@ export function buildChannelVideoTask(
     status: 'pending',
     progress: 0,
     eta: '',
-    line: video.source === 'fallback'
-      ? '【自動追蹤 (yt-dlp 備援)】排隊優先下載中...'
-      : '【自動追蹤 (RSS)】排隊優先下載中...',
+    line: `【自動追蹤 (${channelSourceLabel(video.source)})】排隊優先下載中...`,
     path: '',
     errorMsg: '',
     mediaUri: '',
