@@ -394,3 +394,51 @@ export function describeApiQuotaDegraded(): string {
 export function describeApiKeyRejected(): string {
   return '（⚠️ API 金鑰無效或該專案未啟用 YouTube Data API v3，已改用官方 RSS，請於頻道設定中檢查金鑰）';
 }
+
+// ============================================================================
+// 當日用量估算
+// ============================================================================
+
+/** 每日配額上限（單位）。 */
+export const DAILY_QUOTA_UNITS = 10000;
+
+/** 當日用量的累計狀態。 */
+export interface ApiUnitCounter {
+  /** 本配額日已消耗的單位估算值 */
+  used: number;
+  /** 本次計數週期的結束時點（下一個太平洋時間午夜） */
+  resetAt: number;
+}
+
+/**
+ * 累計當日用量，跨越重置時點時自零起算。
+ *
+ * **這是估算值，不是權威數字。** API 不提供查詢自身用量的端點；Console 上的
+ * 數字走 Service Usage／Cloud Monitoring，需 OAuth 的 `cloud-platform` 權限，
+ * 非 API 金鑰可得。下列情形會使估算**低於**實際：同一 Google Cloud 專案被
+ * 其他工具使用、同一把金鑰用於多台裝置、以及失敗請求是否計費的不確定性。
+ *
+ * 重置時點刻意重用 `nextQuotaResetTime` —— 與配額耗盡抑制採同一計算，
+ * 兩者若各自為政，會出現「抑制已解除但計數還沒歸零」之類的矛盾狀態。
+ */
+export function addApiUnits(
+  counter: ApiUnitCounter | undefined,
+  units: number,
+  now: number
+): ApiUnitCounter {
+  const amount = Math.max(0, units || 0);
+  if (!counter || !counter.resetAt || now >= counter.resetAt) {
+    return { used: amount, resetAt: nextQuotaResetTime(now) };
+  }
+  return { used: Math.max(0, counter.used || 0) + amount, resetAt: counter.resetAt };
+}
+
+/**
+ * 取得當前有效的已用單位數；已跨越重置時點時回傳 0。
+ *
+ * 供顯示使用 —— 未經此函式直接讀 `used` 會在跨日後仍顯示昨日的數字。
+ */
+export function currentApiUnitsUsed(counter: ApiUnitCounter | undefined, now: number): number {
+  if (!counter || !counter.resetAt || now >= counter.resetAt) return 0;
+  return Math.max(0, counter.used || 0);
+}

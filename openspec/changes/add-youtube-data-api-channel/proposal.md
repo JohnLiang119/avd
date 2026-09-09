@@ -10,13 +10,14 @@
 - API 通道的候選視窗為每輪最多 50 筆（RSS 約 15、備援 2 筆），既有的「候選視窗達上限即限制錨點推進」規則需認得此新上限。
 - 配額耗盡（HTTP 403 `quotaExceeded`）時降級至 RSS → yt-dlp，並在該日內不再重試 API，避免每輪白打；回饋須讓使用者知道正在降級而非「沒有新影片」。
 - **API key 為機密**：MUST NOT 出現在任何錯誤訊息、錯誤日誌、Toast 或匯出的備份中。現行 `fetch_http_text` 的錯誤訊息會嵌入完整網址（含 query string），若不修正會把 key 寫進 `avd_error_log` —— 使用者貼日誌求助時即外洩。
+- 設定介面顯示**當日 API 用量估算**（已用單位／10,000）。API 未提供查詢自身用量的端點，Console 上的數字走 Service Usage／Cloud Monitoring 且需 OAuth 的 `cloud-platform` 權限，非 API 金鑰可得；故 app 只能自行累計，該數值 MUST 明確標示為估算值。
 - 不新增第三方依賴：API 為純 HTTP JSON，且實測 `googleapis.com` 完整支援 CORS（`Access-Control-Allow-Origin` 回應 Origin、OPTIONS 預檢 200），兩平台皆可直接以 `fetch()` 呼叫，Android 端不需新增原生外掛方法。
 
 ## Capabilities
 
 ### New Capabilities
 
-- `youtube-data-api-channel`: 以使用者自填的 YouTube Data API v3 key 提供頻道新片擷取與批次直播狀態查詢；涵蓋 key 的設定、驗證、機密保護、uploads 播放清單解析、配額耗盡的降級與當日抑制。
+- `youtube-data-api-channel`: 以使用者自填的 YouTube Data API v3 key 提供頻道新片擷取與批次直播狀態查詢；涵蓋 key 的設定、驗證、機密保護、uploads 播放清單解析、配額耗盡的降級與當日抑制，以及當日用量估算的累計與呈現。
 
 ### Modified Capabilities
 
@@ -46,6 +47,11 @@
 ## 配額與公開發布的取捨
 
 配額綁 Google Cloud 專案而非使用者。本專案以 GitHub Release 公開散布，若把單一 key 內嵌於安裝檔：所有使用者共用同一份 10,000 units/日（每人 20 頻道每小時一輪約需 500 units，約 20 個使用者即耗盡），且 key 可自安裝檔取出被盜用。故 key **必須**為使用者自填的選填設定，各自使用自己的專案配額；未填者維持現有 RSS → yt-dlp 行為，不因此喪失任何既有功能。
+
+## 範圍調整紀錄
+
+- **當日用量估算的顯示**原列為 design.md 的 Open Question（因 API 無查詢端點、只能估算而價值存疑），
+  經使用者決定後併入本 change，新增一條 Requirement 與對應任務。
 
 ## 與其他 change 的依賴
 

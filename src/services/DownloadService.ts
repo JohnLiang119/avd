@@ -1427,6 +1427,8 @@ export const DownloadService = {
         onResolved?: (uploadsPlaylistId: string) => void;
         /** API 失敗時回報錯誤類別，供呼叫端寫入抑制狀態與回饋 */
         onError?: (kind: ApiErrorKind) => void;
+        /** 每次請求送達服務後回報其配額成本，供呼叫端累計當日用量估算 */
+        onUnitsConsumed?: (units: number) => void;
       };
     }
   ): Promise<MonitoredVideoResult[]> {
@@ -1439,9 +1441,24 @@ export const DownloadService = {
     }) === 'api';
 
     if (api && useApi) {
+      // 計數時機為「請求已送達服務」：傳輸層錯誤未達 Google 故不計入，
+      // 其餘（含配額耗盡的 403）一律計入 —— 那些請求確實被服務處理過。
+      const countedFetch = async (request: ApiRequest) => {
+        try {
+          const json = await fetchApiJson(request);
+          api.onUnitsConsumed?.(1);
+          return json;
+        } catch (e: any) {
+          const message = e?.message || String(e);
+          const isTransport = /^NETWORK_ERROR:/i.test(message) || e instanceof TypeError;
+          if (!isTransport) api.onUnitsConsumed?.(1);
+          throw e;
+        }
+      };
+
       try {
         const { videos, uploadsPlaylistId } = await fetchChannelVideosViaApi(
-          channelId, api.apiKey, fetchApiJson, api.uploadsPlaylistId
+          channelId, api.apiKey, countedFetch, api.uploadsPlaylistId
         );
         api.onResolved?.(uploadsPlaylistId);
         return videos;

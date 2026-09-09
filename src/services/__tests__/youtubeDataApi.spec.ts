@@ -18,6 +18,9 @@ import {
   fetchChannelVideosViaApi,
   describeApiQuotaDegraded,
   describeApiKeyRejected,
+  addApiUnits,
+  currentApiUnitsUsed,
+  DAILY_QUOTA_UNITS,
 } from '../youtubeDataApi';
 
 /** 可辨識的假金鑰 —— 用於斷言它絕不出現在網址、指紋或訊息中 */
@@ -387,5 +390,48 @@ describe('回饋訊息片段', () => {
       expect(msg).not.toContain('AIza');
       expect(msg).not.toContain(FAKE_KEY);
     }
+  });
+});
+
+describe('當日用量估算', () => {
+  const NOON = Date.parse('2026-09-09T19:00:00Z');   // 太平洋 09/09 12:00
+
+  it('同一配額日內累加，重置時點與 nextQuotaResetTime 一致', () => {
+    const a = addApiUnits(undefined, 1, NOON);
+    expect(a.used).toBe(1);
+    expect(a.resetAt).toBe(nextQuotaResetTime(NOON));
+
+    const b = addApiUnits(a, 1, NOON + 60000);
+    expect(b.used).toBe(2);
+    expect(b.resetAt).toBe(a.resetAt);
+  });
+
+  it('跨越重置時點後自零起算', () => {
+    const before = addApiUnits(undefined, 480, NOON);
+    const after = addApiUnits(before, 1, before.resetAt);
+    expect(after.used).toBe(1);
+    expect(after.resetAt).toBeGreaterThan(before.resetAt);
+  });
+
+  it('缺少既有狀態時視為零', () => {
+    expect(addApiUnits(undefined, 3, NOON).used).toBe(3);
+    expect(addApiUnits({ used: 0, resetAt: 0 }, 3, NOON).used).toBe(3);
+  });
+
+  it('顯示用的讀取在跨日後回傳 0，不會殘留昨日數字', () => {
+    const counter = addApiUnits(undefined, 480, NOON);
+    expect(currentApiUnitsUsed(counter, NOON + 3600000)).toBe(480);
+    expect(currentApiUnitsUsed(counter, counter.resetAt)).toBe(0);
+    expect(currentApiUnitsUsed(undefined, NOON)).toBe(0);
+  });
+
+  it('每日上限為 10000', () => {
+    expect(DAILY_QUOTA_UNITS).toBe(10000);
+  });
+
+  it('負值與非數字不會使計數倒退', () => {
+    const c = addApiUnits(undefined, 5, NOON);
+    expect(addApiUnits(c, -3, NOON).used).toBe(5);
+    expect(addApiUnits(c, NaN as any, NOON).used).toBe(5);
   });
 });

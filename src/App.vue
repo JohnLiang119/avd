@@ -1010,6 +1010,19 @@
           </span>
         </div>
 
+        <div v-if="youtubeApiKey.trim()" style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #475569;">
+            <span>今日用量（估算）</span>
+            <span style="font-variant-numeric: tabular-nums;">
+              <b>{{ apiUnitsUsedToday }}</b> / {{ DAILY_QUOTA_UNITS }}
+            </span>
+          </div>
+          <div style="font-size: 10px; color: #94a3b8; line-height: 1.6; margin-top: 4px;">
+            由本機自行累計，非官方數字。同一把金鑰用於多台裝置、或同一專案被其他工具使用時，實際用量會高於此值。
+            權威數字請見 Google Cloud Console 的「配額和系統限制」。太平洋時間午夜歸零。
+          </div>
+        </div>
+
         <div v-if="monitorConfig.apiQuotaSuppressedUntil && Date.now() < monitorConfig.apiQuotaSuppressedUntil"
              style="margin-top: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400e; line-height: 1.6;">
           ⚠️ 今日配額已用盡，目前暫時改用官方 RSS。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
@@ -1075,6 +1088,9 @@ import {
   apiKeyFingerprint,
   describeApiQuotaDegraded,
   describeApiKeyRejected,
+  addApiUnits,
+  currentApiUnitsUsed,
+  DAILY_QUOTA_UNITS,
   type ApiErrorKind,
 } from './services/youtubeDataApi';
 import {
@@ -1544,6 +1560,13 @@ interface ChannelMonitorConfig {
    * 但「使用者換了金鑰」是明確可偵測的解除條件。存指紋而非金鑰本身。
    */
   apiRejectedKeyFingerprint?: string;
+  /**
+   * 當日 API 用量估算（單位）與其計數週期結束時點。
+   * **估算值**：API 不提供查詢自身用量的端點，同專案被其他工具使用、
+   * 同一金鑰用於多台裝置皆會使此值低於實際。持久化以免重啟後歸零。
+   */
+  apiUnitsUsedToday?: number;
+  apiUnitsResetAt?: number;
 }
 
 const monitoredChannels = storage.defineSetting<MonitoredChannel[]>('avd_monitored_channels', [], {
@@ -1610,6 +1633,15 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
         monitorConfig.value.apiRejectedKeyFingerprint = undefined;
       }
     },
+    onUnitsConsumed: (units: number) => {
+      const next = addApiUnits(
+        { used: monitorConfig.value.apiUnitsUsedToday || 0, resetAt: monitorConfig.value.apiUnitsResetAt || 0 },
+        units,
+        Date.now()
+      );
+      monitorConfig.value.apiUnitsUsedToday = next.used;
+      monitorConfig.value.apiUnitsResetAt = next.resetAt;
+    },
     onError: (kind: ApiErrorKind) => {
       if (kind === 'quota') {
         // 配額為每日額度，重置前的每次請求都必然失敗 —— 抑制到下一個
@@ -1631,6 +1663,12 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
 // 與關鍵字編輯器同形式：編輯期間只改草稿，按「儲存」才寫回設定，
 // 「取消」有明確語意。金鑰預設以 password 型態顯示 —— 規格要求
 // MUST NOT 預設以明文完整顯示，使用者可自行切換為可見。
+/** 當日已用單位（跨日後自動回 0，不殘留昨日數字）。 */
+const apiUnitsUsedToday = computed(() => currentApiUnitsUsed(
+  { used: monitorConfig.value.apiUnitsUsedToday || 0, resetAt: monitorConfig.value.apiUnitsResetAt || 0 },
+  Date.now()
+));
+
 const showApiKeyDialog = ref(false);
 const apiKeyDraft = ref('');
 const apiKeyVisible = ref(false);
