@@ -6,6 +6,17 @@ import {
   selectNewVideos,
   nextChannelBaseline,
   buildChannelVideoTask,
+  normalizeForMatching,
+  normalizeChannelKeywords,
+  channelKeywords,
+  matchesChannelKeywords,
+  partitionByKeywords,
+  describeKeywordFilteredRound,
+  describeKeywordFilteredSuffix,
+  describeChannelKeywordMiss,
+  conservativeAnchor,
+  KEYWORD_MAX_COUNT,
+  KEYWORD_MAX_LENGTH,
   type MatchableVideo,
   type MonitoredChannelLike
 } from '../useChannelMatching';
@@ -205,5 +216,236 @@ describe('buildChannelVideoTask', () => {
     expect(t.status).toBe('pending');
     expect(t.isAudio).toBe(false);
     expect(t.url).toBe('https://www.youtube.com/watch?v=n1');
+  });
+});
+
+// ============================================================================
+// 關鍵字篩選
+// ============================================================================
+
+/** yt-dlp 備援來源的影片 */
+const fb = (id: string, publishedTime: number): MatchableVideo =>
+  vid(id, publishedTime, { source: 'fallback' });
+
+describe('channelKeywords —— 既有資料形態的向下相容', () => {
+  it('缺少 keywords 欄位、undefined、非陣列值皆得到空清單', () => {
+    expect(channelKeywords(channel())).toEqual([]);
+    expect(channelKeywords(channel({ keywords: undefined }))).toEqual([]);
+    expect(channelKeywords(channel({ keywords: 'ai' as any }))).toEqual([]);
+    expect(channelKeywords(channel({ keywords: 123 as any }))).toEqual([]);
+    expect(channelKeywords(channel({ keywords: null as any }))).toEqual([]);
+  });
+
+  it('空清單時比對一律回傳符合 —— 未設關鍵字維持全量追蹤', () => {
+    expect(matchesChannelKeywords('任何標題', [])).toBe(true);
+    expect(matchesChannelKeywords('', [])).toBe(true);
+    expect(matchesChannelKeywords('任何標題', channelKeywords(channel()))).toBe(true);
+  });
+});
+
+describe('normalizeChannelKeywords —— 去重與顯示文字', () => {
+  it('依正規化值去重，保留第一個項目的原始大小寫', () => {
+    const got = normalizeChannelKeywords(['AI', 'ai', ' Ai ']);
+    expect(got.keywords).toHaveLength(1);
+    expect(got.keywords[0]).toBe('AI');
+  });
+
+  it('非字串與空白項目被移除，不視為拒絕', () => {
+    const got = normalizeChannelKeywords(['ai', 123, null, undefined, '   ', '\t\n', {}]);
+    expect(got.keywords).toEqual(['ai']);
+    expect(got.rejections).toEqual([]);
+  });
+
+  it('去重以正規化值為準 —— 繁簡與全形視為同一項', () => {
+    expect(normalizeChannelKeywords(['學習', '学习']).keywords).toEqual(['學習']);
+    expect(normalizeChannelKeywords(['ＡＩ', 'ai']).keywords).toEqual(['ＡＩ']);
+  });
+});
+
+describe('normalizeForMatching —— 字形正規化管線', () => {
+  it('混合字形的四種組合全部命中', () => {
+    // 影片標題入庫前已被整串啟發式簡繁轉換改寫，同一個詞會以不同字形入庫。
+    // 兩側折算到同一字形域後，四種組合必須得到一致結果。
+    for (const title of ['機器学习入門', '机器学习入门']) {
+      for (const kw of ['學習', '学习']) {
+        expect(matchesChannelKeywords(title, [kw])).toBe(true);
+      }
+    }
+  });
+
+  it('全形英數折半形後忽略大小寫', () => {
+    expect(matchesChannelKeywords('ＡＩ 新知', ['ai'])).toBe(true);
+    expect(matchesChannelKeywords('AI 新知', ['ＡＩ'])).toBe(true);
+    expect(normalizeForMatching('ＡＩ')).toBe('ai');
+  });
+
+  it('未命中的標題不會被誤判為命中', () => {
+    expect(matchesChannelKeywords('料理教學', ['機器學習'])).toBe(false);
+  });
+});
+
+describe('normalizeChannelKeywords —— 輸入契約', () => {
+  it('超過數量上限的項目被拒絕且回傳原因，結果仍為上限值', () => {
+    const input = Array.from({ length: KEYWORD_MAX_COUNT + 1 }, (_, i) => `kw${i}`);
+    const got = normalizeChannelKeywords(input);
+    expect(got.keywords).toHaveLength(KEYWORD_MAX_COUNT);
+    expect(got.rejections).toHaveLength(1);
+    expect(got.rejections[0]).toContain(String(KEYWORD_MAX_COUNT));
+    // MUST NOT 靜默截斷 —— 必須有可顯示的原因，且指出是哪一項
+    expect(got.rejections[0]).toContain(`kw${KEYWORD_MAX_COUNT}`);
+  });
+
+  it('長度剛好達上限可通過，超過一個字元被拒絕', () => {
+    const ok = normalizeChannelKeywords(['a'.repeat(KEYWORD_MAX_LENGTH)]);
+    expect(ok.keywords).toHaveLength(1);
+    expect(ok.rejections).toEqual([]);
+
+    const tooLong = normalizeChannelKeywords(['a'.repeat(KEYWORD_MAX_LENGTH + 1)]);
+    expect(tooLong.keywords).toEqual([]);
+    expect(tooLong.rejections).toHaveLength(1);
+    expect(tooLong.rejections[0]).toContain(String(KEYWORD_MAX_LENGTH));
+  });
+
+  it('零寬字元與全形空白組成的項目視為空白而被移除', () => {
+    // trim() 不會移除零寬字元 —— 不另行處理會產生永不命中的關鍵字
+    const blank = '​‌‍⁠﻿　';
+    expect(normalizeChannelKeywords([blank]).keywords).toEqual([]);
+  });
+
+  it('前後夾零寬字元的關鍵字正規化為純文字且仍能命中', () => {
+    const got = normalizeChannelKeywords(['​ai​']);
+    expect(got.keywords).toEqual(['ai']);
+    expect(matchesChannelKeywords('AI 週報', got.keywords)).toBe(true);
+  });
+});
+
+describe('partitionByKeywords', () => {
+  const videos = [vid('a', NEWER, { title: '機器學習入門' }), vid('b', OLDER, { title: '週末料理' })];
+
+  it('多關鍵字任一命中即進入命中清單', () => {
+    const got = partitionByKeywords(videos, ['料理', '機器學習']);
+    expect(got.matched.map(v => v.videoId)).toEqual(['a', 'b']);
+    expect(got.missed).toEqual([]);
+  });
+
+  it('未命中影片只出現在未命中清單', () => {
+    const got = partitionByKeywords(videos, ['機器學習']);
+    expect(got.matched.map(v => v.videoId)).toEqual(['a']);
+    expect(got.missed.map(v => v.videoId)).toEqual(['b']);
+  });
+
+  it('空關鍵字清單時全部命中，未命中清單為空', () => {
+    const got = partitionByKeywords(videos, []);
+    expect(got.matched).toHaveLength(2);
+    expect(got.missed).toEqual([]);
+  });
+});
+
+describe('nextChannelBaseline —— 錨點守門為上限而非排除', () => {
+  it('較舊的未處理影片不得被越過', () => {
+    // 較新的 n1 未命中關鍵字（可被越過），較舊的 n2 命中但為直播（未處理）。
+    // 排除式作法會錯誤地回傳 n1，使 n2 日後轉存檔也不再被判定為新片。
+    const got = nextChannelBaseline(
+      [vid('n1', NEWER), vid('n2', OLDER), vid('n3', OLDEST)],
+      0,
+      new Set(['n2'])
+    );
+    expect(got?.videoId).toBe('n3');
+    expect(got?.publishedTime).toBe(OLDEST);
+  });
+
+  it('未處理影片的發布時間本身也不得被觸及', () => {
+    // 上限為嚴格小於：與未處理影片同一時間點的影片不得成為錨點
+    const got = nextChannelBaseline(
+      [vid('n1', NEWER), vid('n2', OLDER), vid('n3', OLDER)],
+      0,
+      new Set(['n2'])
+    );
+    expect(got).toBeNull();
+  });
+
+  it('未命中關鍵字的影片不計入未處理集合，錨點得以越過', () => {
+    // 呼叫端不把未命中影片放進 unhandledVideoIds，故錨點正常推進至最新者
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], 0, new Set());
+    expect(got?.videoId).toBe('n1');
+  });
+});
+
+describe('nextChannelBaseline —— 備援候選視窗上限', () => {
+  it('備援達每輪上限時錨點取本輪最舊者', () => {
+    // 可能還有更舊的影片未被取回也未經比對，錨點不得跨過本輪最舊者
+    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0);
+    expect(got?.videoId).toBe('n2');
+    expect(got?.publishedTime).toBe(OLDER);
+  });
+
+  it('備援僅 1 筆未達上限時不套用視窗上限', () => {
+    const got = nextChannelBaseline([fb('n1', NEWER)], 0);
+    expect(got?.videoId).toBe('n1');
+  });
+
+  it('官方 RSS 來源不受視窗上限影響', () => {
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], 0);
+    expect(got?.videoId).toBe('n1');
+  });
+
+  it('視窗上限與未處理上限同時生效時取較嚴格者', () => {
+    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0, new Set(['n2']));
+    expect(got).toBeNull();
+  });
+});
+
+describe('關鍵字回饋訊息片段', () => {
+  it('「全部被關鍵字篩除」與「目前沒有新影片」產生不同字串', () => {
+    const filtered = describeKeywordFilteredRound(12);
+    expect(filtered).not.toContain('目前沒有新影片');
+    expect(filtered).toContain('12');
+    expect(filtered).toContain('不符合關鍵字設定');
+  });
+
+  it('K 為零時補充片段為空字串 —— 未設關鍵字時既有訊息完全不變', () => {
+    expect(describeKeywordFilteredSuffix(0)).toBe('');
+  });
+
+  it('K 大於零時補充片段可附加於「發現 N 部新影片」之後', () => {
+    // N 只計入實際建立任務數：命中 2 部但 1 部因直播跳過時 N 為 1、K 不含該部
+    const n = 1;
+    const msg = `🔔 發現 ${n} 部新影片，已優先加入下載佇列！` + describeKeywordFilteredSuffix(5);
+    expect(msg).toContain('發現 1 部新影片');
+    expect(msg).toContain('另有 5 部');
+    expect(msg).not.toContain('目前沒有新影片');
+  });
+
+  it('片段不含失敗頻道提示 —— 由 App.vue 與既有片段組裝', () => {
+    expect(describeKeywordFilteredRound(3)).not.toContain('無法連線');
+    expect(describeKeywordFilteredSuffix(3)).not.toContain('無法連線');
+  });
+
+  it('單頻道全部未命中時有專用提示，不退回「沒有新影片」', () => {
+    const msg = describeChannelKeywordMiss('測試頻道', 3);
+    expect(msg).toContain('測試頻道');
+    expect(msg).toContain('3');
+    expect(msg).not.toContain('目前沒有新影片');
+  });
+});
+
+describe('conservativeAnchor —— 還原時取較舊者', () => {
+  it('備份錨點較新時保留本機值', () => {
+    expect(conservativeAnchor(OLDER, NEWER)).toBe(OLDER);
+  });
+
+  it('備份錨點較舊時採用備份值', () => {
+    expect(conservativeAnchor(NEWER, OLDER)).toBe(OLDER);
+  });
+
+  it('任一方缺值時採用另一方', () => {
+    expect(conservativeAnchor(undefined, NEWER)).toBe(NEWER);
+    expect(conservativeAnchor(NEWER, undefined)).toBe(NEWER);
+    expect(conservativeAnchor(0, NEWER)).toBe(NEWER);
+  });
+
+  it('兩方皆無時維持未初始化，不以當下時間建立錨點', () => {
+    expect(conservativeAnchor(undefined, undefined)).toBeUndefined();
+    expect(conservativeAnchor(0, 0)).toBeUndefined();
   });
 });

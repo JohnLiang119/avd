@@ -851,6 +851,18 @@
               <div style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
                 {{ channel.lastVideoTitle ? '最新: ' + channel.lastVideoTitle : '等待新片比對中...' }}
               </div>
+              <!-- 關鍵字入口：只顯示狀態與數量，完整內容留在對話框，維持雙行版面 -->
+              <van-button
+                size="mini"
+                :type="channel.keywords && channel.keywords.length ? 'primary' : 'default'"
+                plain
+                round
+                title="設定此頻道的標題關鍵字篩選"
+                @click="openKeywordEditor(channel)"
+                style="padding: 0 8px; height: 20px; font-size: 10px; flex-shrink: 0;"
+              >
+                {{ keywordEntryLabel(channel) }}
+              </van-button>
               <van-button 
                 size="mini" 
                 type="warning" 
@@ -865,6 +877,74 @@
               </van-button>
             </div>
           </div>
+        </div>
+      </div>
+    </van-dialog>
+
+
+    <!-- 頻道標題關鍵字編輯（草稿式：確認才寫回訂閱，取消不影響） -->
+    <van-dialog
+      v-model:show="showKeywordDialog"
+      :title="`🔎 ${keywordEditingChannelTitle} 的關鍵字`"
+      show-cancel-button
+      confirm-button-text="確認"
+      cancel-button-text="取消"
+      :before-close="onKeywordDialogBeforeClose"
+    >
+      <div style="padding: 14px 16px; max-height: 60vh; overflow-y: auto;">
+        <p style="font-size: 12px; color: #64748b; line-height: 1.6; margin: 0 0 10px;">
+          只下載<b>標題含有</b>下列任一關鍵字的新影片。未設定任何關鍵字時，維持追蹤該頻道的全部影片。
+        </p>
+        <p style="font-size: 11px; color: #94a3b8; line-height: 1.6; margin: 0 0 12px;">
+          比對忽略英文大小寫、全形半形與繁簡字形差異。<br>
+          逗號（<code>,</code> 或 <code>，</code>）是<b>分隔符</b>，不可作為關鍵字內容；
+          每個頻道最多 {{ KEYWORD_MAX_COUNT }} 個關鍵字，單項最長 {{ KEYWORD_MAX_LENGTH }} 字元。
+        </p>
+
+        <van-field
+          v-model="keywordInput"
+          placeholder="輸入關鍵字後按 Enter 或逗號新增"
+          clearable
+          style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px;"
+          @keyup.enter="commitKeywordInput"
+          @update:model-value="(v: string) => { if (/[,，]/.test(v)) commitKeywordInput(); }"
+        />
+
+        <div v-if="keywordRejections.length > 0" style="margin-top: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px;">
+          <div v-for="(reason, i) in keywordRejections" :key="i" style="font-size: 11px; color: #b91c1c; line-height: 1.6;">
+            ⚠️ {{ reason }}
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin: 14px 0 6px;">
+          <span style="font-size: 12px; font-weight: 600; color: #475569;">
+            已設定 ({{ keywordDraft.length }}/{{ KEYWORD_MAX_COUNT }})
+          </span>
+          <span
+            v-if="keywordDraft.length > 0"
+            style="font-size: 12px; color: #ef4444; cursor: pointer;"
+            @click="clearKeywordDraft"
+          >
+            全部清空
+          </span>
+        </div>
+
+        <div v-if="keywordDraft.length === 0" style="font-size: 12px; color: #94a3b8; text-align: center; padding: 14px 0; background: #f8fafc; border-radius: 8px;">
+          尚未設定關鍵字 —— 目前追蹤此頻道的全部影片。
+        </div>
+        <div v-else style="display: flex; flex-wrap: wrap; gap: 6px;">
+          <van-tag
+            v-for="(kw, i) in keywordDraft"
+            :key="kw"
+            type="primary"
+            plain
+            closeable
+            size="medium"
+            style="font-size: 12px; padding: 4px 8px;"
+            @close="removeKeywordAt(i)"
+          >
+            {{ kw }}
+          </van-tag>
         </div>
       </div>
     </van-dialog>
@@ -924,6 +1004,15 @@ import {
   selectNewVideos,
   nextChannelBaseline,
   buildChannelVideoTask,
+  normalizeChannelKeywords,
+  channelKeywords,
+  partitionByKeywords,
+  describeKeywordFilteredRound,
+  describeKeywordFilteredSuffix,
+  describeChannelKeywordMiss,
+  conservativeAnchor,
+  KEYWORD_MAX_COUNT,
+  KEYWORD_MAX_LENGTH,
   type ChannelAnchor
 } from './composables/useChannelMatching';
 import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
@@ -1341,6 +1430,14 @@ interface MonitoredChannel {
   lastCheckTime?: number;
   lastKnownVideoId?: string;
   lastVideoTitle?: string;
+  /**
+   * 標題關鍵字篩選。空陣列代表無篩選（全量追蹤）。
+   *
+   * 頻道物件有三個建構點（頻道管理彈窗新增、網址列自動加入追蹤、還原匯入）
+   * 加上持久化反序列化，四處皆須經 `normalizeChannelKeywords` 產生此欄位，
+   * 且一律寫入 `[]` 而非留 `undefined`，使後續 UI 與檢查不必反覆處理該形態。
+   */
+  keywords?: string[];
 }
 
 interface ChannelMonitorConfig {
@@ -1354,8 +1451,12 @@ const monitoredChannels = storage.defineSetting<MonitoredChannel[]>('avd_monitor
   deserialize: (raw) => {
     const list = typeof raw === 'string' ? JSON.parse(raw || '[]') : (raw ?? []);
     if (!Array.isArray(list)) return [];
-    // 向下相容：舊資料只有 lastCheckTime
-    return list.map((c: any) => ({ ...c, lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0 }));
+    // 向下相容：舊資料只有 lastCheckTime，且不含 keywords 欄位
+    return list.map((c: any) => ({
+      ...c,
+      lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0,
+      keywords: normalizeChannelKeywords(c?.keywords).keywords,
+    }));
   },
 });
 
@@ -1431,7 +1532,9 @@ const addManualChannel = async () => {
       lastPublishedTime: latestPubTime || Date.now(),
       lastCheckTime: Date.now(),
       lastKnownVideoId: latestVid,
-      lastVideoTitle: latestTitle
+      lastVideoTitle: latestTitle,
+      // 一律寫入 []（而非留 undefined），使後續 UI 與檢查不必處理該形態
+      keywords: []
     });
 
     manualChannelInput.value = '';
@@ -1458,6 +1561,93 @@ const clearAllChannels = () => {
     showToast('已清空追蹤清單');
   }).catch(() => {});
 };
+
+// ---- 頻道標題關鍵字編輯（草稿式） ----
+//
+// 草稿與訂閱分離：編輯期間只改 keywordDraft，按「確認」才寫回頻道物件。
+// 這讓「取消」有明確語意。註：useStorage 的 watch 已是 { deep: true }，
+// 原地修改 keywords 陣列一樣會持久化，因此草稿式並非持久化的必要條件，
+// 純粹是編輯語意的選擇 —— 不需為此額外替換整個頻道物件。
+const showKeywordDialog = ref(false);
+const keywordEditingChannelId = ref('');
+const keywordEditingChannelTitle = ref('');
+const keywordDraft = ref<string[]>([]);
+const keywordInput = ref('');
+const keywordRejections = ref<string[]>([]);
+
+const openKeywordEditor = (channel: MonitoredChannel) => {
+  keywordEditingChannelId.value = channel.channelId;
+  keywordEditingChannelTitle.value = channel.title;
+  keywordDraft.value = channelKeywords(channel);
+  keywordInput.value = '';
+  keywordRejections.value = [];
+  showKeywordDialog.value = true;
+};
+
+/**
+ * 把輸入框內容併入草稿。Enter 與逗號（半形 `,`／全形 `，`）皆為分隔符。
+ *
+ * 正規化與上限檢查全交由 normalizeChannelKeywords，UI 只負責顯示它回傳的
+ * 拒絕原因 —— 超限一律拒絕並提示，不靜默截斷。
+ */
+const commitKeywordInput = (): boolean => {
+  const raw = keywordInput.value;
+  if (!raw.trim()) {
+    keywordRejections.value = [];
+    return true;
+  }
+  const merged = [...keywordDraft.value, ...raw.split(/[,，]/)];
+  const { keywords, rejections } = normalizeChannelKeywords(merged);
+  keywordDraft.value = keywords;
+  keywordRejections.value = rejections;
+  keywordInput.value = '';
+  return rejections.length === 0;
+};
+
+const removeKeywordAt = (index: number) => {
+  keywordDraft.value = keywordDraft.value.filter((_, i) => i !== index);
+  keywordRejections.value = [];
+};
+
+const clearKeywordDraft = () => {
+  keywordDraft.value = [];
+  keywordInput.value = '';
+  keywordRejections.value = [];
+};
+
+/**
+ * 對話框關閉前的守門。
+ *
+ * 走 before-close 而非 @confirm：van-dialog 的確認鈕會無條件關閉，
+ * 若在 @confirm 內發現超限而想留住使用者，對話框早已關掉、拒絕原因
+ * 也就看不到了 —— 那正是「靜默截斷」的另一種形式。
+ */
+const onKeywordDialogBeforeClose = (action: string): boolean => {
+  // 取消：草稿直接丟棄，訂閱不受影響
+  if (action !== 'confirm') return true;
+
+  // 先把輸入框殘留文字併入，避免使用者打完字直接按確認而遺失該項
+  if (!commitKeywordInput()) {
+    // 有項目被拒絕：留在對話框讓使用者看見原因，不靜默套用
+    return false;
+  }
+
+  const target = monitoredChannels.value.find(c => c.channelId === keywordEditingChannelId.value);
+  if (target) {
+    target.keywords = normalizeChannelKeywords(keywordDraft.value).keywords;
+    showToast(target.keywords.length
+      ? `已設定 ${target.keywords.length} 個關鍵字`
+      : '已清空關鍵字，恢復追蹤全部影片');
+  }
+  return true;
+};
+
+/** 頻道卡片上的關鍵字入口文案。 */
+const keywordEntryLabel = (channel: MonitoredChannel): string => {
+  const count = channel.keywords ? channel.keywords.length : 0;
+  return count > 0 ? `關鍵字 ${count}` : '全部影片';
+};
+
 
 // 頻道本地與雲端備份/還原功能
 const channelFileInputRef = ref<HTMLInputElement | null>(null);
@@ -1531,40 +1721,63 @@ const restoreActions = [
   { name: '覆蓋現有', subname: '以備份檔完全取代現有清單', color: '#ee0a24' }
 ];
 
+/**
+ * 由備份項目建構頻道物件。覆蓋與合併兩條還原路徑共用，確保關鍵字
+ * 正規化只有一處實作 —— 缺少欄位的舊版備份、含非字串／空白／重複值的
+ * 備份，皆在此收斂為正規化後的陣列。
+ *
+ * @param anchor 已由 conservativeAnchor 決定的時間錨點；`undefined`
+ *   代表兩方皆無有效錨點，此時**不得**以當下時間建立錨點 —— 連
+ *   `lastCheckTime` 也必須留空，否則 `channelBaseline` 的向下相容鏈
+ *   （`lastPublishedTime || lastCheckTime || 0`）會讓污染從該欄位復活。
+ */
+const buildRestoredChannel = (c: any, anchor?: number): MonitoredChannel => ({
+  channelId: c.channelId,
+  title: c.title || c.channelId,
+  thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
+  enabled: c.enabled !== false,
+  lastPublishedTime: anchor,
+  lastCheckTime: anchor,
+  lastKnownVideoId: c.lastKnownVideoId || '',
+  lastVideoTitle: c.lastVideoTitle || '',
+  keywords: normalizeChannelKeywords(c?.keywords).keywords,
+});
+
+/** 備份項目中的時間錨點（沿用既有的向下相容鏈）。 */
+const backupAnchorOf = (c: any): number | undefined =>
+  c?.lastPublishedTime || c?.lastCheckTime || undefined;
+
 const onRestoreActionSelect = (action: any) => {
   const validChannels = restoreIncomingChannels.value;
   if (action.name === '覆蓋現有') {
-    // 覆蓋
-    monitoredChannels.value = validChannels.map(c => ({
-      channelId: c.channelId,
-      title: c.title || c.channelId,
-      thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
-      enabled: c.enabled !== false,
-      lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || Date.now(),
-      lastCheckTime: c.lastCheckTime || Date.now(),
-      lastKnownVideoId: c.lastKnownVideoId || '',
-      lastVideoTitle: c.lastVideoTitle || ''
-    }));
+    // 覆蓋：錨點取本機與備份中較舊者。
+    // 關鍵字改變了錨點的語意（推進不再只代表「已下載」，也代表「已略過」），
+    // 直接採用備份中較新的錨點會使未設關鍵字的本機裝置永久漏掉那批影片。
+    const localAnchors = new Map(
+      monitoredChannels.value.map(c => [c.channelId, c.lastPublishedTime || c.lastCheckTime || undefined])
+    );
+    monitoredChannels.value = validChannels.map(c =>
+      buildRestoredChannel(c, conservativeAnchor(localAnchors.get(c.channelId), backupAnchorOf(c)))
+    );
     showToast(`已覆蓋還原 ${monitoredChannels.value.length} 個頻道！`);
   } else if (action.name === '合併現有') {
-    // 合併
+    // 合併：新增頻道採用備份錨點；已存在的頻道維持本機錨點與關鍵字不變
     let added = 0;
+    let keptLocalKeywords = 0;
     validChannels.forEach(c => {
       if (!monitoredChannels.value.some(existing => existing.channelId === c.channelId)) {
-        monitoredChannels.value.push({
-          channelId: c.channelId,
-          title: c.title || c.channelId,
-          thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
-          enabled: c.enabled !== false,
-          lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || Date.now(),
-          lastCheckTime: c.lastCheckTime || Date.now(),
-          lastKnownVideoId: c.lastKnownVideoId || '',
-          lastVideoTitle: c.lastVideoTitle || ''
-        });
+        monitoredChannels.value.push(buildRestoredChannel(c, backupAnchorOf(c)));
         added++;
+      } else if (normalizeChannelKeywords(c?.keywords).keywords.length > 0) {
+        // 依既有去重規則保留本機頻道，其關鍵字不得被匯入值覆寫或合併；
+        // 但必須告知使用者，否則會誤以為關鍵字已同步
+        keptLocalKeywords++;
       }
     });
-    showToast(`合併完成！新增了 ${added} 個頻道 (現共 ${monitoredChannels.value.length} 個)`);
+    const keptHint = keptLocalKeywords > 0
+      ? `（${keptLocalKeywords} 個頻道已存在，保留本機關鍵字設定、未套用匯入值）`
+      : '';
+    showToast(`合併完成！新增了 ${added} 個頻道 (現共 ${monitoredChannels.value.length} 個)${keptHint}`);
   }
   showRestoreSheet.value = false;
 };
@@ -1630,6 +1843,9 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
   let newVideoCount = 0;
+  // 符合既有新片條件、但未命中關鍵字而未建立任務的影片數（K）。
+  // 與 newVideoCount（N）互斥：命中但因直播／狀態未知而未處理者兩者皆不計入。
+  let keywordFilteredCount = 0;
   let fallbackVideoCount = 0;
   let failedCount = 0;
   const failedLevels: ChannelRssErrorLevel[] = [];
@@ -1669,11 +1885,21 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       // 本次未被實際處理的影片（因直播而跳過，或直播狀態查詢失敗而無從判定）。
       // 時間錨點不得越過這些影片，否則它們日後即使可正常下載也永遠不會再被判定為新片
       // —— 排程直播的 publishedTime 是「建立時間」，在直播結束轉為存檔後並不會改變。
+      //
+      // 未命中關鍵字的影片**不列入**此集合：那是使用者明確要求永久略過的項目，
+      // 錨點必須能越過，否則每輪都會重新比對整個 Feed。
       const unhandledVideoIds = new Set<string>();
 
+      // 關鍵字篩選必須先於直播狀態驗證 —— 未命中的影片不得觸發任何直播查詢
+      // 或額外的影片資訊擷取。fetchYouTubeRss 已把官方 RSS 與 yt-dlp 備援
+      // 併為一條帶 source 標記的陣列，因此兩種來源自動共用這條篩選路徑。
+      const newVideos = selectNewVideos(videos, channelLastPub, tasks.value);
+      const { matched, missed } = partitionByKeywords(newVideos, channelKeywords(channel));
+      keywordFilteredCount += missed.length;
+
       // reverse() 使較舊的影片先進入佇列，較新者最後 unshift 而位於最前。
-      // selectNewVideos 回傳新陣列，reverse 不會影響 videos 的順序。
-      for (const vid of selectNewVideos(videos, channelLastPub, tasks.value).reverse()) {
+      // matched 為 partitionByKeywords 產生的新陣列，reverse 不影響 videos 的順序。
+      for (const vid of matched.reverse()) {
         const liveStatus = await DownloadService.checkVideoLiveStatus(vid.url);
         if (liveStatus !== 'not_live') {
           // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
@@ -1751,11 +1977,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
     if (newVideoCount > 0) {
       const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
-      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！（⚠️ ${describeEarlyStop(skippedChannelCount)}）`);
+      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）`);
       processQueue();
     } else if (isManual) {
+      const filteredHint = keywordFilteredCount > 0
+        ? `${describeKeywordFilteredRound(keywordFilteredCount)}　`
+        : '';
       showToast({
-        message: `⚠️ ${describeEarlyStop(skippedChannelCount)}`,
+        message: `${filteredHint}⚠️ ${describeEarlyStop(skippedChannelCount)}`,
         duration: 5000,
         closeOnClick: true
       });
@@ -1775,19 +2004,26 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     // 有新影片但部分失敗
     const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
     const failHint = `⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}`;
-    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！（${failHint}）`);
+    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）`);
     processQueue();
   } else if (newVideoCount > 0) {
     // 全部成功且有新影片
     const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 包含 ${fallbackVideoCount} 部 yt-dlp 備援抓取)` : ' [官方 RSS]';
-    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！`);
+    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}`);
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
-    showToast(`已檢查完成，目前沒有新影片（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）`);
+    // K 大於零時 MUST NOT 顯示「目前沒有新影片」—— 那正是本能力要防止的假陽性
+    const noNewHint = keywordFilteredCount > 0
+      ? describeKeywordFilteredRound(keywordFilteredCount)
+      : '已檢查完成，目前沒有新影片';
+    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）`);
   } else if (isManual) {
-    // 全部成功且沒新片
-    showToast('已檢查完成 [官方 RSS]，目前沒有新影片');
+    // 全部成功且沒新片。K 大於零代表「有新片但被自己的關鍵字篩掉」，
+    // 與「真的沒有新片」是兩回事，MUST 以不同文案區分。
+    showToast(keywordFilteredCount > 0
+      ? describeKeywordFilteredRound(keywordFilteredCount)
+      : '已檢查完成 [官方 RSS]，目前沒有新影片');
   }
 };
 
@@ -1803,7 +2039,15 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
       return;
     }
 
-    const latestVideo = videos[0];
+    // 模擬會實際建立下載任務，若繞過關鍵字會讓使用者誤認正式排程也不受篩選控制。
+    // 取最新的「命中」影片；無命中時顯示專用提示且不建立任何測試任務。
+    const { matched, missed } = partitionByKeywords(videos, channelKeywords(channel));
+    if (matched.length === 0) {
+      showToast(describeChannelKeywordMiss(channel.title, missed.length));
+      return;
+    }
+
+    const latestVideo = matched[0];
     const pubTimeStr = formatPublishTime(latestVideo.publishedTime) || formatPublishTime(Date.now());
     const sourceLabel = latestVideo.source === 'fallback' ? '【測試模式 (yt-dlp 備援)】' : '【測試模式 (RSS)】';
     const testTitle = `[測試模擬] ${buildTaskDisplayTitle(latestVideo.title, channel.title, pubTimeStr)}`;
@@ -1847,6 +2091,9 @@ const simulateGlobalNewVideo = async () => {
 
   showLoadingToast({ message: `正在抓取 ${enabledChannels.length} 個頻道最新 2 集影片...`, forbidClick: true });
   let totalAdded = 0;
+  // 因關鍵字全數未命中而未建立任務的頻道數與影片數
+  let keywordMissChannels = 0;
+  let keywordMissVideos = 0;
 
   try {
     for (const channel of enabledChannels) {
@@ -1856,8 +2103,14 @@ const simulateGlobalNewVideo = async () => {
         });
         if (!videos || videos.length === 0) continue;
 
-        // 取得最新 2 集影片
-        const topVideos = videos.slice(0, 2);
+        // 每頻道最多取最新 2 集「命中關鍵字」的影片；未命中者不建立測試任務
+        const { matched, missed } = partitionByKeywords(videos, channelKeywords(channel));
+        if (matched.length === 0) {
+          keywordMissChannels++;
+          keywordMissVideos += missed.length;
+          continue;
+        }
+        const topVideos = matched.slice(0, 2);
         // 按時間正序反轉插入，讓最新的在最頂部
         for (const vid of topVideos.reverse()) {
           const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
@@ -1897,6 +2150,9 @@ const simulateGlobalNewVideo = async () => {
       showToast(`🔔 成功！已將各頻道最新影片（共 ${totalAdded} 部）插隊至最前面！`);
       showChannelModal.value = false;
       processQueue();
+    } else if (keywordMissChannels > 0) {
+      // 有取到影片但全被關鍵字篩掉 —— MUST NOT 混為「取不到影片」
+      showToast(`已檢查 ${keywordMissChannels} 個頻道共 ${keywordMissVideos} 部影片，但都不符合關鍵字設定，未建立測試任務`);
     } else {
       showToast('未能取得任何頻道的影片');
     }
@@ -2417,7 +2673,8 @@ const addTask = async (urlToAdd: string) => {
             title: channelInfo.title || urlToAdd,
             thumbnail: channelInfo.thumbnail || 'https://www.youtube.com/favicon.ico',
             enabled: true,
-            lastCheckTime: Date.now()
+            lastCheckTime: Date.now(),
+            keywords: []
           });
           // 設定項的變更由 useStorage 自動持久化
           showToast('已加入自動追蹤清單');
