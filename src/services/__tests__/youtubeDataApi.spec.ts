@@ -425,6 +425,16 @@ describe('當日用量估算', () => {
     expect(currentApiUnitsUsed(undefined, NOON)).toBe(0);
   });
 
+  it('重啟後以持久化的狀態續計，不從零開始', () => {
+    // 模擬重啟：從儲存讀回 { used, resetAt } 後再累計一次
+    const persisted = { used: 480, resetAt: nextQuotaResetTime(NOON) };
+    const afterRestart = addApiUnits(persisted, 1, NOON + 3600000);
+    expect(afterRestart.used).toBe(481);
+    expect(afterRestart.resetAt).toBe(persisted.resetAt);
+    // 顯示端同樣要讀到續計值，而非 0
+    expect(currentApiUnitsUsed(persisted, NOON + 3600000)).toBe(480);
+  });
+
   it('每日上限為 10000', () => {
     expect(DAILY_QUOTA_UNITS).toBe(10000);
   });

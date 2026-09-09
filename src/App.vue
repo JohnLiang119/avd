@@ -1019,7 +1019,8 @@
           </div>
           <div style="font-size: 10px; color: #94a3b8; line-height: 1.6; margin-top: 4px;">
             由本機自行累計，非官方數字。同一把金鑰用於多台裝置、或同一專案被其他工具使用時，實際用量會高於此值。
-            權威數字請見 Google Cloud Console 的「配額和系統限制」。太平洋時間午夜歸零。
+            權威數字請見 Google Cloud Console 的「配額和系統限制」。<br>
+            每天 <b>{{ apiQuotaResetLocalTime }}</b> 歸零（Google 以太平洋時間午夜重置，此處已換算為當地時間）。
           </div>
         </div>
 
@@ -1663,6 +1664,18 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
 // 與關鍵字編輯器同形式：編輯期間只改草稿，按「儲存」才寫回設定，
 // 「取消」有明確語意。金鑰預設以 password 型態顯示 —— 規格要求
 // MUST NOT 預設以明文完整顯示，使用者可自行切換為可見。
+/**
+ * 配額歸零時點的**當地**時間字串。
+ *
+ * Google 的配額於太平洋時間午夜重置，換算到其他時區往往落在白天 ——
+ * 台灣是下午三點。只寫「太平洋時間午夜」對使用者毫無意義，而且數字在
+ * 下午突然歸零看起來就是 bug。故直接顯示當地時鐘時間。
+ */
+const apiQuotaResetLocalTime = computed(() =>
+  new Date(monitorConfig.value.apiUnitsResetAt || nextQuotaResetTime(Date.now()))
+    .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+);
+
 /** 當日已用單位（跨日後自動回 0，不殘留昨日數字）。 */
 const apiUnitsUsedToday = computed(() => currentApiUnitsUsed(
   { used: monitorConfig.value.apiUnitsUsedToday || 0, resetAt: monitorConfig.value.apiUnitsResetAt || 0 },
