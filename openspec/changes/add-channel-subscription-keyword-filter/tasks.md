@@ -81,5 +81,8 @@
 - [x] 6.1 在第 5 節全部驗證完成後建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
   - commit `<pending>`：功能與測試（`useChannelMatching.ts`、其 spec、`App.vue`）與本檔進度。
   - 依使用者指示於 5.6～5.12 人工驗證前先行提交與進版。
-- [ ] 6.2 將 avd 下一版版號同步更新至 `package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處版號一致
-- [ ] 6.3 重新執行五項建置驗證 —— `npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check --manifest-path src-tauri/Cargo.toml`、`gradlew :app:compileDebugJavaWithJavac` —— 全數通過後建立獨立的版本進版 commit（與 6.1 分開，保留可單獨 revert 的空間），確認發布腳本的預設訊息版號與 `package.json` 一致；發布腳本仍由使用者手動執行，進版後主動告知使用者可以發布
+- [x] 6.2 將 avd 下一版版號同步更新至 `package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處版號一致
+  - 七處已跨檔比對一致：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`cargo update --workspace --offline`）、`android/app/build.gradle`（`versionCode` 121→122、`versionName` 1.0.85）。
+  - `avd_s/publish_all.ps1` 的預設 `$Message` 已換為描述本次改動且版號正確的新文字；該檔屬工作區 repo，另行提交。
+- [x] 6.3 重新執行五項建置驗證 —— `npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check --manifest-path src-tauri/Cargo.toml`、`gradlew :app:compileDebugJavaWithJavac` —— 全數通過後建立獨立的版本進版 commit（與 6.1 分開，保留可單獨 revert 的空間），確認發布腳本的預設訊息版號與 `package.json` 一致；發布腳本仍由使用者手動執行，進版後主動告知使用者可以發布
+  - 1.0.85 下五項驗證全數通過：`npm run build`、`npm test`（253）、`vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac`。
