@@ -103,7 +103,18 @@
 
 ## 8. 提交與版本進版
 
-- [ ] 8.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
-- [ ] 8.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明
-- [ ] 8.3 【發布說明須含 BREAKING 提示】此版移除 RSS 與 yt-dlp 備援，**未設定 API 金鑰者頻道追蹤將停止運作**。發布說明 MUST 明確告知此行為變更與其解法；完成方式：`publish_all.ps1` 的預設 `$Message` 含該提示
-- [ ] 8.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 8.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+- [x] 8.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
+- [x] 8.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明
+
+  **已同步至 v1.0.91**（`versionCode` 127 → 128）。`avd_s/publish_all.ps1` 的
+  預設 `$Message` 亦已更新並內嵌 `(v1.0.91)`；該檔屬 `C:\JohnLiang` 工作區
+  repo（非 avd repo），故獨立提交。
+- [x] 8.3 【發布說明須含 BREAKING 提示】此版移除 RSS 與 yt-dlp 備援，**未設定 API 金鑰者頻道追蹤將停止運作**。發布說明 MUST 明確告知此行為變更與其解法；完成方式：`publish_all.ps1` 的預設 `$Message` 含該提示
+- [x] 8.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 8.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+
+  **commit 序列：**
+  - `72280fc` feat!: 頻道追蹤收斂為 YouTube Data API 單一通道（avd repo，功能修正）
+  - `5186347` chore: avd 進版至 1.0.91（avd repo，版號七處）
+  - `67c40e4` chore: publish_all.ps1 預設發布說明更新至 v1.0.91（工作區 repo）
+
+  發布腳本未執行 —— 依規範由使用者手動執行。
