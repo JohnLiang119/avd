@@ -175,5 +175,7 @@ Requirement 提出 delta。本 change 的第 4 節會改造它才剛修正的錨
 - [x] 7.2 【已於 3.4 完成】候選視窗規則的 MODIFIED 已寫入本 change 的 `specs/channel-auto-monitor/spec.md`。原任務只打算補上括號內的來源列舉，但 3.4 發現該規則的判定條件本身有誤（會使 RSS 錨點永久停滯），故整條規則已改寫，列舉降為說明性文字。`openspec validate add-youtube-data-api-channel --strict` 通過
   - 歸檔順序限制不變：本條 delta 以 keyword change 歸檔後的文字為基底，**須待其歸檔後才可歸檔本 change**。
 
-- [ ] 7.3 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處一致
-- [ ] 7.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 7.1 分開，保留可單獨 revert 的空間）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 該腳本的版號防呆在啟動時讀取 `package.json` 與 `$Message`，而打包與 `git add .` 發生在數十秒後，工作區若在其間變動會產生內容與訊息不符的發布（v1.0.85 即因此作廢）。工作區乾淨且已推送後，才由使用者手動執行發布腳本
+- [x] 7.3 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處一致
+  - 七處同步至 1.0.89（`versionCode` 126），跨檔比對一致、無 1.0.88 殘留；`avd_s/publish_all.ps1` 的預設發布說明已更新。
+- [x] 7.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 7.1 分開，保留可單獨 revert 的空間）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 該腳本的版號防呆在啟動時讀取 `package.json` 與 `$Message`，而打包與 `git add .` 發生在數十秒後，工作區若在其間變動會產生內容與訊息不符的發布（v1.0.85 即因此作廢）。工作區乾淨且已推送後，才由使用者手動執行發布腳本
+  - 1.0.89 下五項驗證全數通過（311 個 JS 測試 + 5 個 Rust 測試）。進版 commit 與 7.1 的功能 commit 分開。
