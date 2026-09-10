@@ -743,35 +743,91 @@
     <!-- 頻道自動追蹤管理彈窗 -->
     <van-dialog v-model:show="showChannelModal" title="📡 頻道自動追蹤排程" confirm-button-text="關閉" :show-cancel-button="false">
       <div style="padding: 16px; max-height: 70vh; overflow-y: auto;">
+        <!--
+          追蹤停擺的持續狀態指示。移除 RSS 與 yt-dlp 備援後，API 不可用即等於
+          追蹤完全停止 —— 一則飄過的 Toast 不足以讓使用者察覺，錯過那一則可能
+          數日後才發現完全沒有新片。此處常駐於頻道管理彈窗頂部，恢復後自動消失。
+        -->
+        <div
+          v-if="trackingNotice"
+          style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;"
+        >
+          <div style="font-size: 12.5px; font-weight: 700; color: #b91c1c; margin-bottom: 4px;">
+            {{ trackingNotice.title }}
+          </div>
+          <div style="font-size: 11px; color: #7f1d1d; line-height: 1.5;">
+            {{ trackingNotice.detail }}
+          </div>
+        </div>
+
+        <!--
+          頻道數增加使既有間隔低於新下限：規格要求 MUST 於頻道管理介面告知，
+          MUST NOT 在使用者未察覺的情況下持續以會耗盡配額的頻率檢查。
+        -->
+        <div
+          v-if="intervalBelowFloor"
+          style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;"
+        >
+          <div style="font-size: 12.5px; font-weight: 700; color: #b45309; margin-bottom: 4px;">
+            ⚠️ 檢查間隔已低於安全下限
+          </div>
+          <div style="font-size: 11px; color: #92400e; line-height: 1.5;">
+            目前設定 {{ monitorConfig.checkIntervalMinutes }} 分鐘。{{ intervalFloorReason }}
+            請於下方調整，否則每日配額可能提前耗盡而使追蹤停止。
+          </div>
+        </div>
+
         <!-- 頂部控制面板 -->
         <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 13px; font-weight: 600; color: #1e293b;">每小時自動檢查新片</span>
+            <span style="font-size: 13px; font-weight: 600; color: #1e293b;">定時自動檢查新片</span>
             <van-switch v-model="monitorConfig.autoCheckEnabled" size="20px" />
           </div>
           <div style="font-size: 11px; color: #64748b; margin-bottom: 10px;">
             上次檢查: {{ monitorConfig.lastGlobalCheckTime ? new Date(monitorConfig.lastGlobalCheckTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '尚未檢查' }}
           </div>
 
-          <!-- 備援機制開關 (預設關閉) -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
-            <div>
-              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">啟用 yt-dlp 備援機制</div>
-              <div style="font-size: 10px; color: #94a3b8;">官方 RSS 連線異常時切換首頁解析備援（預設關閉）</div>
+          <!-- 檢查間隔。下限依頻道數與每日配額推導，低於下限一律拒絕而非靜默接受 -->
+          <div style="margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <div style="font-size: 12px; font-weight: 500; color: #1e293b; flex-shrink: 0;">檢查間隔（分鐘）</div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <van-field
+                  v-model="checkIntervalDraft"
+                  type="digit"
+                  :placeholder="String(intervalFloorMinutes)"
+                  style="background: #f1f5f9; border-radius: 6px; font-size: 12px; padding: 4px 8px; width: 76px;"
+                />
+                <van-button size="mini" type="primary" plain round @click="applyCheckInterval" style="padding: 0 10px; height: 22px; font-size: 10px;">
+                  套用
+                </van-button>
+              </div>
             </div>
-            <van-switch v-model="monitorConfig.enableYtDlpFallback" size="18px" />
+            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; line-height: 1.5;">
+              {{ intervalFloorReason }}
+            </div>
           </div>
-          <!-- YouTube Data API 金鑰（選填）。未設定時完全維持 RSS → yt-dlp 行為 -->
+
+          <!-- 啟動時是否補做檢查。預設開啟，維持既有行為 -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+            <div style="flex: 1; min-width: 0; margin-right: 8px;">
+              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">啟動時檢查</div>
+              <div style="font-size: 10px; color: #94a3b8;">開啟應用程式時，若距上次檢查已達間隔就補做一次（預設開啟）</div>
+            </div>
+            <van-switch v-model="checkOnStartupEnabled" size="18px" />
+          </div>
+
+          <!-- YouTube Data API 金鑰：頻道追蹤的必要條件，未設定即停止追蹤 -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
             <div style="flex: 1; min-width: 0; margin-right: 8px;">
               <div style="font-size: 12px; font-weight: 500; color: #1e293b;">
                 YouTube Data API 金鑰
                 <span
-                  :style="{ fontSize: '10px', marginLeft: '6px', color: youtubeApiKey.trim() ? '#16a34a' : '#94a3b8' }"
+                  :style="{ fontSize: '10px', marginLeft: '6px', color: youtubeApiKey.trim() ? '#16a34a' : '#dc2626' }"
                 >{{ youtubeApiKey.trim() ? '● 已設定' : '○ 未設定' }}</span>
               </div>
               <div style="font-size: 10px; color: #94a3b8;">
-                設定後改以官方 API 為第一通道，最穩定；未設定則維持 RSS → yt-dlp（選填）
+                頻道追蹤的唯一通道，未設定即停止追蹤（下載與播放清單解析不受影響）
               </div>
             </div>
             <van-button size="mini" plain round @click="openApiKeyEditor" style="padding: 0 10px; height: 22px; font-size: 10px; flex-shrink: 0;">
@@ -977,13 +1033,13 @@
     >
       <div style="padding: 14px 16px; max-height: 60vh; overflow-y: auto;">
         <p style="font-size: 12px; color: #64748b; line-height: 1.6; margin: 0 0 10px;">
-          設定金鑰後，頻道追蹤改以 <b>YouTube Data API</b> 為第一通道 —— 官方 RSS 端點會回傳隨機的假 404，API 則有服務水準保證，且回傳精確發布時間與更寬的候選範圍。
+          頻道追蹤只有 <b>YouTube Data API</b> 一條通道 —— 未設定有效金鑰時追蹤即停止運作。API 提供結構化的發布時間與直播狀態、每輪 50 筆候選視窗，以及官方服務水準。
         </p>
         <p style="font-size: 11px; color: #94a3b8; line-height: 1.7; margin: 0 0 12px;">
           <b>免費，不需信用卡</b>：每個 Google Cloud 專案每日 10,000 單位額度，本應用程式的用量約 5%。<br>
           需自行於 Google Cloud Console 建立專案、啟用「YouTube Data API v3」並產生 API 金鑰。<br>
           金鑰只存在本機，<b>不會</b>寫入頻道備份，也不會出現在錯誤日誌中。<br>
-          留空即停用 API 通道，回到 RSS → yt-dlp。
+          留空即停止頻道追蹤；影片下載、播放清單解析與頻道網址解析不受影響。
         </p>
 
         <van-field
@@ -1026,7 +1082,7 @@
 
         <div v-if="monitorConfig.apiQuotaSuppressedUntil && Date.now() < monitorConfig.apiQuotaSuppressedUntil"
              style="margin-top: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400e; line-height: 1.6;">
-          ⚠️ 今日配額已用盡，目前暫時改用官方 RSS。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
+          ⚠️ 今日配額已用盡，頻道追蹤暫停中。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
         </div>
         <div v-else-if="monitorConfig.apiRejectedKeyFingerprint"
              style="margin-top: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #b91c1c; line-height: 1.6;">
@@ -1080,19 +1136,27 @@ import {
 import { buildTaskDisplayTitle } from './services/displayFormat';
 import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
 import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
-import { classifyChannelRssError, describeChannelRssFailure, describeEarlyStop, describeDegradedRound, CHANNEL_CHECK_DEGRADE_AFTER_FAILURES, shouldBackoff, describeRateLimit, type ChannelRssErrorLevel } from './services/rateLimit';
+import { isDeviceOfflineError, describeEarlyStop, shouldBackoff, describeRateLimit } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   nextQuotaResetTime,
   apiKeyFingerprint,
-  describeApiQuotaDegraded,
+  channelTrackingStatus,
+  trackingUnavailableStatusOf,
+  describeTrackingStatus,
+  describeMissingKeyCheck,
+  describeApiFetchFailure,
+  describeApiQuotaExhausted,
   describeApiKeyRejected,
+  checkIntervalFloorMinutes,
+  describeCheckIntervalFloor,
   addApiUnits,
   currentApiUnitsUsed,
   DAILY_QUOTA_UNITS,
   type ApiErrorKind,
+  type ChannelTrackingStatus,
 } from './services/youtubeDataApi';
 import {
   channelBaseline,
@@ -1100,7 +1164,6 @@ import {
   selectNewVideos,
   nextChannelBaseline,
   buildChannelVideoTask,
-  channelSourceLabel,
   normalizeChannelKeywords,
   channelKeywords,
   partitionByKeywords,
@@ -1481,17 +1544,23 @@ onMounted(async () => {
     }, 3000);
   }
 
-  // 頻道自動追蹤排程：APP 開啟時比對自上次檢查是否已達週期
+  // 頻道自動追蹤排程：APP 開啟時比對自上次檢查是否已達週期。
+  // `checkOnStartup` 預設為 true，維持既有行為；關閉後啟動不補做，
+  // 但下方的定時檢查照常運作。
   const checkIntervalMs = (monitorConfig.value.checkIntervalMinutes || 60) * 60 * 1000;
   const timeSinceLastCheck = Date.now() - (monitorConfig.value.lastGlobalCheckTime || 0);
-  if (monitorConfig.value.autoCheckEnabled && timeSinceLastCheck >= checkIntervalMs) {
+  const checkOnStartup = monitorConfig.value.checkOnStartup !== false;
+  if (checkOnStartup && monitorConfig.value.autoCheckEnabled && timeSinceLastCheck >= checkIntervalMs) {
     setTimeout(() => {
       checkAllMonitoredChannels(false);
     }, 3000);
   }
 
-  // 每一分鐘背景核對是否已達下一個一小時檢查週期
+  // 每一分鐘背景核對是否已達下一個檢查週期
   setInterval(() => {
+    // 停擺指示的時間節拍：置於 autoCheckEnabled 的判斷之前 ——
+    // 使用者關閉自動檢查時，配額抑制仍須能自行到期而讓指示消失。
+    uiNow.value = Date.now();
     if (!monitorConfig.value.autoCheckEnabled) return;
     const intervalMs = (monitorConfig.value.checkIntervalMinutes || 60) * 60 * 1000;
     const elapsed = Date.now() - (monitorConfig.value.lastGlobalCheckTime || 0);
@@ -1505,7 +1574,9 @@ onMounted(async () => {
     for (const channel of monitoredChannels.value) {
       if (channel.title && channel.title.startsWith('UC') && channel.title.length === 24) {
         try {
-          const realTitle = await DownloadService.fetchChannelTitleFromRss(channel.channelId);
+          const realTitle = await DownloadService.fetchChannelTitle(channel.channelId, {
+            api: buildApiOptions(channel),
+          });
           if (realTitle) {
             channel.title = realTitle;
             console.log(`自動修復頻道標題: ${channel.channelId} -> ${realTitle}`);
@@ -1547,16 +1618,20 @@ interface ChannelMonitorConfig {
   autoCheckEnabled: boolean;
   checkIntervalMinutes: number;
   lastGlobalCheckTime: number;
-  enableYtDlpFallback?: boolean;
+  /**
+   * 應用程式啟動時是否補做一次檢查（距上次檢查已達間隔時）。
+   * 預設 `true` 以維持既有行為 —— 既有使用者升級後不應感到行為改變。
+   */
+  checkOnStartup?: boolean;
   /**
    * API 配額耗盡的抑制解除時點（下一個太平洋時間午夜）。
-   * 此時點之前一律跳過 API 通道直接走 RSS —— 配額耗盡後在重置前的每次
-   * 請求都必然失敗，不抑制的話每個頻道每輪都要白付一次失敗往返。
+   * 此時點之前一律跳過頻道檢查 —— 配額耗盡後在重置前的每次請求都必然
+   * 失敗，不抑制的話每個頻道每輪都要白付一次失敗往返。
    * 必須持久化：app 重啟頻繁，只放記憶體會讓抑制失效而恢復白打。
    */
   apiQuotaSuppressedUntil?: number;
   /**
-   * 被 API 拒絕的金鑰指紋。與當前金鑰指紋相符時跳過 API。
+   * 被 API 拒絕的金鑰指紋。與當前金鑰指紋相符時停止追蹤。
    * 綁定金鑰內容而非時間 —— 無效金鑰不會因時間而變有效，
    * 但「使用者換了金鑰」是明確可偵測的解除條件。存指紋而非金鑰本身。
    */
@@ -1587,11 +1662,13 @@ const monitorConfig = storage.defineSetting<ChannelMonitorConfig>('avd_monitor_c
   autoCheckEnabled: true,
   checkIntervalMinutes: 60,
   lastGlobalCheckTime: 0,
-  enableYtDlpFallback: false,
+  checkOnStartup: true,
 }, {
   deserialize: (raw, defaultValue) => {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw ?? {});
+      // 舊備份可能帶有已移除的 enableYtDlpFallback：規格要求該欄位 MUST 被
+      // 忽略，MUST NOT 因其存在而拒絕匯入。多餘的鍵在此自然被忽略。
       return { ...defaultValue, ...(parsed as object) };
     } catch {
       return defaultValue;
@@ -1606,20 +1683,21 @@ const monitorConfig = storage.defineSetting<ChannelMonitorConfig>('avd_monitor_c
 // 測試失敗來提醒。獨立鍵讓「不得匯出」成為結構性事實。
 const youtubeApiKey = storage.defineSetting('avd_youtube_api_key', '');
 
-// 本輪 API 通道的狀態，供檢查結果回饋使用（每輪開始時重設）
-let apiQuotaDegradedThisRound = false;
+// 本輪 API 通道的狀態，供檢查結果回饋使用（每輪開始時重設）。
+// 名稱刻意是「耗盡」而非「降級」—— 已無備援可降級，配額耗盡即完全停擺。
+let apiQuotaExhaustedThisRound = false;
 let apiKeyRejectedThisRound = false;
 
 /**
- * 產生傳給 `fetchChannelVideos` 的 API 選項。
+ * 產生傳給頻道擷取各函式的 API 選項。
  *
- * 四個呼叫點（檢查迴圈、加入頻道、單頻道模擬、全頻道模擬）共用同一份，
+ * 五個呼叫點（檢查迴圈、直播狀態、加入頻道、名稱修復、模擬測試）共用同一份，
  * 使抑制狀態一致 —— 否則模擬入口會在配額已耗盡時仍逐一白打 API。
- * 金鑰為空時回傳 `undefined`，`fetchChannelVideos` 因此完全不觸碰 API。
+ * 金鑰為空時仍回傳選項（`apiKey` 為空字串），由被呼叫端判定為「未設金鑰」
+ * 而拋出可辨識的停擺錯誤 —— 回傳 undefined 會讓停擺原因在此處就被抹平。
  */
 const buildApiOptions = (channel?: MonitoredChannel) => {
   const apiKey = youtubeApiKey.value.trim();
-  if (!apiKey) return undefined;
 
   return {
     apiKey,
@@ -1648,7 +1726,7 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
         // 配額為每日額度，重置前的每次請求都必然失敗 —— 抑制到下一個
         // 太平洋時間午夜，並持久化以免重啟後恢復白打
         monitorConfig.value.apiQuotaSuppressedUntil = nextQuotaResetTime(Date.now());
-        apiQuotaDegradedThisRound = true;
+        apiQuotaExhaustedThisRound = true;
       } else if (kind === 'key') {
         // 綁定金鑰指紋而非時間：無效金鑰不會因時間而變有效
         monitorConfig.value.apiRejectedKeyFingerprint = apiKeyFingerprint(apiKey);
@@ -1657,6 +1735,109 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
       // 'other'（5xx、網路錯誤）不抑制 —— 那是暫時性狀況，下輪值得再試
     },
   };
+};
+
+// ============================================================================
+// 追蹤停擺的持續狀態指示
+// ============================================================================
+
+/**
+ * 驅動停擺指示的時間戳，每分鐘遞進一次。
+ *
+ * 配額抑制會於太平洋時間午夜自行解除，而 `Date.now()` 不是響應式的 ——
+ * 少了這個節拍，指示會在恢復後仍掛著，直到使用者重開彈窗才消失。
+ */
+const uiNow = ref(Date.now());
+
+/** 目前的追蹤可用狀態。停擺原因三者的解法不同，故不併為布林。 */
+const trackingStatus = computed<ChannelTrackingStatus>(() => channelTrackingStatus({
+  apiKey: youtubeApiKey.value.trim(),
+  now: uiNow.value,
+  quotaSuppressedUntil: monitorConfig.value.apiQuotaSuppressedUntil,
+  rejectedKeyFingerprint: monitorConfig.value.apiRejectedKeyFingerprint,
+}));
+
+/**
+ * 頻道管理彈窗頂部的持續停擺指示；正常運作時為 `null`（不顯示任何東西）。
+ *
+ * 移除備援後 API 不可用即等於追蹤完全停止，一則飄過的 Toast 不足以讓
+ * 使用者察覺 —— 錯過那一則可能數日後才發現完全沒有新片。
+ */
+const trackingNotice = computed(() => describeTrackingStatus(trackingStatus.value, {
+  quotaResetAt: monitorConfig.value.apiQuotaSuppressedUntil,
+}));
+
+// ============================================================================
+// 檢查間隔與其安全下限
+// ============================================================================
+
+/** 啟用中的頻道數 —— 間隔下限與配額估算皆以此為輸入。 */
+const enabledChannelCount = computed(() => monitoredChannels.value.filter(c => c.enabled).length);
+
+/** 目前頻道數下的間隔下限（分鐘）。 */
+const intervalFloorMinutes = computed(() => checkIntervalFloorMinutes(enabledChannelCount.value));
+
+/** 下限的依據說明，直接顯示於設定旁 —— 使用者看得懂為什麼是這個數字。 */
+const intervalFloorReason = computed(() => describeCheckIntervalFloor(enabledChannelCount.value));
+
+/**
+ * 既有間隔是否已低於目前頻道數的下限。
+ *
+ * 使用者在設定短間隔後新增頻道，下限會隨之提高而使既有設定失效 ——
+ * 規格要求此情形 MUST 於頻道管理介面告知，MUST NOT 在使用者未察覺的
+ * 情況下持續以會耗盡配額的頻率檢查。
+ */
+const intervalBelowFloor = computed(
+  () => (monitorConfig.value.checkIntervalMinutes || 0) < intervalFloorMinutes.value
+);
+
+/**
+ * 「啟動時檢查」的開關。
+ *
+ * 以可寫 computed 承接，使 `undefined`（既有使用者的舊設定尚無此欄位）
+ * 一律讀成 `true` —— 預設 MUST 維持既有行為，升級後不應感到行為改變。
+ */
+const checkOnStartupEnabled = computed({
+  get: () => monitorConfig.value.checkOnStartup !== false,
+  set: (v: boolean) => { monitorConfig.value.checkOnStartup = v; },
+});
+
+/** 檢查間隔的編輯草稿（分鐘）。 */
+const checkIntervalDraft = ref(String(monitorConfig.value.checkIntervalMinutes || 60));
+
+watch(() => monitorConfig.value.checkIntervalMinutes, (v) => {
+  checkIntervalDraft.value = String(v || 60);
+});
+
+/**
+ * 套用檢查間隔設定。
+ *
+ * 低於下限時 MUST NOT 靜默接受 —— 那是一個必然耗盡配額的設定，而移除
+ * 備援後配額耗盡等於追蹤完全停止。此處直接拒絕並回退草稿，同時說明下限
+ * 的依據（頻道數與每日配額）。
+ */
+const applyCheckInterval = () => {
+  const parsed = Math.floor(Number(checkIntervalDraft.value));
+  const floor = intervalFloorMinutes.value;
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    checkIntervalDraft.value = String(monitorConfig.value.checkIntervalMinutes || 60);
+    showToast('請輸入正整數的檢查間隔（分鐘）');
+    return;
+  }
+
+  if (parsed < floor) {
+    checkIntervalDraft.value = String(monitorConfig.value.checkIntervalMinutes || 60);
+    showToast({
+      message: `檢查間隔不得低於 ${floor} 分鐘。${intervalFloorReason.value}`,
+      duration: 6000,
+      closeOnClick: true,
+    });
+    return;
+  }
+
+  monitorConfig.value.checkIntervalMinutes = parsed;
+  showToast(`已將檢查間隔設為 ${parsed} 分鐘`);
 };
 
 // ---- YouTube Data API 金鑰編輯（草稿式） ----
@@ -1706,11 +1887,18 @@ const onApiKeyDialogBeforeClose = (action: string): boolean => {
     apiKeyRejectedThisRound = false;
   }
 
-  showToast(next ? '已儲存 API 金鑰，下次檢查將以 API 為第一通道' : '已清除 API 金鑰，回到 RSS → yt-dlp');
+  showToast(next
+    ? '已儲存 API 金鑰，頻道追蹤將於下次檢查恢復'
+    : '已清除 API 金鑰，頻道追蹤將停止運作（下載與播放清單解析不受影響）');
   return true;
 };
 
 const showChannelModal = ref(false);
+
+/** 開啟頻道管理彈窗時重新取樣時間，使停擺指示立即反映當下狀態。 */
+watch(showChannelModal, (open) => {
+  if (open) uiNow.value = Date.now();
+});
 const isAddingManualChannel = ref(false);
 const isCheckingChannels = ref(false);
 const manualChannelInput = ref('');
@@ -1740,23 +1928,26 @@ const addManualChannel = async () => {
     try {
       // 尚未建立頻道物件，故不帶快取的 uploads 清單識別碼；
       // 首次成功後由檢查迴圈的 onResolved 寫入該頻道並快取。
-      const rss = await DownloadService.fetchChannelVideos(res.channelId, {
-        enableFallback: monitorConfig.value.enableYtDlpFallback,
+      const latest = await DownloadService.fetchChannelVideos(res.channelId, {
         api: buildApiOptions()
       });
-      if (rss && rss.length > 0) {
-        latestVid = rss[0].videoId;
-        latestTitle = rss[0].title;
-        latestPubTime = rss[0].publishedTime || 0;
+      if (latest && latest.length > 0) {
+        latestVid = latest[0].videoId;
+        latestTitle = latest[0].title;
+        latestPubTime = latest[0].publishedTime || 0;
       }
-      // 如果 title 仍為空，嘗試從 RSS feed 取得頻道名稱
+      // 名稱仍為空時以 API 查詢；失敗不阻擋加入，退回使用者輸入的內容，
+      // 待後續檢查成功時由啟動時的名稱修復自動補上。
       if (!channelTitle) {
-        channelTitle = await DownloadService.fetchChannelTitleFromRss(res.channelId);
+        channelTitle = await DownloadService.fetchChannelTitle(res.channelId, {
+          api: buildApiOptions(),
+        });
       }
     } catch (e) {
-      console.warn('Initial RSS fetch for title skipped', e);
+      console.warn('加入頻道時的初次擷取略過（不阻擋加入）', e);
     }
-    // 最終 fallback：使用原始輸入
+    // 最終退回：以使用者輸入作為暫時名稱。名稱屬輔助資訊，取不到
+    // 不得阻擋加入 —— 後續檢查成功時由啟動時的名稱修復自動補上。
     if (!channelTitle) {
       channelTitle = manualChannelInput.value.trim();
     }
@@ -2066,6 +2257,23 @@ const applyChannelAnchor = (channel: MonitoredChannel, anchor: ChannelAnchor | n
   channel.lastVideoTitle = anchor.title;
 };
 
+/**
+ * 已提示過的停擺原因。
+ *
+ * 未設金鑰的狀態會持續存在，而自動排程每分鐘核對一次 —— 沒有這道抑制，
+ * 使用者會被同一則提示反覆騷擾。手動檢查不受此限（使用者主動點的，
+ * 必須得到回應），停擺原因改變時也會再提示一次。
+ */
+let notifiedBlockedStatus: ChannelTrackingStatus | '' = '';
+
+/** 停擺原因對應的檢查回饋文案。 */
+const describeTrackingBlocked = (status: ChannelTrackingStatus): string => {
+  if (status === 'missing_key') return describeMissingKeyCheck();
+  if (status === 'key_rejected') return describeApiKeyRejected();
+  if (status === 'quota_exhausted') return describeApiQuotaExhausted();
+  return '';
+};
+
 const checkAllMonitoredChannels = async (isManual = false) => {
   if (isCheckingChannels.value) return;
   if (!monitorConfig.value.autoCheckEnabled && !isManual) return;
@@ -2076,64 +2284,70 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     return;
   }
 
+  // 追蹤停擺時 MUST NOT 發出任何頻道影片擷取請求，且 MUST 明確告知原因。
+  // 刻意不更新 lastGlobalCheckTime —— 本輪什麼都沒檢查，記為已檢查會讓
+  // 使用者補上金鑰後還要再等一個完整間隔。
+  uiNow.value = Date.now();
+  const blockedNow = trackingStatus.value;
+  if (blockedNow !== 'ok') {
+    if (isManual || notifiedBlockedStatus !== blockedNow) {
+      notifiedBlockedStatus = blockedNow;
+      showToast({ message: describeTrackingBlocked(blockedNow), duration: 6000, closeOnClick: true });
+    }
+    return;
+  }
+  notifiedBlockedStatus = '';
+
   isCheckingChannels.value = true;
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
-  apiQuotaDegradedThisRound = false;
+  apiQuotaExhaustedThisRound = false;
   apiKeyRejectedThisRound = false;
 
   let newVideoCount = 0;
   // 符合既有新片條件、但未命中關鍵字而未建立任務的影片數（K）。
   // 與 newVideoCount（N）互斥：命中但因直播／狀態未知而未處理者兩者皆不計入。
   let keywordFilteredCount = 0;
-  let fallbackVideoCount = 0;
   let failedCount = 0;
-  const failedLevels: ChannelRssErrorLevel[] = [];
+  // 其中屬「裝置連不上網」者。全數為此類時，總結文案才指向連線問題。
+  let offlineFailureCount = 0;
   const now = Date.now();
   // 提早停止：偵測到裝置網路層錯誤即中止本輪（裝置連不上網，剩餘頻道不可能有不同結果）。
   let stoppedEarly = false;
   let skippedChannelCount = 0;
-  // 降級：連續失敗達門檻後，本輪其餘頻道改為單次嘗試（不重試）。
-  // 刻意不用 break —— 若清單前段有數個永久失效的頻道，整輪停止會讓後段健康頻道每輪都被餓死。
-  let consecutiveFailures = 0;
-  let degraded = false;
-  let degradedChannelCount = 0;
+  // 本輪中途才停擺（配額在本輪耗盡，或金鑰被拒而觸發抑制）—— 其餘頻道必然同一結果。
+  let blockedMidRound: ChannelTrackingStatus | '' = '';
 
   for (let i = 0; i < enabledChannels.length; i++) {
     const channel = enabledChannels[i];
     try {
-      if (degraded) degradedChannelCount++;
       const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
-        enableFallback: monitorConfig.value.enableYtDlpFallback,
-        noRetry: degraded,
         api: buildApiOptions(channel)
       });
-      consecutiveFailures = 0;
       if (!videos || videos.length === 0) continue;
 
       const channelLastPub = channelBaseline(channel);
 
       if (isFirstTimeTracking(channel)) {
         // 首次追蹤：以最新影片的發布時間建立初始防線，不觸發下載。
-        // 只看 videos[0]：若來源未提供精確時間（備援模式的 publishedTime 為 0），
-        // 則不建立基準 —— 維持未初始化狀態，待下次能取得精確時間時再錨定。
-        // 切勿以當下時間替代：那會把基準推至未來，使該時點之前發布的影片永久漏抓。
+        // 只看 videos[0]：若該筆未帶精確時間則不建立基準 —— 維持未初始化
+        // 狀態，待下次能取得精確時間時再錨定。切勿以當下時間替代：那會把
+        // 基準推至未來，使該時點之前發布的影片永久漏抓。
         // 刻意不套用「不越過未處理影片」那道守門：此情境本就不下載任何既有內容。
         applyChannelAnchor(channel, nextChannelBaseline([videos[0]], 0), now);
         continue;
       }
 
-      // 本次未被實際處理的影片（因直播而跳過，或直播狀態查詢失敗而無從判定）。
+      // 本次未被實際處理的影片（直播狀態查詢失敗而無從判定）。
       // 時間錨點不得越過這些影片，否則它們日後即使可正常下載也永遠不會再被判定為新片
       // —— 排程直播的 publishedTime 是「建立時間」，在直播結束轉為存檔後並不會改變。
       //
       // 未命中關鍵字的影片**不列入**此集合：那是使用者明確要求永久略過的項目，
-      // 錨點必須能越過，否則每輪都會重新比對整個 Feed。
+      // 錨點必須能越過，否則每輪都會重新比對整個清單。
       const unhandledVideoIds = new Set<string>();
 
       // 關鍵字篩選必須先於直播狀態驗證 —— 未命中的影片不得觸發任何直播查詢
-      // 或額外的影片資訊擷取。fetchChannelVideos 已把官方 RSS 與 yt-dlp 備援
-      // 併為一條帶 source 標記的陣列，因此兩種來源自動共用這條篩選路徑。
+      // 或額外的影片資訊擷取。
       const newVideos = selectNewVideos(videos, channelLastPub, tasks.value);
       const { matched, missed } = partitionByKeywords(newVideos, channelKeywords(channel));
       keywordFilteredCount += missed.length;
@@ -2143,9 +2357,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
       const ordered = matched.reverse();
 
       // 兩段式：先一次解析整組候選的直播狀態，再走訪建立任務。
-      // 交織在同一輪走訪中就無法批次 —— API 可用時單次請求可涵蓋 50 支，
-      // 取代逐支各開一個 yt-dlp 行程。無金鑰時內部自動退回逐支，
-      // 故此處不需要知道金鑰是否存在。
+      // 交織在同一輪走訪中就無法批次 —— 單次請求可涵蓋 50 支、僅 1 unit。
       const liveStatuses = await DownloadService.resolveLiveStatuses(ordered, {
         api: buildApiOptions(channel)
       });
@@ -2158,7 +2370,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           //
           // 'live'（直播中或排程未開播）—— 系統**已知**且明確不予下載，與未命中
           //   關鍵字的影片同列，錨點得以越過。以壓住錨點來表達「之後再看」，在
-          //   每日建立排程直播的頻道（如新聞台）上會使錨點永久卡死：feed 中永遠
+          //   每日建立排程直播的頻道（如新聞台）上會使錨點永久卡死：清單中永遠
           //   有未處理影片，每輪把錨點之後的所有影片重新判定為新片，僅靠佇列去重
           //   掩蓋，使用者清空佇列時即全部湧入。
           //
@@ -2173,10 +2385,6 @@ const checkAllMonitoredChannels = async (isManual = false) => {
           continue;
         }
 
-        if (vid.source === 'fallback') {
-          fallbackVideoCount++;
-        }
-
         // 優先插隊至佇列最前面第一位！
         tasks.value.unshift(buildChannelVideoTask(vid, channel, taskStore.nextTaskId()));
         newVideoCount++;
@@ -2184,9 +2392,17 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
       applyChannelAnchor(channel, nextChannelBaseline(videos, channelLastPub, unhandledVideoIds), now);
     } catch (err) {
+      const blocked = trackingUnavailableStatusOf(err);
+      if (blocked) {
+        // 追蹤於本輪中途停擺：其餘頻道必然得到同一結果，中止整輪而不逐一白打。
+        blockedMidRound = blocked;
+        skippedChannelCount = enabledChannels.length - i;
+        break;
+      }
+
       failedCount++;
-      const level = classifyChannelRssError(err);
-      failedLevels.push(level);
+      const offline = isDeviceOfflineError(err);
+      if (offline) offlineFailureCount++;
       console.warn(`檢查頻道 ${channel.title} 失敗:`, err);
       // 只記入日誌、不逐頻道彈提示 —— 迴圈結束後由總結提示統一告知。
       try {
@@ -2197,43 +2413,55 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         });
       } catch { /* 記錄失敗不得影響檢查流程 */ }
 
-      if (level === 'network') {
+      if (offline) {
         // 裝置端網路層錯誤：這台裝置現在確定連不上網，剩餘頻道逐一嘗試也不會有不同結果。
         skippedChannelCount = enabledChannels.length - (i + 1);
         // 停在最後一個頻道等於本輪其實已跑完 —— 不是提早結束，不可宣稱有頻道未檢查。
         stoppedEarly = skippedChannelCount > 0;
         break;
       }
-
-      consecutiveFailures++;
-      if (!degraded && consecutiveFailures >= CHANNEL_CHECK_DEGRADE_AFTER_FAILURES) {
-        // 連續失敗到達門檻：視為全域性故障，本輪其餘頻道不再支付重試等待，但仍逐一走訪。
-        degraded = true;
-        console.warn(`[自動追蹤] 連續 ${consecutiveFailures} 個頻道失敗，本輪其餘頻道改為單次嘗試`);
-      }
     }
   }
 
   monitorConfig.value.lastGlobalCheckTime = now;
   isCheckingChannels.value = false;
+  uiNow.value = Date.now();
 
-  // 本輪 API 狀態片段。金鑰無效優先於配額耗盡 —— 前者需使用者修正，
-  // 後者只需等待重置。抑制生效後續輪不再呼叫 API，故 onError 不再觸發，
-  // 此片段自然只出現一次，不會每輪或每頻道重複騷擾。
+  // 本輪 API 停擺片段。金鑰無效優先於配額耗盡 —— 前者需使用者修正，
+  // 後者只需等待重置。抑制生效後，續輪於進入迴圈前就被擋下，故此片段
+  // 自然只出現一次，不會每輪或每頻道重複騷擾。
   const apiHint = apiKeyRejectedThisRound
     ? describeApiKeyRejected()
-    : apiQuotaDegradedThisRound
-      ? describeApiQuotaDegraded()
+    : apiQuotaExhaustedThisRound
+      ? describeApiQuotaExhausted()
       : '';
 
-  const isFallbackEnabled = !!monitorConfig.value.enableYtDlpFallback;
-  const failureLevel: ChannelRssErrorLevel = failedLevels.every(level => level === 'network')
-    ? 'network'
-    : failedLevels.includes('server')
-      ? 'server'
-      : 'content';
+  // 全數失敗且全為裝置離線時，文案才指向連線問題；否則指向 API 擷取失敗。
+  const allOffline = failedCount > 0 && offlineFailureCount === failedCount;
 
-  if (stoppedEarly) {
+  if (blockedMidRound) {
+    // 本輪中途停擺：其餘頻道未檢查。此分支優先於下方判斷 ——
+    // failedCount 只計入實際跑過的頻道，硬套現有判斷會誤導使用者。
+    notifiedBlockedStatus = blockedMidRound;
+    try {
+      errorLog.value = appendErrorEntry(errorLog.value, {
+        time: Date.now(),
+        context: '頻道檢查（中途停擺）',
+        message: describeTrackingBlocked(blockedMidRound)
+      });
+    } catch { /* 記錄失敗不得影響檢查流程 */ }
+
+    if (newVideoCount > 0) {
+      showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ 尚有 ${skippedChannelCount} 個頻道未檢查）${apiHint}`);
+      processQueue();
+    } else {
+      showToast({
+        message: `${describeTrackingBlocked(blockedMidRound)}（尚有 ${skippedChannelCount} 個頻道未檢查）`,
+        duration: 6000,
+        closeOnClick: true
+      });
+    }
+  } else if (stoppedEarly) {
     // 提早停止優先於下方既有四分支：failedCount 只計入實際跑過的頻道，
     // 硬套現有判斷會誤入「部分失敗」分支，讓使用者誤以為被跳過的頻道也檢查過。
     try {
@@ -2245,8 +2473,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     } catch { /* 記錄失敗不得影響檢查流程 */ }
 
     if (newVideoCount > 0) {
-      const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
-      showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）${apiHint}`);
+      showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）${apiHint}`);
       processQueue();
     } else if (isManual) {
       const filteredHint = keywordFilteredCount > 0
@@ -2262,23 +2489,20 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     // 全部失敗
     if (isManual) {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
-      const degradedHint = degradedChannelCount > 0 ? `（${describeDegradedRound(degradedChannelCount)}）` : '';
       showToast({
-        message: `❌ ${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled })}${degradedHint}${apiHint}`,
+        message: `❌ ${describeApiFetchFailure({ offline: allOffline })}${apiHint}`,
         duration: 5000,
         closeOnClick: true
       });
     }
   } else if (newVideoCount > 0 && failedCount > 0) {
     // 有新影片但部分失敗
-    const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 含 ${fallbackVideoCount} 部備援抓取)` : ' [官方 RSS]';
-    const failHint = `⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}`;
-    showToast(`🔔 發現 ${newVideoCount} 部新片${sourceHint}，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）${apiHint}`);
+    const failHint = `⚠️ ${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}`;
+    showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）${apiHint}`);
     processQueue();
   } else if (newVideoCount > 0) {
     // 全部成功且有新影片
-    const sourceHint = fallbackVideoCount > 0 ? ` (⚠️ 包含 ${fallbackVideoCount} 部 yt-dlp 備援抓取)` : ' [官方 RSS]';
-    showToast(`🔔 發現 ${newVideoCount} 部新影片${sourceHint}，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}${apiHint}`);
+    showToast(`🔔 發現 ${newVideoCount} 部新影片，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}${apiHint}`);
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
@@ -2286,13 +2510,13 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     const noNewHint = keywordFilteredCount > 0
       ? describeKeywordFilteredRound(keywordFilteredCount)
       : '已檢查完成，目前沒有新影片';
-    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeChannelRssFailure(failureLevel, { fallbackEnabled: isFallbackEnabled, compact: true })}${failureLevel === 'network' ? '' : !isFallbackEnabled ? '，可於設定開啟備援' : ''}）${apiHint}`);
+    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}）${apiHint}`);
   } else if (isManual) {
     // 全部成功且沒新片。K 大於零代表「有新片但被自己的關鍵字篩掉」，
     // 與「真的沒有新片」是兩回事，MUST 以不同文案區分。
     showToast((keywordFilteredCount > 0
       ? describeKeywordFilteredRound(keywordFilteredCount)
-      : '已檢查完成 [官方 RSS]，目前沒有新影片') + apiHint);
+      : '已檢查完成，目前沒有新影片') + apiHint);
   }
 };
 
@@ -2300,7 +2524,6 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
   showLoadingToast({ message: '正在模擬抓取最新影片...', forbidClick: true });
   try {
     const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
-      enableFallback: monitorConfig.value.enableYtDlpFallback,
       api: buildApiOptions(channel)
     });
     closeToast();
@@ -2319,7 +2542,6 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
 
     const latestVideo = matched[0];
     const pubTimeStr = formatPublishTime(latestVideo.publishedTime) || formatPublishTime(Date.now());
-    const sourceLabel = `【測試模式 (${channelSourceLabel(latestVideo.source)})】`;
     const testTitle = `[測試模擬] ${buildTaskDisplayTitle(latestVideo.title, channel.title, pubTimeStr)}`;
 
     const testTask: DownloadTask = {
@@ -2334,7 +2556,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
       status: 'pending',
       progress: 0,
       eta: '',
-      line: `${sourceLabel}優先排隊下載中...`,
+      line: '【測試模式】優先排隊下載中...',
       path: '',
       errorMsg: '',
       mediaUri: '',
@@ -2369,7 +2591,6 @@ const simulateGlobalNewVideo = async () => {
     for (const channel of enabledChannels) {
       try {
         const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
-          enableFallback: monitorConfig.value.enableYtDlpFallback,
           api: buildApiOptions(channel)
         });
         if (!videos || videos.length === 0) continue;
@@ -2386,7 +2607,6 @@ const simulateGlobalNewVideo = async () => {
         for (const vid of topVideos.reverse()) {
           const pubTimeStr = formatPublishTime(vid.publishedTime) || formatPublishTime(Date.now());
           const taskTitle = `[測試模擬] ${buildTaskDisplayTitle(vid.title, channel.title, pubTimeStr)}`;
-          const sourceLabel = `【測試模式 (${channelSourceLabel(vid.source)})】`;
 
           const testTask: DownloadTask = {
             id: taskStore.nextTaskId(),
@@ -2400,7 +2620,7 @@ const simulateGlobalNewVideo = async () => {
             status: 'pending',
             progress: 0,
             eta: '',
-            line: `${sourceLabel}優先排隊下載中...`,
+            line: '【測試模式】優先排隊下載中...',
             path: '',
             errorMsg: '',
             mediaUri: '',

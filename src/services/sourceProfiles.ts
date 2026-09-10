@@ -54,7 +54,7 @@ export interface SourceProfile {
   /**
    * 是否可加入自動追蹤。
    *
-   * 追蹤機制綁定 YouTube 的官方 RSS，故僅 YouTube 頻道成立。呼叫端仍需
+   * 追蹤機制綁定 YouTube Data API，故僅 YouTube 頻道成立。呼叫端仍需
    * 自行排除子頁面（`/watch`、`/playlist`）—— 那是網址形狀的問題，
    * 與來源本身的能力無關。
    */

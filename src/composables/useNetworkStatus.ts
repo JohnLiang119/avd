@@ -3,9 +3,9 @@ import { ref, type Ref } from 'vue';
 /**
  * 主畫面網路狀態：四態模型，用以區分「離線」與「已連線但無法連上網際網路」。
  *
- * 與 `rateLimit.ts` 的 `classifyChannelRssError`（NETWORK_ERROR/HTTP_STATUS）是
- * 兩件獨立的事——那是個別 RSS 請求失敗後的事後分類，這裡是持續性、主動探測的
- * 畫面狀態，刻意不共用邏輯（見 show-network-status/design.md 的 Non-Goals）。
+ * 與 `rateLimit.ts` 的 `isDeviceOfflineError`（NETWORK_ERROR 前綴）是兩件獨立
+ * 的事——那是個別請求失敗後的事後分類，這裡是持續性、主動探測的畫面狀態，
+ * 刻意不共用邏輯（見 show-network-status/design.md 的 Non-Goals）。
  */
 export type NetworkStatusState = 'checking' | 'online' | 'degraded' | 'offline';
 

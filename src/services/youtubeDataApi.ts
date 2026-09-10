@@ -3,9 +3,8 @@
  *
  * 本模組刻意**不匯入任何 `@tauri-apps/*`**，也不自行發出網路請求 ——
  * 需要網路的函式一律以參數注入 `fetchJson`。這使整層邏輯（請求建構、
- * 回應解析、狀態映射、錯誤分類、抑制時點、通道選擇）都能在 vitest 中
- * 直接測試，沿用 `DownloadService.spec.ts` 對 `fetchChannelRssWithRetry`
- * 注入 `request`／`sleep` 的既有模式。
+ * 回應解析、狀態映射、錯誤分類、抑制時點、追蹤狀態判定、間隔下限）
+ * 都能在 vitest 中直接測試。
  *
  * 型別以 `import type` 引入，編譯後完全抹除，不產生執行期相依。
  */
@@ -63,6 +62,27 @@ export function buildVideosRequest(videoIds: string[], apiKey: string): ApiReque
     part: 'snippet,liveStreamingDetails',
     id: videoIds.join(','),
   }, apiKey);
+}
+
+/**
+ * 查詢頻道名稱的請求（`channels.list?part=snippet`）。
+ *
+ * 名稱先前取自 RSS feed 根層的 `<title>`，該路徑已隨 RSS 一併移除。
+ * 每次 1 unit，僅在加入頻道與名稱修復時發生，對配額預算的影響可忽略。
+ */
+export function buildChannelSnippetRequest(channelId: string, apiKey: string): ApiRequest {
+  return buildRequest('channels', {
+    part: 'snippet',
+    id: channelId,
+  }, apiKey);
+}
+
+/** 自 `channels.list?part=snippet` 回應取出頻道名稱；取不到時為空字串。 */
+export function parseChannelTitle(json: any): string {
+  const items = json?.items;
+  if (!Array.isArray(items) || items.length === 0) return '';
+  const title = items[0]?.snippet?.title;
+  return typeof title === 'string' ? title : '';
 }
 
 /** 查詢頻道的 uploads 播放清單識別碼（前綴推導失敗時的後備）。 */
@@ -287,8 +307,8 @@ export function apiKeyFingerprint(apiKey: string): string {
   return hash.toString(16).padStart(8, '0');
 }
 
-/** 決定第一通道所需的狀態。 */
-export interface ChannelSelectionState {
+/** 判定頻道追蹤是否可運作所需的狀態。 */
+export interface ChannelTrackingState {
   apiKey: string;
   now: number;
   /** 配額耗盡的抑制解除時點；未抑制時為 undefined 或 0 */
@@ -298,26 +318,63 @@ export interface ChannelSelectionState {
 }
 
 /**
- * 決定本輪的第一通道。
+ * 頻道追蹤的可用狀態。
  *
- * 回傳 `'rss'` 代表跳過 API 直接走既有的 RSS → yt-dlp 鏈。未設金鑰時
- * 一律 `'rss'`，且呼叫端 MUST NOT 因此顯示任何錯誤或提示 —— 那是完全
- * 正常的預設狀態。
+ * 三種停擺原因刻意分開而非併為一個布林：它們的解法完全不同（設定金鑰／
+ * 修正金鑰／等待重置），規格明訂持續狀態指示 MUST 能區分三者。
  */
-export function selectFirstChannel(state: ChannelSelectionState): 'api' | 'rss' {
+export type ChannelTrackingStatus = 'ok' | 'missing_key' | 'key_rejected' | 'quota_exhausted';
+
+/** 除 `'ok'` 以外的停擺原因。 */
+export type ChannelTrackingBlocked = Exclude<ChannelTrackingStatus, 'ok'>;
+
+/**
+ * 判定頻道追蹤本輪是否可運作。
+ *
+ * 頻道追蹤只有 YouTube Data API 一條通道，故此判定的結果不再是「走哪條
+ * 通道」而是「能不能追蹤」。回傳非 `'ok'` 時呼叫端 MUST NOT 發出任何頻道
+ * 影片擷取請求，且 MUST 明確告知原因 —— 靜默視為「沒有新影片」正是
+ * 移除備援後最需要防止的假陽性。
+ */
+export function channelTrackingStatus(state: ChannelTrackingState): ChannelTrackingStatus {
   const key = (state.apiKey || '').trim();
-  if (!key) return 'rss';
+  if (!key) return 'missing_key';
 
   // 配額抑制：時點未到之前一律不打 API；時點已過自動恢復，不需使用者操作
-  if (state.quotaSuppressedUntil && state.now < state.quotaSuppressedUntil) return 'rss';
+  if (state.quotaSuppressedUntil && state.now < state.quotaSuppressedUntil) return 'quota_exhausted';
 
   // 金鑰無效抑制：綁定金鑰內容而非時間 —— 無效金鑰不會因時間而變有效，
   // 但「使用者換了金鑰」是明確可偵測的解除條件
   if (state.rejectedKeyFingerprint && state.rejectedKeyFingerprint === apiKeyFingerprint(key)) {
-    return 'rss';
+    return 'key_rejected';
   }
 
-  return 'api';
+  return 'ok';
+}
+
+/**
+ * 追蹤停擺錯誤的訊息前綴。
+ *
+ * 停擺時 `fetchChannelVideos` MUST 拋出可辨識的錯誤而非回傳空清單 ——
+ * 空清單會被上層當成「這個頻道沒有新影片」，使追蹤完全停止卻毫無徵狀。
+ */
+export const TRACKING_UNAVAILABLE_PREFIX = 'CHANNEL_TRACKING_UNAVAILABLE:';
+
+/** 建構可辨識的追蹤停擺錯誤。 */
+export function trackingUnavailableError(status: ChannelTrackingBlocked): Error {
+  return new Error(`${TRACKING_UNAVAILABLE_PREFIX}${status}`);
+}
+
+/** 自錯誤取回停擺原因；非停擺錯誤回傳 `null`。 */
+export function trackingUnavailableStatusOf(error: unknown): ChannelTrackingBlocked | null {
+  const text = error instanceof Error ? error.message : String(error ?? '');
+  const index = text.indexOf(TRACKING_UNAVAILABLE_PREFIX);
+  if (index < 0) return null;
+  const rest = text.slice(index + TRACKING_UNAVAILABLE_PREFIX.length).trim();
+  if (rest.startsWith('missing_key')) return 'missing_key';
+  if (rest.startsWith('key_rejected')) return 'key_rejected';
+  if (rest.startsWith('quota_exhausted')) return 'quota_exhausted';
+  return null;
 }
 
 /**
@@ -381,14 +438,13 @@ function isPlaylistNotFound(error: unknown): boolean {
 // 那會把既有分支中的資訊洗掉。
 
 /**
- * 配額耗盡而降級的告知。
+ * 配額耗盡的告知。
  *
- * 必須讓使用者知道本輪的抓取品質與平常不同（降級後候選視窗變窄、
- * 備援還不帶精確發布時間），否則會誤判漏片原因。同時明說會自動恢復，
- * 避免使用者去做無效的手動處理。
+ * 措辭刻意是「停止」而非「降級」—— 已無備援可降級，配額耗盡即代表
+ * 頻道追蹤完全停止。同時明說會自動恢復，避免使用者去做無效的手動處理。
  */
-export function describeApiQuotaDegraded(): string {
-  return '（⚠️ 今日 API 配額已用盡，暫時改用官方 RSS，太平洋時間午夜重置後自動恢復）';
+export function describeApiQuotaExhausted(): string {
+  return '（⚠️ 今日 API 配額已用盡，頻道追蹤暫停，太平洋時間午夜重置後自動恢復）';
 }
 
 /**
@@ -398,7 +454,147 @@ export function describeApiQuotaDegraded(): string {
  * MUST NOT 包含金鑰的任何片段 —— 本函式不接受金鑰參數即結構性保證。
  */
 export function describeApiKeyRejected(): string {
-  return '（⚠️ API 金鑰無效或該專案未啟用 YouTube Data API v3，已改用官方 RSS，請於頻道設定中檢查金鑰）';
+  return '（⚠️ API 金鑰無效或該專案未啟用 YouTube Data API v3，頻道追蹤已停止，請於頻道設定中檢查金鑰）';
+}
+
+/**
+ * 頻道影片擷取失敗的告知。
+ *
+ * 措辭刻意不提「RSS」或「備援」—— 已無第二條通道，也不提供任何可開啟
+ * 備援的建議。裝置離線與服務層失敗分開：前者代表「這台裝置連不上網」，
+ * 後者只代表這幾個請求失敗，把兩者混用會把使用者導向錯誤的排查方向。
+ */
+export function describeApiFetchFailure(
+  options: { offline?: boolean; compact?: boolean } = {}
+): string {
+  if (options.offline) return '目前無法連線（裝置未連上網路）';
+  return options.compact ? 'API 擷取失敗' : '無法自 YouTube Data API 取得頻道影片清單';
+}
+
+/**
+ * 未設金鑰時的檢查回饋。
+ *
+ * MUST NOT 與「目前沒有新影片」或「無法連線至 YouTube」混用：前者是假陽性
+ * （系統根本沒有檢查），後者會把使用者導向錯誤的排查方向（系統並未發出
+ * 任何請求，不是連線問題）。
+ */
+export function describeMissingKeyCheck(): string {
+  return '頻道追蹤已停止：未設定 YouTube Data API 金鑰，請於頻道管理的「YouTube Data API 金鑰」填入後恢復';
+}
+
+// ============================================================================
+// 停擺狀態指示（持續可見）
+// ============================================================================
+
+/** 一則持續可見的停擺指示。 */
+export interface TrackingStatusNotice {
+  /** 停擺原因 */
+  title: string;
+  /** 解法或恢復方式 */
+  detail: string;
+}
+
+/**
+ * 產生停擺狀態指示的文案。
+ *
+ * 三種原因的文案 MUST 互異 —— 解法完全不同（設定金鑰／修正金鑰／等待
+ * 重置），混為一談會讓使用者對著無法解決的提示乾等，或反之去改一把其實
+ * 沒問題的金鑰。配額耗盡者 MUST 說明會自動恢復。
+ *
+ * 本函式不接受金鑰參數，故 MUST NOT 包含金鑰片段是結構性保證，
+ * 不倚賴任何遮蔽邏輯是否周全。
+ */
+export function describeTrackingStatus(
+  status: ChannelTrackingStatus,
+  options: { quotaResetAt?: number } = {}
+): TrackingStatusNotice | null {
+  if (status === 'ok') return null;
+
+  if (status === 'missing_key') {
+    return {
+      title: '⛔ 頻道追蹤已停止：未設定 API 金鑰',
+      detail: '頻道追蹤只有 YouTube Data API 一條通道。請於上方「YouTube Data API 金鑰」填入自備的金鑰，追蹤即恢復。',
+    };
+  }
+
+  if (status === 'key_rejected') {
+    return {
+      title: '⛔ 頻道追蹤已停止：金鑰無效',
+      detail: '金鑰被 YouTube 拒絕，或該 Google Cloud 專案未啟用 YouTube Data API v3。請於上方重新設定正確的金鑰，追蹤即恢復。',
+    };
+  }
+
+  return {
+    title: '⏸️ 頻道追蹤暫停：今日配額已用盡',
+    detail: `每日配額於太平洋時間午夜重置${formatQuotaResetHint(options.quotaResetAt)}，屆時追蹤自動恢復，無須任何操作。`,
+  };
+}
+
+/** 配額重置時點的本地時間補述；無時點時為空字串。 */
+function formatQuotaResetHint(resetAt?: number): string {
+  if (!resetAt || !Number.isFinite(resetAt)) return '';
+  try {
+    return `（本地時間約 ${new Date(resetAt).toLocaleString()}）`;
+  } catch {
+    return '';
+  }
+}
+
+// ============================================================================
+// 檢查間隔的安全下限
+// ============================================================================
+
+/**
+ * 每輪每個頻道的配額成本上界：1 次取影片清單 + 1 次批次查直播狀態。
+ *
+ * 是上界而非平均 —— 該頻道本輪沒有候選影片時不會發出第二次請求。
+ * 估算偏保守是對的方向：低估會讓使用者在無預警下耗盡配額，
+ * 而移除備援後配額耗盡等於追蹤完全停止。
+ */
+export const UNITS_PER_CHANNEL_PER_ROUND = 2;
+
+/**
+ * 間隔下限的配額安全係數。
+ *
+ * 保留三成餘裕給手動檢查、加入頻道的名稱查詢，以及使用者於同一
+ * Google Cloud 專案上的其他用途。不得以剛好用滿每日配額為目標。
+ */
+export const QUOTA_SAFETY_FACTOR = 0.7;
+
+/**
+ * 依啟用頻道數推導的最短檢查間隔（分鐘，未取整）。
+ *
+ * ```
+ *   每日成本 = 頻道數 x 2 x (1440 / 間隔分鐘) <= 每日配額 x 安全係數
+ *   → 間隔分鐘 >= 頻道數 x 2 x 1440 / (每日配額 x 安全係數)
+ * ```
+ *
+ * 硬編一個固定下限在 6 個頻道時過於保守、在 50 個頻道時會爆配額；
+ * 以公式推導使下限隨頻道數自動調整，且該推導可直接寫進 UI 說明。
+ *
+ * 頻道數為 0 時回傳 1 而非 0 —— 回傳 0 或負值會讓呼叫端算出
+ * 「間隔可以是 0 分鐘」這種必然失控的設定。
+ */
+export function minimumCheckIntervalMinutes(enabledChannelCount: number): number {
+  const channels = Math.max(0, Math.floor(enabledChannelCount || 0));
+  if (channels === 0) return 1;
+  const exact = (channels * UNITS_PER_CHANNEL_PER_ROUND * 1440) / (DAILY_QUOTA_UNITS * QUOTA_SAFETY_FACTOR);
+  return Math.max(1, exact);
+}
+
+/** 可供使用者設定的整數下限（分鐘）—— 一律向上取整，不得四捨五入到下限之下。 */
+export function checkIntervalFloorMinutes(enabledChannelCount: number): number {
+  return Math.max(1, Math.ceil(minimumCheckIntervalMinutes(enabledChannelCount)));
+}
+
+/** 下限的依據說明（頻道數與每日配額），供 UI 直接顯示。 */
+export function describeCheckIntervalFloor(enabledChannelCount: number): string {
+  const channels = Math.max(0, Math.floor(enabledChannelCount || 0));
+  const perRound = channels * UNITS_PER_CHANNEL_PER_ROUND;
+  const floor = checkIntervalFloorMinutes(channels);
+  return `目前啟用 ${channels} 個頻道，每輪最多消耗 ${perRound} 單位配額；`
+    + `每日配額 ${DAILY_QUOTA_UNITS} 單位並保留 ${Math.round((1 - QUOTA_SAFETY_FACTOR) * 100)}% 餘裕，`
+    + `故檢查間隔至少 ${floor} 分鐘。`;
 }
 
 // ============================================================================

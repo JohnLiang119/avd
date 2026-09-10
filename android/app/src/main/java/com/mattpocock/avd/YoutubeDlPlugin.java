@@ -24,9 +24,6 @@ import java.util.Locale;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.net.UnknownHostException;
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
 import java.util.Enumeration;
 import android.net.wifi.WifiManager;
 
@@ -660,50 +657,6 @@ public class YoutubeDlPlugin extends Plugin {
         }).start();
     }
 
-    @PluginMethod
-    public void fetchChannelRss(PluginCall call) {
-        String channelId = call.getString("channelId");
-        if (channelId == null || channelId.isEmpty()) {
-            call.reject("Must provide channelId");
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                String rssUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=" + java.net.URLEncoder.encode(channelId, "UTF-8");
-                java.net.URL urlObj = new java.net.URL(rssUrl);
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) urlObj.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(8000);
-
-                if (conn.getResponseCode() != 200) {
-                    call.reject("HTTP_STATUS:" + conn.getResponseCode() + ":無法獲取頻道 RSS");
-                    return;
-                }
-
-                StringBuilder sb = new StringBuilder();
-                try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream(), "UTF-8"))) {
-                    String line;
-                    while ((line = in.readLine()) != null) {
-                        sb.append(line).append("\n");
-                    }
-                }
-
-                JSObject ret = new JSObject();
-                ret.put("xml", sb.toString());
-                call.resolve(ret);
-            } catch (UnknownHostException | ConnectException | SocketTimeoutException e) {
-                Log.e(TAG, "Network error while fetching channel RSS", e);
-                call.reject("NETWORK_ERROR:" + (e.getMessage() != null ? e.getMessage() : e.toString()));
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to fetch channel RSS", e);
-                call.reject("獲取頻道 RSS 失敗: " + e.getMessage());
-            }
-        }).start();
-    }
-
     /**
      * 主畫面網路狀態探測：只有取得預期的 204 才視為 online。
      * 任何失敗（DNS、逾時、連線被拒、非預期狀態碼）一律回傳 online=false，
@@ -732,101 +685,6 @@ public class YoutubeDlPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("online", online);
             call.resolve(ret);
-        }).start();
-    }
-
-    /**
-     * 頻道新片備援抓取（RSS 異常時使用）。
-     *
-     * 刻意不重用 parsePlaylist：後者以 --flat-playlist 執行，該模式下 yt-dlp 不回傳
-     * timestamp 與 upload_date（皆為 null），會迫使前端 fallback 至當下時間而污染
-     * lastPublishedTime 基準。此處改以 --skip-download 逐一解析影片頁面取得精確發布時間。
-     *
-     * 回傳 NDJSON（每行一個 JSON 物件），與 Windows 端 fetch_channel_videos_fallback 對齊。
-     * URL 維持 /channel/{id} 以涵蓋 Videos + Shorts；Live 分頁由前端依 playlist 欄位過濾。
-     */
-    @PluginMethod
-    public void fetchChannelVideosFallback(PluginCall call) {
-        String channelId = call.getString("channelId");
-        if (channelId == null || channelId.isEmpty()) {
-            call.reject("Must provide channelId");
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                String url = "https://www.youtube.com/channel/" + channelId;
-                YoutubeDLRequest request = new YoutubeDLRequest(url);
-                request.addOption("--dump-json");
-                request.addOption("--skip-download");
-                request.addOption("--playlist-end", "2");
-                request.addOption("--no-warnings");
-
-                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
-
-                JSObject ret = new JSObject();
-                ret.put("ndjson", response.getOut());
-                call.resolve(ret);
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to fetch channel videos fallback", e);
-                call.reject("備援抓取頻道新片失敗: " + e.getMessage());
-            }
-        }).start();
-    }
-
-    /**
-     * 查詢單支影片的直播狀態。
-     *
-     * auto-check-filtering 規格要求直播與排程首播不得加入下載佇列，且該排除須在
-     * 所有平台一致生效。此前 Android 端缺少此能力，前端只能一律當作非直播放行，
-     * 導致排程直播（開播前不存在任何可下載格式）被排入佇列並必然失敗。
-     *
-     * 回傳 yt-dlp 的 live_status 原始字串，由前端統一判定。
-     */
-    @PluginMethod
-    public void checkVideoLiveStatus(PluginCall call) {
-        String url = call.getString("url");
-        if (url == null || url.isEmpty()) {
-            call.reject("Must provide an url");
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                YoutubeDLRequest request = new YoutubeDLRequest(url);
-                request.addOption("--print", "live_status");
-                request.addOption("--skip-download");
-                request.addOption("--no-warnings");
-
-                YoutubeDLResponse response = YoutubeDL.getInstance().execute(request);
-                String status = response.getOut() == null ? "" : response.getOut().trim();
-
-                JSObject ret = new JSObject();
-                ret.put("liveStatus", status);
-                call.resolve(ret);
-            } catch (Exception e) {
-                // yt-dlp 對尚未開播的排程直播會直接報錯而非輸出 live_status。
-                // youtubedl-android 的 YoutubeDLException 以完整 stderr 建構
-                // （已於位元組碼確認：execute() 的 errBuffer.toString() 即例外訊息），
-                // 故此處拿得到 yt-dlp 的原始錯誤。
-                //
-                // 若不辨識出來，這類影片會落入「狀態無法判定」而阻擋時間錨點推進 ——
-                // 對每日建立排程直播的頻道（如新聞台），錨點會因此永久卡死。
-                //
-                // 樣式與前端 src/services/downloadErrors.ts 的 UPCOMING_LIVE_ERRORS
-                // 對應，兩處必須同步；刻意比「直播相關錯誤」更窄，誤判為排程直播會
-                // 使一般影片被錨點越過而永久漏抓。
-                String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
-                if (message.contains("this live event will begin in")) {
-                    Log.i(TAG, "Scheduled live not yet started, skipping permanently");
-                    JSObject ret = new JSObject();
-                    ret.put("liveStatus", "is_upcoming");
-                    call.resolve(ret);
-                    return;
-                }
-                Log.e(TAG, "Failed to check live status", e);
-                call.reject("查詢直播狀態失敗: " + e.getMessage());
-            }
         }).start();
     }
 
@@ -1061,7 +919,7 @@ public class YoutubeDlPlugin extends Plugin {
                             String uploader = info.optString("uploader", info.optString("channel", ""));
                             if (!uploader.isEmpty()) channelPrefix = uploader;
 
-                            // 時間解析順序與備援路徑的 mapFallbackEntry 一致：
+                            // 時間解析順序與前端 enrichment 的解析一致：
                             // timestamp（秒）優先，缺才退回 upload_date 的當日午夜。
                             long ts = info.optLong("timestamp", 0L);
                             if (ts > 0) {

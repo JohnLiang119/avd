@@ -165,8 +165,9 @@ fn fetch_http_text(
     // 完整網址；這些訊息經 reportError 寫入 avd_error_log，而錯誤日誌的設計
     // 目的就是讓使用者複製出來求助 —— 機密一旦寫入其中，貼出日誌即等同公開。
     //
-    // 前綴（HTTP_STATUS: / NETWORK_ERROR:）刻意保留不變：channelRssRetryDelays
-    // 依該前綴分層決定重試時間表，破壞它會使重試策略失效。
+    // 前綴（HTTP_STATUS: / NETWORK_ERROR:）刻意保留不變：前端的
+    // `classifyApiError` 依 HTTP_STATUS 的 body 區分配額耗盡與金鑰無效，
+    // `isDeviceOfflineError` 依 NETWORK_ERROR 判定裝置離線而提早結束整輪。
     let query = url.find('?').map(|i| url[i..].to_string());
     let redact = |message: String| redact_query(message, query.as_deref());
 
@@ -201,8 +202,8 @@ fn fetch_http_text(
                     // reason 只在回應 body 的 JSON 中，故於此附上。
                     //
                     // 只在 Content-Type 為 JSON 時附上：Google 的 API 錯誤是 JSON，
-                    // 而 YouTube RSS 的 404 是整頁 HTML 錯誤頁 —— 附上只會把它塞進
-                    // 錯誤日誌。截斷長度避免任何來源的巨大 body 灌爆日誌。
+                    // 而一般網站的錯誤頁是整頁 HTML —— 附上只會把它塞進錯誤日誌。
+                    // 截斷長度避免任何來源的巨大 body 灌爆日誌。
                     let is_json = response
                         .header("Content-Type")
                         .map(|value| value.to_lowercase().contains("json"))
@@ -231,29 +232,6 @@ fn fetch_http_text(
         .map_err(|e| format!("讀取回應內容失敗: {}", e))?;
 
     Ok(text)
-}
-
-#[tauri::command]
-async fn fetch_channel_videos_fallback(app: tauri::AppHandle, channel_id: String) -> Result<String, String> {
-    use tauri_plugin_shell::ShellExt;
-    let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
-    
-    // URL 保持 /channel/{id}（不加 /videos），以同時涵蓋 Videos + Shorts；Live 分頁由前端過濾。
-    let url = format!("https://www.youtube.com/channel/{}", channel_id);
-    // 不使用 --flat-playlist：該模式下 yt-dlp 不回傳 timestamp 與 upload_date（皆為 null），
-    // 會迫使前端 fallback 至 Date.now() 而污染 lastPublishedTime 基準。
-    // 改以 --skip-download 逐一解析影片頁面取得精確發布時間，並以 --playlist-end 2 限制解析數量。
-    let output = sidecar_command
-        .args(["--dump-json", "--skip-download", "--playlist-end", "2", &url])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).into_owned())
-    }
 }
 
 #[tauri::command]
@@ -305,7 +283,6 @@ pub fn run() {
             install_win_msi,
             fetch_http_text,
             probe_internet_connectivity,
-            fetch_channel_videos_fallback,
             update_yt_dlp,
             get_yt_dlp_version
         ])
@@ -343,11 +320,13 @@ mod redact_tests {
     }
 
     #[test]
-    fn channel_rss_query_is_removed_but_host_kept() {
-        let url = "https://www.youtube.com/feeds/videos.xml?channel_id=UCtest";
+    fn non_secret_query_is_also_removed_but_host_kept() {
+        // 遮蔽不挑對象：任何網址的 query string 一律移除，host 與路徑保留，
+        // 使錯誤訊息仍可辨識是哪個端點失敗。
+        let url = "https://www.googleapis.com/youtube/v3/channels?part=snippet&id=UCtest";
         let query = url.find('?').map(|i| &url[i..]);
         let got = redact_query(format!("{}: status code 404", url), query);
-        assert_eq!(got, "https://www.youtube.com/feeds/videos.xml: status code 404");
+        assert_eq!(got, "https://www.googleapis.com/youtube/v3/channels: status code 404");
     }
 
     #[test]

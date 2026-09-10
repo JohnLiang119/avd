@@ -30,7 +30,7 @@ const vid = (id: string, publishedTime: number, extra: Partial<MatchableVideo> =
   title: `影片 ${id}`,
   publishedTime,
   url: `https://www.youtube.com/watch?v=${id}`,
-  source: 'rss',
+  source: 'api',
   ...extra,
 });
 
@@ -40,7 +40,7 @@ const channel = (over: Partial<MonitoredChannelLike> = {}): MonitoredChannelLike
   ...over,
 });
 
-/** RSS 回傳為由新至舊 */
+/** API 回傳為由新至舊 */
 const NEWER = T(2026, 9, 3, 12, 0, 0);
 const OLDER = T(2026, 9, 1, 8, 0, 0);
 const OLDEST = T(2026, 8, 20, 8, 0, 0);
@@ -130,14 +130,14 @@ describe('selectNewVideos', () => {
 
 describe('nextChannelBaseline', () => {
   it('有精確發布時間時推進至最新者（視窗已回溯至錨點之前）', () => {
-    // 現實的 RSS 形狀：回傳的最舊影片早於目前錨點，代表視窗完整覆蓋
+    // 現實的 API 形狀：回傳的最舊影片早於目前錨點，代表視窗完整覆蓋
     // 「錨點到現在」的缺口，不存在未經比對的較舊影片，故錨點推進至最新者。
     const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER), vid('n3', OLDEST)], OLDER);
     expect(got).toEqual({ publishedTime: NEWER, videoId: 'n1', title: '影片 n1' });
   });
 
   it('無精確發布時間時不推進 —— 不得以當下時間替代', () => {
-    // publishedTime 為 0 代表備援模式未提供精確時間。
+    // publishedTime 為 0 代表來源未提供可解析的精確時間。
     // 若此處回傳當下時間，基準會被推到未來而永久漏片。
     expect(nextChannelBaseline([vid('n1', 0)], OLDER)).toBeNull();
   });
@@ -168,7 +168,7 @@ describe('nextChannelBaseline', () => {
   });
 
   it('不倚賴輸入順序，取已處理影片中發布時間最大者', () => {
-    // 備援來源未必依時間排序
+    // 來源未必依時間排序
     const got = nextChannelBaseline([vid('a', OLDER), vid('b', NEWER), vid('c', OLDEST)], 0);
     expect(got?.videoId).toBe('b');
   });
@@ -195,11 +195,11 @@ describe('buildChannelVideoTask', () => {
     expect(t.id).toBe(7);
   });
 
-  it('來源標記區分 RSS 與 yt-dlp 備援', () => {
-    expect(buildChannelVideoTask(vid('n1', NEWER), channel(), 1).line)
-      .toContain('RSS');
-    expect(buildChannelVideoTask(vid('n1', NEWER, { source: 'fallback' }), channel(), 1).line)
-      .toContain('yt-dlp 備援');
+  it('任務狀態文字不標註來源 —— 只有一條通道，標註已無資訊量', () => {
+    const line = buildChannelVideoTask(vid('n1', NEWER), channel(), 1).line;
+    expect(line).toContain('自動追蹤');
+    expect(line).not.toContain('RSS');
+    expect(line).not.toContain('備援');
   });
 
   it('子資料夾名稱移除檔案系統不接受的字元', () => {
@@ -224,10 +224,6 @@ describe('buildChannelVideoTask', () => {
 // ============================================================================
 // 關鍵字篩選
 // ============================================================================
-
-/** yt-dlp 備援來源的影片 */
-const fb = (id: string, publishedTime: number): MatchableVideo =>
-  vid(id, publishedTime, { source: 'fallback' });
 
 describe('channelKeywords —— 既有資料形態的向下相容', () => {
   it('缺少 keywords 欄位、undefined、非陣列值皆得到空清單', () => {
@@ -373,36 +369,26 @@ describe('nextChannelBaseline —— 錨點守門為上限而非排除', () => {
   });
 });
 
-describe('nextChannelBaseline —— 備援候選視窗上限', () => {
-  it('備援視窗未回溯至錨點時，錨點取本輪最舊者', () => {
-    // 備援每輪僅 2 筆，兩筆都比錨點新 —— 錨點與本輪最舊者之間可能還有
-    // 未被取回也未經比對的影片，故錨點不得跨過本輪最舊者。
-    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], OLDEST);
+describe('nextChannelBaseline —— 候選視窗上限', () => {
+  it('視窗未回溯至錨點時，錨點取本輪最舊者', () => {
+    // 兩筆都比錨點新 —— 錨點與本輪最舊者之間可能還有未被取回也未經比對的
+    // 影片，故錨點不得跨過本輪最舊者。
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], OLDEST);
     expect(got?.videoId).toBe('n2');
     expect(got?.publishedTime).toBe(OLDER);
   });
 
-  it('備援僅 1 筆未達上限時不套用視窗上限', () => {
-    const got = nextChannelBaseline([fb('n1', NEWER)], 0);
-    expect(got?.videoId).toBe('n1');
+  it('視窗已回溯至錨點時不設限，錨點推進至本輪最新者', () => {
+    expect(
+      nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER), vid('n3', OLDEST)], OLDER)?.videoId
+    ).toBe('n1');
   });
 
-  it('視窗上限與來源無關 —— 取決於是否回溯至錨點', () => {
-    // 同樣 2 筆、同樣時間，只因來源不同而有不同結果是錯的規則。
-    // 兩者皆未回溯至錨點，故皆設限；皆已回溯，則皆不設限。
-    for (const make of [vid, fb]) {
-      expect(nextChannelBaseline([make('n1', NEWER), make('n2', OLDER)], OLDEST)?.videoId).toBe('n2');
-      expect(
-        nextChannelBaseline([make('n1', NEWER), make('n2', OLDER), make('n3', OLDEST)], OLDER)?.videoId
-      ).toBe('n1');
-    }
-  });
-
-  it('官方 RSS 的實際形狀不會被上限鎖住錨點', () => {
-    // 這是採「取回筆數達來源上限即設限」會踩到的故障：RSS 固定約 15 筆且
-    // 橫跨數月，以筆數判定會使上限恆成立，而上限（最舊者）早於現有錨點，
-    // 錨點將永遠無法推進、每輪重新比對整個 Feed。
-    const feed = Array.from({ length: 15 }, (_, i) => vid(`r${i}`, NEWER - i * 86400000));
+  it('上限判定與取回筆數無關 —— 只看視窗是否覆蓋錨點', () => {
+    // 這是採「取回筆數達每輪上限即設限」會踩到的故障：API 每輪 50 筆且
+    // 時間跨度遠大於檢查間隔，以筆數判定會使上限恆成立，而上限（最舊者）
+    // 早於現有錨點，錨點將永遠無法推進、每輪重新比對整個清單。
+    const feed = Array.from({ length: 50 }, (_, i) => vid(`r${i}`, NEWER - i * 86400000));
     const baseline = NEWER - 2 * 86400000;   // 錨點在近兩天內，遠晚於最舊那筆
     const got = nextChannelBaseline(feed, baseline);
     expect(got?.videoId).toBe('r0');
@@ -410,7 +396,7 @@ describe('nextChannelBaseline —— 備援候選視窗上限', () => {
   });
 
   it('尚未建立錨點時不設限 —— 首次追蹤不存在可跳過的缺口', () => {
-    expect(nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0)?.videoId).toBe('n1');
+    expect(nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], 0)?.videoId).toBe('n1');
     expect(nextChannelBaseline([vid('n1', NEWER)], 0)?.videoId).toBe('n1');
   });
 
@@ -420,7 +406,7 @@ describe('nextChannelBaseline —— 備援候選視窗上限', () => {
   });
 
   it('視窗上限與未處理上限同時生效時取較嚴格者', () => {
-    const got = nextChannelBaseline([fb('n1', NEWER), fb('n2', OLDER)], 0, new Set(['n2']));
+    const got = nextChannelBaseline([vid('n1', NEWER), vid('n2', OLDER)], 0, new Set(['n2']));
     expect(got).toBeNull();
   });
 });

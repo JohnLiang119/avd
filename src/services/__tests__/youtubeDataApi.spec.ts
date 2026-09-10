@@ -14,9 +14,19 @@ import {
   classifyApiError,
   nextQuotaResetTime,
   apiKeyFingerprint,
-  selectFirstChannel,
+  channelTrackingStatus,
+  trackingUnavailableError,
+  trackingUnavailableStatusOf,
+  describeTrackingStatus,
+  describeMissingKeyCheck,
+  describeApiFetchFailure,
+  buildChannelSnippetRequest,
+  parseChannelTitle,
+  minimumCheckIntervalMinutes,
+  checkIntervalFloorMinutes,
+  describeCheckIntervalFloor,
   fetchChannelVideosViaApi,
-  describeApiQuotaDegraded,
+  describeApiQuotaExhausted,
   describeApiKeyRejected,
   addApiUnits,
   currentApiUnitsUsed,
@@ -311,28 +321,161 @@ describe('金鑰指紋', () => {
   });
 });
 
-describe('通道選擇', () => {
+describe('追蹤狀態判定', () => {
   const NOW = Date.parse('2026-09-09T19:00:00Z');
 
-  it('未設金鑰一律走 RSS', () => {
-    expect(selectFirstChannel({ apiKey: '', now: NOW })).toBe('rss');
-    expect(selectFirstChannel({ apiKey: '   ', now: NOW })).toBe('rss');
+  it('未設金鑰即為停擺 —— 已無其他通道可退', () => {
+    expect(channelTrackingStatus({ apiKey: '', now: NOW })).toBe('missing_key');
+    expect(channelTrackingStatus({ apiKey: '   ', now: NOW })).toBe('missing_key');
   });
 
-  it('已設金鑰且未抑制走 API', () => {
-    expect(selectFirstChannel({ apiKey: FAKE_KEY, now: NOW })).toBe('api');
+  it('已設金鑰且未抑制時可正常追蹤', () => {
+    expect(channelTrackingStatus({ apiKey: FAKE_KEY, now: NOW })).toBe('ok');
   });
 
-  it('配額抑制中走 RSS，抑制時點已過恢復 API', () => {
-    expect(selectFirstChannel({ apiKey: FAKE_KEY, now: NOW, quotaSuppressedUntil: NOW + 3600000 })).toBe('rss');
-    expect(selectFirstChannel({ apiKey: FAKE_KEY, now: NOW, quotaSuppressedUntil: NOW - 1 })).toBe('api');
+  it('配額抑制中為停擺，抑制時點已過自動恢復', () => {
+    expect(channelTrackingStatus({ apiKey: FAKE_KEY, now: NOW, quotaSuppressedUntil: NOW + 3600000 }))
+      .toBe('quota_exhausted');
+    expect(channelTrackingStatus({ apiKey: FAKE_KEY, now: NOW, quotaSuppressedUntil: NOW - 1 })).toBe('ok');
   });
 
-  it('金鑰無效抑制中走 RSS，更換金鑰後恢復 API', () => {
+  it('金鑰無效抑制中為停擺，更換金鑰後恢復', () => {
     const rejected = apiKeyFingerprint(FAKE_KEY);
-    expect(selectFirstChannel({ apiKey: FAKE_KEY, now: NOW, rejectedKeyFingerprint: rejected })).toBe('rss');
+    expect(channelTrackingStatus({ apiKey: FAKE_KEY, now: NOW, rejectedKeyFingerprint: rejected }))
+      .toBe('key_rejected');
     // 換了金鑰 —— 指紋不符，抑制自動解除
-    expect(selectFirstChannel({ apiKey: 'AIzaANOTHERKEY', now: NOW, rejectedKeyFingerprint: rejected })).toBe('api');
+    expect(channelTrackingStatus({ apiKey: 'AIzaANOTHERKEY', now: NOW, rejectedKeyFingerprint: rejected }))
+      .toBe('ok');
+  });
+
+  it('未設金鑰優先於任何抑制 —— 三者的解法不同，不得混為一談', () => {
+    expect(channelTrackingStatus({
+      apiKey: '',
+      now: NOW,
+      quotaSuppressedUntil: NOW + 3600000,
+      rejectedKeyFingerprint: apiKeyFingerprint(FAKE_KEY),
+    })).toBe('missing_key');
+  });
+});
+
+describe('追蹤停擺錯誤的往返', () => {
+  it('三種停擺原因皆可自錯誤原樣取回', () => {
+    for (const status of ['missing_key', 'key_rejected', 'quota_exhausted'] as const) {
+      expect(trackingUnavailableStatusOf(trackingUnavailableError(status))).toBe(status);
+    }
+  });
+
+  it('包在其他訊息中仍可辨識 —— 邊界層可能加上前後文', () => {
+    expect(trackingUnavailableStatusOf(new Error('檢查頻道失敗: CHANNEL_TRACKING_UNAVAILABLE:quota_exhausted')))
+      .toBe('quota_exhausted');
+  });
+
+  it('一般錯誤不誤判為停擺，否則會把可重試的失敗當成停止追蹤', () => {
+    for (const err of [
+      new Error('HTTP_STATUS:500:server unavailable'),
+      new Error('NETWORK_ERROR:unable to resolve host'),
+      'API_CHANNEL_NOT_FOUND:UCxxx',
+      null,
+      undefined,
+    ]) {
+      expect(trackingUnavailableStatusOf(err), String(err)).toBeNull();
+    }
+  });
+});
+
+describe('停擺狀態指示', () => {
+  const NOTICES = (['missing_key', 'key_rejected', 'quota_exhausted'] as const)
+    .map(s => describeTrackingStatus(s, { quotaResetAt: Date.parse('2026-09-11T07:00:00Z') })!);
+
+  it('正常運作時不產生任何指示', () => {
+    expect(describeTrackingStatus('ok')).toBeNull();
+  });
+
+  it('三種原因的文案兩兩互異 —— 解法不同，混用會讓使用者做無效處理', () => {
+    const titles = NOTICES.map(n => n.title);
+    const details = NOTICES.map(n => n.detail);
+    expect(new Set(titles).size).toBe(3);
+    expect(new Set(details).size).toBe(3);
+  });
+
+  it('配額耗盡明說會自動恢復，未設金鑰與金鑰無效則指向使用者的動作', () => {
+    const [missing, rejected, quota] = NOTICES;
+    expect(missing.detail).toContain('金鑰');
+    expect(rejected.detail).toContain('金鑰');
+    expect(quota.detail).toContain('自動恢復');
+    // 配額耗盡不得叫使用者去改金鑰 —— 那是無效處理
+    expect(quota.detail).not.toContain('請於上方');
+  });
+
+  it('皆不含金鑰片段 —— 函式不接受金鑰參數即結構性保證', () => {
+    for (const notice of NOTICES) {
+      for (const text of [notice.title, notice.detail]) {
+        expect(text).not.toContain('AIza');
+        expect(text).not.toContain(FAKE_KEY);
+      }
+    }
+  });
+
+  it('無重置時點時仍可產生配額文案，不因缺少參數而失敗', () => {
+    const notice = describeTrackingStatus('quota_exhausted')!;
+    expect(notice.detail).toContain('自動恢復');
+  });
+});
+
+describe('檢查間隔的安全下限', () => {
+  it('下限依頻道數推導 —— 6 個約 2.5 分鐘、20 個約 8.2、50 個約 20.6', () => {
+    expect(minimumCheckIntervalMinutes(6)).toBeCloseTo(2.47, 1);
+    expect(minimumCheckIntervalMinutes(20)).toBeCloseTo(8.23, 1);
+    expect(minimumCheckIntervalMinutes(50)).toBeCloseTo(20.57, 1);
+  });
+
+  it('0 個頻道不回傳 0 或負值 —— 那會算出「間隔可以是 0 分鐘」', () => {
+    for (const n of [0, -1, NaN, undefined as any]) {
+      expect(minimumCheckIntervalMinutes(n), String(n)).toBeGreaterThan(0);
+      expect(checkIntervalFloorMinutes(n), String(n)).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('可設定的下限一律向上取整，不得四捨五入到下限之下', () => {
+    expect(checkIntervalFloorMinutes(6)).toBe(3);
+    expect(checkIntervalFloorMinutes(20)).toBe(9);
+    expect(checkIntervalFloorMinutes(50)).toBe(21);
+    expect(checkIntervalFloorMinutes(6)).toBeGreaterThanOrEqual(minimumCheckIntervalMinutes(6));
+  });
+
+  it('下限隨頻道數單調遞增 —— 加頻道只會使下限提高', () => {
+    let prev = 0;
+    for (let n = 1; n <= 60; n++) {
+      const floor = checkIntervalFloorMinutes(n);
+      expect(floor).toBeGreaterThanOrEqual(prev);
+      prev = floor;
+    }
+  });
+
+  it('說明含下限的依據：頻道數與每日配額', () => {
+    const text = describeCheckIntervalFloor(20);
+    expect(text).toContain('20 個頻道');
+    expect(text).toContain(String(DAILY_QUOTA_UNITS));
+    expect(text).toContain('9 分鐘');
+  });
+});
+
+describe('以 API 取得頻道名稱', () => {
+  it('請求只取 snippet，且金鑰在標頭而非網址', () => {
+    const req = buildChannelSnippetRequest(CH, FAKE_KEY);
+    expect(req.url).toContain('channels');
+    expect(req.url).toContain('part=snippet');
+    expect(req.url).toContain(CH);
+    expect(req.url).not.toContain(FAKE_KEY);
+    expect(req.headers['X-goog-api-key']).toBe(FAKE_KEY);
+  });
+
+  it('自回應取出名稱；缺項或形狀不符時回空字串而非拋錯', () => {
+    expect(parseChannelTitle({ items: [{ snippet: { title: '測試頻道' } }] })).toBe('測試頻道');
+    expect(parseChannelTitle({ items: [] })).toBe('');
+    expect(parseChannelTitle({ items: [{ snippet: {} }] })).toBe('');
+    expect(parseChannelTitle({})).toBe('');
+    expect(parseChannelTitle(null)).toBe('');
   });
 });
 
@@ -380,11 +523,11 @@ describe('fetchChannelVideosViaApi —— uploads 清單後備查詢', () => {
 
 describe('回饋訊息片段', () => {
   it('配額耗盡與金鑰無效的文案互異', () => {
-    expect(describeApiQuotaDegraded()).not.toBe(describeApiKeyRejected());
+    expect(describeApiQuotaExhausted()).not.toBe(describeApiKeyRejected());
   });
 
   it('配額耗盡明說會自動恢復，避免使用者做無效處理', () => {
-    const msg = describeApiQuotaDegraded();
+    const msg = describeApiQuotaExhausted();
     expect(msg).toContain('配額');
     expect(msg).toContain('自動恢復');
     expect(msg).not.toContain('目前沒有新影片');
@@ -398,10 +541,42 @@ describe('回饋訊息片段', () => {
   });
 
   it('兩者皆不含金鑰片段 —— 函式不接受金鑰參數即結構性保證', () => {
-    for (const msg of [describeApiQuotaDegraded(), describeApiKeyRejected()]) {
+    for (const msg of [describeApiQuotaExhausted(), describeApiKeyRejected()]) {
       expect(msg).not.toContain('AIza');
       expect(msg).not.toContain(FAKE_KEY);
     }
+  });
+
+  it('未設金鑰的回饋不與「沒有新影片」或「無法連線」混用', () => {
+    const msg = describeMissingKeyCheck();
+    expect(msg).toContain('金鑰');
+    // 系統根本沒有檢查，顯示「沒有新影片」是假陽性
+    expect(msg).not.toContain('目前沒有新影片');
+    expect(msg).not.toContain('沒有新影片');
+    // 系統並未發出任何請求，不是連線問題
+    expect(msg).not.toContain('無法連線');
+    expect(msg).not.toBe(describeApiFetchFailure());
+    expect(msg).not.toBe(describeApiFetchFailure({ offline: true }));
+  });
+
+  it('擷取失敗的文案不再提及 RSS 或備援 —— 已無第二條通道', () => {
+    for (const msg of [
+      describeApiFetchFailure(),
+      describeApiFetchFailure({ compact: true }),
+      describeApiFetchFailure({ offline: true }),
+      describeApiQuotaExhausted(),
+      describeApiKeyRejected(),
+      describeMissingKeyCheck(),
+    ]) {
+      expect(msg).not.toContain('RSS');
+      expect(msg).not.toContain('備援');
+    }
+  });
+
+  it('裝置離線與服務層失敗的措辭分開，不把兩者混用', () => {
+    expect(describeApiFetchFailure({ offline: true })).toContain('裝置');
+    expect(describeApiFetchFailure()).not.toContain('裝置');
+    expect(describeApiFetchFailure()).not.toBe(describeApiFetchFailure({ offline: true }));
   });
 });
 

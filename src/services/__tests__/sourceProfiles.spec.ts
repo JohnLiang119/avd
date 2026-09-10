@@ -144,7 +144,7 @@ describe('能力宣告', () => {
   });
 
   it('只有 YouTube 頻道可加入自動追蹤', () => {
-    // 追蹤機制綁定官方 RSS，其他平台沒有等價物
+    // 追蹤機制綁定 YouTube Data API，其他平台沒有等價物
     const trackable = SOURCE_PROFILES.filter(p => p.supportsChannelTracking).map(p => p.id);
     expect(trackable).toEqual(['youtube-channel', 'youtube-handle']);
     expect(FALLBACK_PROFILE.supportsChannelTracking).toBe(false);

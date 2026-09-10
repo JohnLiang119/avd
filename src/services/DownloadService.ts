@@ -13,16 +13,19 @@ import {
   ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
   type EnrichedItem
 } from './enrichment';
-import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES, channelRssRetryDelays } from './rateLimit';
+import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
-import { isUpcomingLiveError } from './downloadErrors';
 import {
-  selectFirstChannel,
+  channelTrackingStatus,
+  trackingUnavailableError,
   fetchChannelVideosViaApi,
   resolveLiveStatusesViaApi,
+  buildChannelSnippetRequest,
+  parseChannelTitle,
   classifyApiError,
   type ApiRequest,
   type ApiErrorKind,
+  type ChannelTrackingBlocked,
 } from './youtubeDataApi';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
@@ -160,37 +163,6 @@ async function sleepUnlessCancelled(ms: number): Promise<void> {
   if (isParseCancelling) throw new Error(PARSE_CANCELLED);
 }
 
-
-/**
- * 取得頻道 RSS，依錯誤性質套用分層的重試等待（見 `channelRssRetryDelays`）。
- *
- * 各層等待長度差異極大（network 0.5 秒、404 累計 1.1 秒、5xx 累計 4 秒），刻意不與
- * yt-dlp 下載路徑的 2s→4s→8s 共用一張表 —— 那會讓每個失敗頻道白等 14 秒。
- * `sleep` 可注入以便測試時不必實際等待；`options.noRetry` 供呼叫端在本輪已判定
- * 為全域性故障時降級為單次嘗試。
- */
-export async function fetchChannelRssWithRetry(
-  request: () => Promise<string>,
-  sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  options: { noRetry?: boolean } = {}
-): Promise<string> {
-  let plan: number[] | null = null;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const xmlText = await request();
-      if (!xmlText) throw new Error('頻道 RSS 內容為空');
-      return xmlText;
-    } catch (error) {
-      // 時間表以「首次失敗」的錯誤性質決定，後續重試沿用同一張表，
-      // 避免中途錯誤類型改變而讓重試次數失控。
-      if (plan === null) plan = options.noRetry ? [] : channelRssRetryDelays(error);
-      const delay = plan[attempt];
-      if (!delay) throw error;
-      console.warn(`[頻道 RSS] 失敗，${delay} 毫秒後重試（第 ${attempt + 1}/${plan.length} 次）`);
-      await sleep(delay);
-    }
-  }
-}
 
 /**
  * 執行解析用的 yt-dlp；遭遇來源限流時退避重試。
@@ -367,85 +339,11 @@ export interface MonitoredVideoResult {
   publishedTime: number;
   url: string;
   /**
-   * 資料來源通道。三者的候選視窗與發布時間精確度並不相同：
-   * `api` 每輪 50 筆且帶精確時間、`rss` 約 15 筆帶精確時間、
-   * `fallback` 每輪僅 2 筆且不帶精確時間。錨點守門依此決定上限。
+   * 資料來源通道。頻道追蹤只有 YouTube Data API 一條通道，故此欄位恆為
+   * `'api'`。欄位本身保留而不移除：既有佇列中的任務已序列化此欄位，
+   * 移除會牽動持久化與型別，收益卻只是少一個單值欄位。
    */
-  source: 'api' | 'rss' | 'fallback';
-}
-
-/**
- * 判斷一筆 yt-dlp 備援結果是否來自頻道的 Live 分頁。
- *
- * yt-dlp 抓取 /channel/{id} 時會遍歷該頻道存在的各分頁，`playlist` 欄位格式為
- * 「{頻道名} - {分頁名}」（如 `Lofi Girl - Live`）。
- *
- * 刻意不使用 `playlist.includes('Live')`：頻道名稱本身含 "Live" 時會誤殺
- * （例如 `Live Music - Videos`），因此改為比對分頁名後綴。
- *
- * 也刻意不採用 `was_live === true` 作為判準，原因有二：
- *   1. 實測顯示 Live 分頁影片的 `was_live` 為 `false`，該條件對此用途完全無效。
- *   2. `was_live` 指的是「該影片是否為已結束的直播存檔」；這類影片若出現在
- *      Videos 分頁，官方 RSS 是會涵蓋的，濾掉反而與 RSS 的範圍不一致。
- */
-function isLiveTabEntry(entry: any): boolean {
-  const playlist = typeof entry?.playlist === 'string' ? entry.playlist : '';
-  return /\s-\sLive$/.test(playlist.trim());
-}
-
-/**
- * 將一筆 yt-dlp 備援結果轉為 MonitoredVideoResult。
- *
- * 時間解析優先序：`timestamp`（Unix 秒）→ `upload_date`（YYYYMMDD）→ `0`。
- * 兩者皆無時回傳 `0` 而非當下時間，交由呼叫端判斷是否推進基準。
- */
-function mapFallbackEntry(entry: any): MonitoredVideoResult {
-  const videoId = entry?.id || '';
-  const url = entry?.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
-
-  let pubTime = 0;
-  if (typeof entry?.timestamp === 'number' && entry.timestamp > 0) {
-    pubTime = entry.timestamp * 1000;
-  } else if (entry?.upload_date && String(entry.upload_date).length === 8) {
-    const str = String(entry.upload_date);
-    const parsed = new Date(`${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}T00:00:00Z`).getTime();
-    if (Number.isFinite(parsed)) pubTime = parsed;
-  }
-
-  return {
-    videoId,
-    title: convertCnToTw(entry?.title || ''),
-    published: pubTime ? new Date(pubTime).toISOString() : '',
-    publishedTime: pubTime,
-    url,
-    source: 'fallback' as const,
-  };
-}
-
-/**
- * 將備援回傳的 NDJSON（每行一個 JSON 物件）轉為最新影片清單。
- * 濾除 Live 分頁後依發布時間由新至舊排序，再取前 `limit` 筆。
- */
-function parseFallbackNdjson(ndjson: string, limit = 2): MonitoredVideoResult[] {
-  const entries = ndjson
-    .trim()
-    .split('\n')
-    .map((line) => {
-      try {
-        return JSON.parse(line.trim());
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .filter((entry: any) => !isLiveTabEntry(entry));
-
-  if (entries.length === 0) return [];
-
-  return entries
-    .map(mapFallbackEntry)
-    .sort((a, b) => b.publishedTime - a.publishedTime)
-    .slice(0, limit);
+  source: 'api';
 }
 
 /**
@@ -460,8 +358,8 @@ function parseFallbackNdjson(ndjson: string, limit = 2): MonitoredVideoResult[] 
  * 單看狀態碼不足，403 兩者皆可能。
  */
 /**
- * API 通道的呼叫端選項。`fetchChannelVideos` 與 `resolveLiveStatuses` 共用，
- * 使抑制狀態、用量計數與錯誤回報在兩條路徑上一致。
+ * API 通道的呼叫端選項。`fetchChannelVideos`、`resolveLiveStatuses` 與
+ * `fetchChannelTitle` 共用，使抑制狀態、用量計數與錯誤回報在各路徑上一致。
  */
 export interface ChannelApiOptions {
   apiKey: string;
@@ -480,15 +378,20 @@ export interface ChannelApiOptions {
   onUnitsConsumed?: (units: number) => void;
 }
 
-/** 本輪是否該走 API 通道。 */
-function shouldUseApi(api?: ChannelApiOptions): api is ChannelApiOptions {
-  if (!api) return false;
-  return selectFirstChannel({
-    apiKey: api.apiKey,
-    now: api.now ?? Date.now(),
-    quotaSuppressedUntil: api.quotaSuppressedUntil,
-    rejectedKeyFingerprint: api.rejectedKeyFingerprint,
-  }) === 'api';
+/**
+ * 本輪頻道追蹤是否可運作；不可運作時回傳停擺原因。
+ *
+ * 移除備援後這不再是「選哪條通道」而是「能不能追蹤」—— 回傳非 `null` 時
+ * 呼叫端 MUST 拋出可辨識的錯誤，MUST NOT 靜默回傳空清單。
+ */
+function trackingBlockedReason(api?: ChannelApiOptions): ChannelTrackingBlocked | null {
+  const status = channelTrackingStatus({
+    apiKey: api?.apiKey ?? '',
+    now: api?.now ?? Date.now(),
+    quotaSuppressedUntil: api?.quotaSuppressedUntil,
+    rejectedKeyFingerprint: api?.rejectedKeyFingerprint,
+  });
+  return status === 'ok' ? null : status;
 }
 
 /**
@@ -1394,7 +1297,7 @@ export const DownloadService = {
    *
    * 刻意不拋出例外——任何失敗（連線層、逾時、非預期回應）一律回傳 false，
    * 由呼叫端（`useNetworkStatus`）依此區分 online 與 degraded，
-   * 與個別 RSS 請求失敗後的事後分類（`rateLimit.ts` 的 `classifyChannelRssError`）
+   * 與個別請求失敗後的事後分類（`rateLimit.ts` 的 `isDeviceOfflineError`）
    * 是兩件獨立的事，見 show-network-status/design.md 的 Non-Goals。
    */
   async probeInternetConnectivity(timeoutMs: number): Promise<boolean> {
@@ -1421,71 +1324,16 @@ export const DownloadService = {
   },
 
   /**
-   * 查詢影片是否為直播中或排程尚未開播。
-   *
-   * 兩平台的判準一致：`is_live` 與 `is_upcoming` 皆視為直播而應排除。
-   * 尚未開播的排程直播不存在任何可下載格式，放行必然導致下載失敗。
-   *
-   * 刻意回傳三態而非布林：`'unknown'` 代表查詢本身失敗、無從判定。
-   * 呼叫端據此得知該影片並未被實際處理，不應讓頻道的時間錨點越過它，
-   * 以便下次檢查重新評估。
-   */
-  async checkVideoLiveStatus(url: string): Promise<LiveCheckResult> {
-    try {
-      let status = '';
-
-      if (isTauri()) {
-        const cmd = Command.sidecar('bin/yt-dlp', [
-          '--print', 'live_status',
-          '--skip-download',
-          url
-        ]);
-        const output = await cmd.execute();
-        status = output.stdout.trim();
-      } else {
-        const res = await YoutubeDlPlugin.checkVideoLiveStatus({ url });
-        status = (res?.liveStatus || '').trim();
-      }
-
-      const normalized = status.toLowerCase();
-      if (!normalized) return 'unknown';
-      return normalized === 'is_live' || normalized === 'is_upcoming' ? 'live' : 'not_live';
-    } catch (e: any) {
-      // yt-dlp 對尚未開播的排程直播會直接報錯而非輸出 live_status。
-      // 若不辨識出來，這類影片會落入 'unknown' 而阻擋時間錨點推進 ——
-      // 對每日建立排程直播的頻道（如新聞台），錨點會因此永久卡死。
-      // 判定樣式與 Android 端的 YoutubeDlPlugin 共用，兩處須同步。
-      if (isUpcomingLiveError(e?.message || String(e))) {
-        console.log(`[直播狀態] 排程未開播，永久略過: ${url}`);
-        return 'live';
-      }
-      console.warn(`檢查直播狀態失敗 (${url}):`, e);
-      return 'unknown';
-    }
-  },
-
-  /**
-   * 取得頻道最新影片，內部封裝三層降級鏈：
-   * **YouTube Data API → 官方 RSS → yt-dlp 備援**。
-   *
-   * 上層只看回傳陣列與其 `source` 標記，不需知道實際走了哪條通道。
-   * 未提供 `api` 選項或其金鑰為空時，MUST NOT 發出任何 API 請求 ——
-   * 那是完全正常的預設狀態，行為與導入 API 通道前逐位元相同。
-   */
-  /**
    * 解析一組影片的直播狀態，回傳 `videoId → 狀態` 的對照表。
    *
-   * API 可用時以批次查詢（單次最多 50 支、僅 1 unit），否則逐支呼叫
-   * `checkVideoLiveStatus`（桌面每支開一個 yt-dlp 行程）。兩種實作對上層
-   * 等價，故呼叫端**不需要知道是否有金鑰**。
+   * 一律走 API 批次查詢（單次最多 50 支、僅 1 unit）。逐支 yt-dlp 查詢的
+   * 降級路徑已移除 —— 那條路徑倚賴自錯誤訊息推測直播狀態，會因工具版本
+   * 或措辭變動而失效，且無法區分「已知為直播」與「查不到」。
    *
-   * 批次途中若有任何一批失敗，先把錯誤分類上報（使配額耗盡與金鑰無效能
-   * 觸發抑制），再改以逐支查詢完成本輪 —— 而不是讓那些影片停在 `unknown`。
-   * 停在 unknown 雖然安全（它們會阻擋錨點、下輪重新評估），但等於本輪白做；
-   * 逐支路徑是已知可用的，值得為此多付一次查詢。
-   *
-   * 查不到的影片一律為 `'unknown'`，MUST NOT 樂觀視為 `'not_live'` ——
-   * 錯放一支未開播的直播進佇列，下載必然失敗。
+   * 批次失敗時該批一律停在 `'unknown'`，並把錯誤分類上報（使配額耗盡與
+   * 金鑰無效能觸發抑制）。`'unknown'` 是保守處置：那些影片會阻擋錨點、
+   * 下輪重新評估，MUST NOT 樂觀視為 `'not_live'` —— 錯放一支未開播的
+   * 直播進佇列，下載必然失敗。
    */
   async resolveLiveStatuses(
     videos: { videoId: string; url: string }[],
@@ -1495,178 +1343,78 @@ export const DownloadService = {
     if (list.length === 0) return new Map();
 
     const api = options?.api;
+    const blocked = trackingBlockedReason(api);
+    if (blocked || !api) {
+      // 追蹤停擺：全部維持 unknown（阻擋錨點、下輪重新評估）。
+      // 呼叫端已於 fetchChannelVideos 取得同一原因並回報，此處不重複上報。
+      return new Map(list.map(v => [v.videoId, 'unknown' as LiveCheckResult]));
+    }
 
-    if (shouldUseApi(api)) {
-      const errors: unknown[] = [];
-      const map = await resolveLiveStatusesViaApi(
-        list.map(v => v.videoId),
-        api.apiKey,
-        countedApiFetch(api),
-        e => errors.push(e)
-      );
+    const errors: unknown[] = [];
+    const map = await resolveLiveStatusesViaApi(
+      list.map(v => v.videoId),
+      api.apiKey,
+      countedApiFetch(api),
+      e => errors.push(e)
+    );
 
-      if (errors.length === 0) return map;
-
-      // 有批次失敗：先記錄抑制，再降級逐支完成本輪
+    if (errors.length > 0) {
       for (const e of errors) api.onError?.(classifyApiError(e));
-      console.warn(`直播狀態批次查詢有 ${errors.length} 批失敗，改以逐支查詢完成本輪`);
+      console.warn(`直播狀態批次查詢有 ${errors.length} 批失敗，該批影片維持狀態未定，下輪重新評估`);
     }
 
-    const map = new Map<string, LiveCheckResult>();
-    for (const video of list) {
-      map.set(video.videoId, await DownloadService.checkVideoLiveStatus(video.url));
-    }
     return map;
   },
 
+  /**
+   * 取得頻道最新影片。**只有 YouTube Data API 一條通道。**
+   *
+   * 未設有效金鑰（或金鑰無效、配額耗盡的抑制生效中）時 MUST 拋出可辨識的
+   * 停擺錯誤，MUST NOT 回傳空清單 —— 空清單會被上層當成「這個頻道沒有
+   * 新影片」，使追蹤完全停止卻毫無徵狀，正是移除備援後最需要防止的假陽性。
+   */
   async fetchChannelVideos(
     channelId: string,
-    options?: {
-      enableFallback?: boolean;
-      noRetry?: boolean;
-      api?: ChannelApiOptions;
-    }
+    options: { api?: ChannelApiOptions }
   ): Promise<MonitoredVideoResult[]> {
     const api = options?.api;
-
-    if (shouldUseApi(api)) {
-      try {
-        const { videos, uploadsPlaylistId } = await fetchChannelVideosViaApi(
-          channelId, api.apiKey, countedApiFetch(api), api.uploadsPlaylistId
-        );
-        api.onResolved?.(uploadsPlaylistId);
-        return videos;
-      } catch (e: any) {
-        // 分類後交由呼叫端決定抑制與回饋；本輪一律降級續走 RSS → yt-dlp。
-        // 刻意不記錄 request 物件 —— 金鑰在標頭中，不得被順帶寫進日誌。
-        const kind = classifyApiError(e);
-        api.onError?.(kind);
-        console.warn(`YouTube Data API 失敗 (${channelId}, ${kind})，降級至官方 RSS`, e?.message || e);
-      }
-    }
+    const blocked = trackingBlockedReason(api);
+    if (blocked || !api) throw trackingUnavailableError(blocked ?? 'missing_key');
 
     try {
-      const xmlText = await fetchChannelRssWithRetry(async () => {
-        if (!isTauri()) {
-          // Android 端使用原生外掛繞過 WebView CORS 限制
-          const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
-          return res.xml || '';
-        }
-
-        // Windows/桌面端調用 Rust 原生 HTTP 請求通道，繞過 WebView CORS 限制
-        const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
-        return invoke<string>('fetch_http_text', { url: rssUrl });
-      }, undefined, { noRetry: options?.noRetry });
-
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(xmlText, 'application/xml');
-      if (doc.documentElement?.nodeName.toLowerCase() === 'parsererror' || doc.querySelector('parsererror')) {
-        throw new Error('頻道 RSS XML 解析失敗');
-      }
-      const entries = Array.from(doc.querySelectorAll('entry'));
-      
-      return entries.map(entry => {
-        const outer = entry.outerHTML || '';
-        
-        let videoId = (entry.getElementsByTagName('yt:videoId')[0] || entry.getElementsByTagName('videoId')[0] || entry.querySelector('videoId'))?.textContent || '';
-        if (!videoId && outer) {
-          const match = outer.match(/<(?:yt:)?videoId>([^<]+)<\/(?:yt:)?videoId>/i);
-          if (match) videoId = match[1];
-        }
-
-        let rawTitle = (entry.getElementsByTagName('title')[0] || entry.querySelector('title'))?.textContent || '';
-        if (!rawTitle && outer) {
-          const match = outer.match(/<title>([^<]+)<\/title>/i);
-          if (match) rawTitle = match[1];
-        }
-
-        let published = (entry.getElementsByTagName('published')[0] || entry.querySelector('published') || entry.getElementsByTagName('updated')[0])?.textContent || '';
-        if (!published && outer) {
-          const match = outer.match(/<published>([^<]+)<\/published>/i) || outer.match(/<updated>([^<]+)<\/updated>/i);
-          if (match) published = match[1];
-        }
-
-        const linkEl = entry.getElementsByTagName('link')[0] || entry.querySelector('link');
-        let url = linkEl?.getAttribute('href') || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : '');
-
-        let pubTime = 0;
-        if (published) {
-          pubTime = new Date(published).getTime();
-        }
-        if (!pubTime || isNaN(pubTime)) {
-          pubTime = Date.now();
-        }
-
-        return {
-          videoId,
-          title: convertCnToTw(rawTitle),
-          published: published || new Date(pubTime).toISOString(),
-          publishedTime: pubTime,
-          url,
-          source: 'rss' as const
-        };
-      });
+      const { videos, uploadsPlaylistId } = await fetchChannelVideosViaApi(
+        channelId, api.apiKey, countedApiFetch(api), api.uploadsPlaylistId
+      );
+      api.onResolved?.(uploadsPlaylistId);
+      return videos;
     } catch (e: any) {
-      if (!options?.enableFallback) {
-        throw new Error(`官方 RSS 連線失敗: ${e.message || String(e)}`);
-      }
-
-      console.warn(`官方 RSS 失敗 (${channelId})，已啟用備援機制，嘗試啟動 yt-dlp 備援...`, e);
-      if (isTauri()) {
-        try {
-          const jsonString = await invoke<string>('fetch_channel_videos_fallback', { channelId });
-          const videos = parseFallbackNdjson(jsonString);
-          if (videos.length === 0) {
-            throw new Error('yt-dlp 未回傳任何有效影片資料');
-          }
-          return videos;
-        } catch (fallbackError: any) {
-          console.error(`yt-dlp 備援也失敗 (${channelId}):`, fallbackError);
-          throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 yt-dlp 備援均失敗. 原錯誤: ${e.message}`);
-        }
-      } else {
-        try {
-          // Android 端備援：改用專用的 fetchChannelVideosFallback。
-          // 先前使用 parsePlaylist，其內部以 --flat-playlist 執行而無法取得發布時間，
-          // 只能一律填入當下時間，正是造成追蹤基準被污染的來源。
-          const res = await YoutubeDlPlugin.fetchChannelVideosFallback({ channelId });
-          const videos = parseFallbackNdjson(res?.ndjson || '');
-          if (videos.length === 0) {
-            throw new Error('Android 備援未回傳任何有效影片資料');
-          }
-          return videos;
-        } catch (fallbackError: any) {
-          console.error(`Android 備援也失敗 (${channelId}):`, fallbackError);
-          throw new Error(`獲取頻道 RSS 失敗: 官方 RSS 與 Android 備援均失敗. 原錯誤: ${e.message}`);
-        }
-      }
+      // 分類後交由呼叫端決定抑制與回饋，錯誤本身照常上拋 —— 已無備援可降級。
+      // 刻意不記錄 request 物件 —— 金鑰在標頭中，不得被順帶寫進日誌。
+      api.onError?.(classifyApiError(e));
+      throw e;
     }
   },
 
-  // 從 YouTube RSS feed 的 <title> 取得頻道名稱
-  async fetchChannelTitleFromRss(channelId: string): Promise<string> {
+  /**
+   * 以 API 取得頻道名稱，供加入頻道與既有頻道的名稱修復使用。
+   *
+   * 查詢失敗一律回傳空字串而非拋錯：名稱屬輔助資訊，MUST NOT 成為加入
+   * 頻道的阻礙 —— 呼叫端沿用既有退回行為（以使用者輸入作為暫時名稱），
+   * 並於後續檢查成功時修復。
+   */
+  async fetchChannelTitle(channelId: string, options?: { api?: ChannelApiOptions }): Promise<string> {
+    const api = options?.api;
+    if (!api || trackingBlockedReason(api)) return '';
+
     try {
-      let xmlText = '';
-      const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`;
-      if (!isTauri()) {
-        const res = await YoutubeDlPlugin.fetchChannelRss({ channelId });
-        xmlText = res.xml || '';
-      } else {
-        xmlText = await invoke<string>('fetch_http_text', { url: rssUrl });
-      }
-      if (xmlText) {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xmlText, 'application/xml');
-        // RSS feed 根層的 <title> 就是頻道名稱
-        const feedTitleEl = doc.querySelector('feed > title');
-        if (feedTitleEl && feedTitleEl.textContent) {
-          return convertCnToTw(feedTitleEl.textContent);
-        }
-      }
-    } catch (e) {
-      console.warn('fetchChannelTitleFromRss failed:', e);
+      const json = await countedApiFetch(api)(buildChannelSnippetRequest(channelId, api.apiKey));
+      return convertCnToTw(parseChannelTitle(json));
+    } catch (e: any) {
+      // 名稱查詢與影片擷取共用同一把金鑰，故此處的失敗同樣值得觸發抑制
+      api.onError?.(classifyApiError(e));
+      console.warn('fetchChannelTitle failed:', e?.message || e);
+      return '';
     }
-    return '';
   },
 
   async resolveYouTubeChannel(input: string): Promise<{ channelId: string; title?: string; thumbnail?: string }> {
