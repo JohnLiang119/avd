@@ -68,17 +68,57 @@ function errorMessageOf(error: unknown): string {
 }
 
 /**
+ * 頻道追蹤單次 API 請求的逾時上限。
+ *
+ * 取 10 秒是為了與桌面端 Rust 既有的連線／讀取逾時對齊 —— 兩平台取不同的
+ * 數字會製造一類難以重現的行為分岔：同一個慢頻道在一邊失敗、另一邊成功。
+ */
+export const API_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * 逾時錯誤的訊息前綴。
+ *
+ * 與 `NETWORK_ERROR:`（裝置離線）及 `HTTP_STATUS:`（服務回報失敗）並列為
+ * 第三類。三者的意涵完全不同，MUST NOT 混用 —— 見 `isDeviceOfflineError`。
+ */
+export const REQUEST_TIMEOUT_PREFIX = 'REQUEST_TIMEOUT:';
+
+/**
+ * 建構逾時錯誤。
+ *
+ * 刻意**不帶入請求網址** —— 錯誤訊息會寫進 `avd_error_log`，而該日誌的設計
+ * 目的就是讓使用者複製出來求助。網址不進訊息是結構性保障，不倚賴遮蔽邏輯。
+ */
+export function requestTimeoutError(timeoutMs: number = API_REQUEST_TIMEOUT_MS): Error {
+  return new Error(`${REQUEST_TIMEOUT_PREFIX}${timeoutMs}ms`);
+}
+
+/** 錯誤是否為請求逾時。 */
+export function isRequestTimeoutError(error: unknown): boolean {
+  return new RegExp(REQUEST_TIMEOUT_PREFIX, 'i').test(errorMessageOf(error));
+}
+
+/**
  * 錯誤是否代表**這台裝置**連不上網，而非遠端服務的問題。
  *
  * 判定依據為邊界層一致加上的 `NETWORK_ERROR:` 前綴（Rust 的 `fetch_http_text`
- * 對 `ureq::Error::Transport` 加上），以及 WebView `fetch()` 於傳輸層失敗時
- * 拋出的 `TypeError`／`Failed to fetch`。
+ * 對非逾時的 `ureq::Error::Transport` 加上），以及 WebView `fetch()` 於傳輸層
+ * 失敗時拋出的 `TypeError`／`Failed to fetch`。
  *
  * 這是「提早停止」唯一的判準：裝置現在確定連不上網，本輪其餘頻道逐一嘗試
  * 也不會有不同結果。與服務層錯誤（HTTP 狀態碼）刻意分開 —— 後者只代表
  * 這一個請求失敗，不足以推論整輪。
+ *
+ * **逾時 MUST NOT 判為裝置離線。** 單一頻道逾時完全不支持「整台裝置連不上網」
+ * 這個推論 —— 可能只是那個頻道的清單特別大、或服務端該次卡住。誤判的代價是
+ * 一個慢頻道就讓整輪其餘頻道全部被跳過，並對使用者宣稱裝置無法連線；那比
+ * 原本的慢嚴重得多，因為它會靜默地讓多數頻道整輪不被檢查。
+ *
+ * 此處刻意寫成明確的提前返回，而非倚賴「逾時訊息剛好不含 NETWORK_ERROR」
+ * 這個巧合 —— 巧合會在有人改動訊息格式時無聲失效。
  */
 export function isDeviceOfflineError(error: unknown): boolean {
+  if (isRequestTimeoutError(error)) return false;
   if (error instanceof TypeError) return true;
   const message = errorMessageOf(error);
   return /NETWORK_ERROR:/i.test(message) || /failed to fetch/i.test(message);

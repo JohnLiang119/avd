@@ -13,7 +13,10 @@ import {
   ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
   type EnrichedItem
 } from './enrichment';
-import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES } from './rateLimit';
+import {
+  shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES,
+  API_REQUEST_TIMEOUT_MS, requestTimeoutError,
+} from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 import {
   channelTrackingStatus,
@@ -374,6 +377,16 @@ export interface ChannelApiOptions {
   onResolved?: (uploadsPlaylistId: string) => void;
   /** API 失敗時回報錯誤類別，供呼叫端寫入抑制狀態與回饋 */
   onError?: (kind: ApiErrorKind) => void;
+  /**
+   * 失敗的原文回報，供呼叫端寫入錯誤日誌。
+   *
+   * 與 `onError` 刻意分開：後者只給分類（供抑制判斷），前者給**未經截斷的
+   * 原文**（供事後追查）。這裡回報的是那些**不會向使用者提示**、但確實改變
+   * 了結果的失敗 —— 直播狀態查詢失敗會使影片停在狀態未定而阻擋錨點、
+   * 頻道名稱查詢失敗會使頻道停留在以網址為名。使用者事後只看得到「沒有新
+   * 影片」或「名稱不對」，日誌裡卻沒有任何線索。
+   */
+  onFailure?: (context: string, error: unknown) => void;
   /** 每次請求送達服務後回報其配額成本，供呼叫端累計當日用量估算 */
   onUnitsConsumed?: (units: number) => void;
 }
@@ -417,6 +430,8 @@ function countedApiFetch(api: ChannelApiOptions) {
 
 async function fetchApiJson(request: ApiRequest): Promise<any> {
   if (isTauri()) {
+    // 桌面端的逾時由 Rust 的 ureq agent 負責（連線與讀取各 10 秒），
+    // 並於該處拋出 REQUEST_TIMEOUT: 前綴，與此處的 Android 路徑一致。
     const text = await invoke<string>('fetch_http_text', {
       url: request.url,
       headers: request.headers,
@@ -424,12 +439,26 @@ async function fetchApiJson(request: ApiRequest): Promise<any> {
     return JSON.parse(text);
   }
 
-  const res = await fetch(request.url, { headers: request.headers });
-  const body = await res.text();
-  if (!res.ok) {
-    throw new Error(`HTTP_STATUS:${res.status}:${body.slice(0, 500)}`);
+  // WebView 的 fetch() 沒有內建逾時 —— 少了這道界限，一個不回應的請求會
+  // **無限期**擋住整輪檢查，而使用者看到的是永不結束的進行中狀態。
+  // 移除備援後追蹤只剩單一通道，那比明確失敗更糟：無法察覺，也無從排查。
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(request.url, { headers: request.headers, signal: controller.signal });
+    const body = await res.text();
+    if (!res.ok) {
+      throw new Error(`HTTP_STATUS:${res.status}:${body.slice(0, 500)}`);
+    }
+    return JSON.parse(body);
+  } catch (e) {
+    // 中止旗標優先於原始錯誤：abort 會讓 fetch 拋出 AbortError，
+    // 而那個錯誤本身不帶「這是我們主動因逾時中止」的資訊。
+    if (controller.signal.aborted) throw requestTimeoutError(API_REQUEST_TIMEOUT_MS);
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return JSON.parse(body);
 }
 
 export const DownloadService = {
@@ -1359,7 +1388,12 @@ export const DownloadService = {
     );
 
     if (errors.length > 0) {
-      for (const e of errors) api.onError?.(classifyApiError(e));
+      for (const e of errors) {
+        api.onError?.(classifyApiError(e));
+        // 這些失敗不向使用者提示，但它們會讓影片停在狀態未定而阻擋錨點推進
+        // —— 屬「改變了結果」，故仍須入帳，否則使用者只看得到「沒有新影片」。
+        api.onFailure?.('直播狀態批次查詢', e);
+      }
       console.warn(`直播狀態批次查詢有 ${errors.length} 批失敗，該批影片維持狀態未定，下輪重新評估`);
     }
 
@@ -1412,7 +1446,9 @@ export const DownloadService = {
     } catch (e: any) {
       // 名稱查詢與影片擷取共用同一把金鑰，故此處的失敗同樣值得觸發抑制
       api.onError?.(classifyApiError(e));
-      console.warn('fetchChannelTitle failed:', e?.message || e);
+      // 不向使用者提示（名稱取不到不阻擋加入頻道），但頻道會停留在以網址
+      // 為名的狀態 —— 那是使用者看得到的結果差異，故須入帳。
+      api.onFailure?.('取得頻道名稱', e);
       return '';
     }
   },

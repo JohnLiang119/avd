@@ -843,6 +843,17 @@
               🧪 模擬測試
             </van-button>
           </div>
+
+          <!--
+            逐頻道進度。放在按鈕正下方 —— 那是使用者按下去之後注視的位置。
+            卡住時會停在該頻道的名稱上，使「是哪個頻道慢」可被指認。
+          -->
+          <div
+            v-if="checkProgressText"
+            style="margin-top: 8px; font-size: 11px; color: #475569; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+          >
+            {{ checkProgressText }}
+          </div>
         </div>
 
         <!-- 頻道備份與還原面板 -->
@@ -1113,7 +1124,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted, onMounted, computed } from 'vue';
+import { ref, watch, onUnmounted, onMounted, computed, nextTick } from 'vue';
 import { showToast, showLoadingToast, closeToast, showDialog, showConfirmDialog } from 'vant';
 import QrcodeVue from 'qrcode.vue';
 import YouTubeBatchModal from './components/YouTubeBatchModal.vue';
@@ -1134,7 +1145,9 @@ import {
   SINGLE_SEQUENCE, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress
 } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
-import { appendErrorEntry, formatErrorLog, sortedForDisplay, type ErrorEntry } from './composables/useErrorLog';
+import {
+  appendErrorEntry, formatErrorLog, sortedForDisplay, decideJournalTransition, type ErrorEntry,
+} from './composables/useErrorLog';
 import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
 import { isDeviceOfflineError, describeEarlyStop, shouldBackoff, describeRateLimit } from './services/rateLimit';
 import { resolveSourceProfile } from './services/sourceProfiles';
@@ -1148,6 +1161,8 @@ import {
   describeTrackingStatus,
   describeMissingKeyCheck,
   describeApiFetchFailure,
+  describeCheckProgress,
+  type ChannelCheckProgress,
   describeApiQuotaExhausted,
   describeApiKeyRejected,
   checkIntervalFloorMinutes,
@@ -1734,7 +1749,29 @@ const buildApiOptions = (channel?: MonitoredChannel) => {
       }
       // 'other'（5xx、網路錯誤）不抑制 —— 那是暫時性狀況，下輪值得再試
     },
+    onFailure: (context: string, error: unknown) => {
+      journalOnly(channel ? `${context}「${channel.title}」` : context, error);
+    },
   };
+};
+
+/**
+ * 只寫入日誌、不向使用者提示。
+ *
+ * 與 `reportError` 的差別在於它不彈 Toast —— 用於那些**不該逐一騷擾使用者**
+ * 但確實改變了結果的失敗（逐頻道失敗由輪末的總結提示統一告知）。
+ * 寫入失敗絕不可讓原本的錯誤處理更糟：這裡本來就已經在錯誤路徑上了。
+ */
+const journalOnly = (context: string, error: unknown) => {
+  try {
+    errorLog.value = appendErrorEntry(errorLog.value, {
+      time: Date.now(),
+      context,
+      message: (error as any)?.message || String(error),
+    });
+  } catch (e) {
+    console.error('寫入錯誤日誌失敗', e);
+  }
 };
 
 // ============================================================================
@@ -1901,6 +1938,18 @@ watch(showChannelModal, (open) => {
 });
 const isAddingManualChannel = ref(false);
 const isCheckingChannels = ref(false);
+
+/**
+ * 本輪檢查的進度。`total` 為 0 代表沒有進行中的檢查。
+ *
+ * 自動輪詢**同樣更新**此狀態（成本近乎為零，且彈窗開著時使用者就看得到），
+ * 但不為自動輪詢額外彈出任何提示 —— 少了這個更新，彈窗開著時自動輪詢啟動，
+ * 使用者會看到按鈕在轉圈卻沒有任何進度，反而更困惑。
+ */
+const checkProgress = ref<ChannelCheckProgress>({ done: 0, total: 0, currentTitle: '' });
+
+/** 進度文案；沒有進行中的檢查時為空字串。 */
+const checkProgressText = computed(() => describeCheckProgress(checkProgress.value));
 const manualChannelInput = ref('');
 
 const addManualChannel = async () => {
@@ -2266,6 +2315,34 @@ const applyChannelAnchor = (channel: MonitoredChannel, anchor: ChannelAnchor | n
  */
 let notifiedBlockedStatus: ChannelTrackingStatus | '' = '';
 
+/**
+ * 已**入帳**的停擺原因。與上方的提示抑制刻意分成兩份變數。
+ *
+ * 兩者的規則不同：手動檢查一律提示（使用者主動點的，必須得到回應），
+ * 但日誌不該因為使用者多按幾次就多寫幾筆。共用一份會讓其中一邊的規則
+ * 悄悄污染另一邊。
+ *
+ * **不持久化**：app 重啟是一個合理的新觀測點，「開啟時追蹤仍是停擺的」
+ * 本身就值得留一筆，而其頻率天然被「使用者多久開一次 app」限制住。
+ * 反過來若持久化，停擺開始那天寫的一筆早被之後的紀錄擠出保留範圍，
+ * 而之後就再也不寫了 —— 使用者可能永遠看不到任何線索。
+ */
+let journaledBlockedStatus: ChannelTrackingStatus | '' = '';
+
+/** 依「只記轉換」規則將停擺狀況入帳。 */
+const journalTrackingStatus = (current: ChannelTrackingStatus | '') => {
+  const status = current === 'ok' ? '' : current;
+  const decision = decideJournalTransition(journaledBlockedStatus, status);
+  journaledBlockedStatus = decision.nextJournaled as ChannelTrackingStatus | '';
+
+  if (decision.kind === 'none') return;
+  if (decision.kind === 'cleared') {
+    journalOnly('頻道追蹤（已恢復）', '停擺狀況已解除，追蹤恢復運作');
+    return;
+  }
+  journalOnly('頻道追蹤（已停止）', describeTrackingBlocked(status as ChannelTrackingStatus));
+};
+
 /** 停擺原因對應的檢查回饋文案。 */
 const describeTrackingBlocked = (status: ChannelTrackingStatus): string => {
   if (status === 'missing_key') return describeMissingKeyCheck();
@@ -2290,15 +2367,19 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   uiNow.value = Date.now();
   const blockedNow = trackingStatus.value;
   if (blockedNow !== 'ok') {
+    // 入帳與提示分頭判斷：提示可因手動檢查而重複，日誌只記轉換
+    journalTrackingStatus(blockedNow);
     if (isManual || notifiedBlockedStatus !== blockedNow) {
       notifiedBlockedStatus = blockedNow;
       showToast({ message: describeTrackingBlocked(blockedNow), duration: 6000, closeOnClick: true });
     }
     return;
   }
+  journalTrackingStatus('ok');
   notifiedBlockedStatus = '';
 
   isCheckingChannels.value = true;
+  checkProgress.value = { done: 0, total: enabledChannels.length, currentTitle: '' };
   if (isManual) showToast(`正在檢查 ${enabledChannels.length} 個頻道...`);
 
   apiQuotaExhaustedThisRound = false;
@@ -2320,6 +2401,11 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
   for (let i = 0; i < enabledChannels.length; i++) {
     const channel = enabledChannels[i];
+    // 進度在該頻道**開始前**更新 —— 卡住時停留的正是那個頻道的名稱，
+    // 使用者據此指認是誰造成等待。更新後若不讓出一次事件迴圈，
+    // 整段同步走完前畫面不會重繪，進度會一次跳到底而失去意義。
+    checkProgress.value = { done: i, total: enabledChannels.length, currentTitle: channel.title };
+    await nextTick();
     try {
       const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
         api: buildApiOptions(channel)
@@ -2425,6 +2511,8 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
   monitorConfig.value.lastGlobalCheckTime = now;
   isCheckingChannels.value = false;
+  // 進度 MUST 讓位給結果回饋，不得殘留而使使用者誤以為仍在進行
+  checkProgress.value = { done: 0, total: 0, currentTitle: '' };
   uiNow.value = Date.now();
 
   // 本輪 API 停擺片段。金鑰無效優先於配額耗盡 —— 前者需使用者修正，
@@ -2443,13 +2531,8 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     // 本輪中途停擺：其餘頻道未檢查。此分支優先於下方判斷 ——
     // failedCount 只計入實際跑過的頻道，硬套現有判斷會誤導使用者。
     notifiedBlockedStatus = blockedMidRound;
-    try {
-      errorLog.value = appendErrorEntry(errorLog.value, {
-        time: Date.now(),
-        context: '頻道檢查（中途停擺）',
-        message: describeTrackingBlocked(blockedMidRound)
-      });
-    } catch { /* 記錄失敗不得影響檢查流程 */ }
+    // 走同一條「只記轉換」路徑 —— 否則配額於每輪中途耗盡時會每輪各寫一筆
+    journalTrackingStatus(blockedMidRound);
 
     if (newVideoCount > 0) {
       showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ 尚有 ${skippedChannelCount} 個頻道未檢查）${apiHint}`);
@@ -2632,6 +2715,9 @@ const simulateGlobalNewVideo = async () => {
         }
       } catch (err) {
         console.warn(`模擬抓取頻道 ${channel.title} 失敗:`, err);
+        // 迴圈中不逐一彈提示（結束後有總結），但仍須入帳 —— 否則使用者
+        // 只看到「共 N 部」少於預期，卻查不到是哪個頻道失敗。
+        journalOnly(`模擬抓取頻道「${channel.title}」`, err);
       }
     }
 

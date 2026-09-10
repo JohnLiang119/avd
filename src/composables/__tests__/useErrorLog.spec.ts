@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   appendErrorEntry,
+  decideJournalTransition,
   formatErrorLog,
   sortedForDisplay,
   ERROR_LOG_LIMIT,
@@ -102,5 +103,59 @@ describe('sortedForDisplay', () => {
 
   it('容忍未初始化的日誌', () => {
     expect(sortedForDisplay(undefined as any)).toEqual([]);
+  });
+});
+
+describe('decideJournalTransition —— 持續性狀況只記轉換', () => {
+  it('狀況開始時記一筆', () => {
+    const got = decideJournalTransition('', 'missing_key');
+    expect(got.kind).toBe('started');
+    expect(got.nextJournaled).toBe('missing_key');
+  });
+
+  it('同一狀況持續時不重複寫入 —— 否則 50 筆的日誌會被同一句話灌爆', () => {
+    let journaled = '';
+    let writes = 0;
+    // 模擬自動排程每分鐘核對一次，持續 90 分鐘
+    for (let minute = 0; minute < 90; minute++) {
+      const got = decideJournalTransition(journaled, 'missing_key');
+      if (got.kind !== 'none') writes++;
+      journaled = got.nextJournaled;
+    }
+    expect(writes).toBe(1);
+  });
+
+  it('原因改變時另記一筆 —— 三種停擺的解法不同，不得併為一次', () => {
+    const got = decideJournalTransition('missing_key', 'key_rejected');
+    expect(got.kind).toBe('changed');
+    expect(got.nextJournaled).toBe('key_rejected');
+  });
+
+  it('狀況解除時記一筆，使「停了多久」可自日誌讀出', () => {
+    const got = decideJournalTransition('quota_exhausted', '');
+    expect(got.kind).toBe('cleared');
+    expect(got.nextJournaled).toBe('');
+  });
+
+  it('本來就正常時 MUST NOT 憑空寫一筆解除', () => {
+    const got = decideJournalTransition('', '');
+    expect(got.kind).toBe('none');
+    expect(got.nextJournaled).toBe('');
+  });
+
+  it('解除後再度發生會重新記一筆開始', () => {
+    let journaled = '';
+    const seq = ['missing_key', 'missing_key', '', '', 'missing_key'];
+    const kinds = seq.map(current => {
+      const got = decideJournalTransition(journaled, current);
+      journaled = got.nextJournaled;
+      return got.kind;
+    });
+    expect(kinds).toEqual(['started', 'none', 'cleared', 'none', 'started']);
+  });
+
+  it('一輪正常檢查不產生任何寫入決定', () => {
+    // 【紅線】日誌只有 50 筆，正常運作絕不能佔用任何一筆
+    expect(decideJournalTransition('', '').kind).toBe('none');
   });
 });

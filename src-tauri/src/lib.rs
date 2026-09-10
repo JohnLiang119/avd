@@ -152,6 +152,29 @@ fn redact_query(message: String, query: Option<&str>) -> String {
     }
 }
 
+/// 傳輸層錯誤是否為逾時。
+///
+/// `ureq` 把「DNS 解析失敗」「連線被拒」與「連線／讀取逾時」全都歸為
+/// `Error::Transport`，但這三者對上層的意涵完全不同：前兩者代表**這台裝置**
+/// 連不上網，逾時只代表**這一個請求**沒等到回應。
+///
+/// 前端的「提早停止」以裝置離線為唯一判準 —— 偵測到即中止整輪，因為剩餘
+/// 頻道逐一嘗試也不會有不同結果。若逾時被歸為裝置離線，一個慢頻道就會讓
+/// 整輪其餘頻道全部被跳過，並對使用者宣稱裝置無法連線。那比原本的慢嚴重
+/// 得多，因為它會**靜默地**讓多數頻道整輪不被檢查。
+///
+/// 以訊息文字判定而非 `ErrorKind`：`ureq` 的 `ErrorKind::Io` 同時涵蓋逾時與
+/// 其他 I/O 失敗（例如連線被對端關閉），單看 kind 分不出來；而逾時的訊息
+/// 一律來自 `std::io::ErrorKind::TimedOut` 的 Display，穩定含有 "timed out"。
+/// 誤判的代價不對稱：漏判（逾時被當成離線）會靜默跳過整輪，誤判（離線被當成
+/// 逾時）只是少一次提早停止、其餘頻道照樣逐一失敗 —— 後者明顯較輕。
+///
+/// 抽為自由函式以便單元測試：`ureq::Transport` 無法在測試中直接建構。
+fn is_timeout_transport_message(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("timed out") || lower.contains("timeout")
+}
+
 #[tauri::command]
 fn fetch_http_text(
     url: String,
@@ -165,9 +188,10 @@ fn fetch_http_text(
     // 完整網址；這些訊息經 reportError 寫入 avd_error_log，而錯誤日誌的設計
     // 目的就是讓使用者複製出來求助 —— 機密一旦寫入其中，貼出日誌即等同公開。
     //
-    // 前綴（HTTP_STATUS: / NETWORK_ERROR:）刻意保留不變：前端的
-    // `classifyApiError` 依 HTTP_STATUS 的 body 區分配額耗盡與金鑰無效，
-    // `isDeviceOfflineError` 依 NETWORK_ERROR 判定裝置離線而提早結束整輪。
+    // 前綴（HTTP_STATUS: / NETWORK_ERROR: / REQUEST_TIMEOUT:）刻意保留不變：
+    // 前端的 `classifyApiError` 依 HTTP_STATUS 的 body 區分配額耗盡與金鑰無效，
+    // `isDeviceOfflineError` 依 NETWORK_ERROR 判定裝置離線而提早結束整輪，
+    // `isRequestTimeoutError` 依 REQUEST_TIMEOUT 將逾時排除於「裝置離線」之外。
     let query = url.find('?').map(|i| url[i..].to_string());
     let redact = |message: String| redact_query(message, query.as_deref());
 
@@ -223,7 +247,14 @@ fn fetch_http_text(
 
                     format!("HTTP_STATUS:{}:{}", status, detail)
                 }
-                ureq::Error::Transport(_) => format!("NETWORK_ERROR:{}", message),
+                ureq::Error::Transport(_) => {
+                    // 逾時 MUST NOT 併入 NETWORK_ERROR —— 見 is_timeout_transport_message
+                    if is_timeout_transport_message(&message) {
+                        format!("REQUEST_TIMEOUT:{}", message)
+                    } else {
+                        format!("NETWORK_ERROR:{}", message)
+                    }
+                }
             }
         })?;
 
@@ -291,6 +322,35 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+
+#[cfg(test)]
+mod timeout_classify_tests {
+    use super::is_timeout_transport_message;
+
+    #[test]
+    fn timeout_messages_are_recognised() {
+        for message in [
+            "Network Error: Connection timed out",
+            "io: connection timed out (os error 10060)",
+            "read timeout",
+            "The operation TIMED OUT",
+        ] {
+            assert!(is_timeout_transport_message(message), "{}", message);
+        }
+    }
+
+    #[test]
+    fn offline_messages_are_not_timeouts() {
+        // 這三者代表這台裝置連不上網，必須維持 NETWORK_ERROR 以觸發提早停止
+        for message in [
+            "Dns Failed: failed to resolve host name",
+            "Connection Failed: connection refused (os error 10061)",
+            "io: broken pipe",
+        ] {
+            assert!(!is_timeout_transport_message(message), "{}", message);
+        }
+    }
+}
 
 #[cfg(test)]
 mod redact_tests {

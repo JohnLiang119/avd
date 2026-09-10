@@ -22,6 +22,11 @@ import {
   describeApiFetchFailure,
   buildChannelSnippetRequest,
   parseChannelTitle,
+  PLAYLIST_ITEMS_FIELDS,
+  VIDEOS_FIELDS,
+  CHANNEL_UPLOADS_FIELDS,
+  CHANNEL_SNIPPET_FIELDS,
+  describeCheckProgress,
   minimumCheckIntervalMinutes,
   checkIntervalFloorMinutes,
   describeCheckIntervalFloor,
@@ -630,5 +635,366 @@ describe('當日用量估算', () => {
     const c = addApiUnits(undefined, 5, NOON);
     expect(addApiUnits(c, -3, NOON).used).toBe(5);
     expect(addApiUnits(c, NaN as any, NOON).used).toBe(5);
+  });
+});
+
+// ============================================================================
+// 欄位遮罩與解析的一致性（【D-A】）
+// ============================================================================
+//
+// 這條耦合斷裂時**不會拋錯** —— 遮罩少寫一個仍在讀的欄位，該欄位只會變成
+// `undefined`，於是影片被略過或發布時間退化為 0。所以夾具刻意**由遮罩推導**
+// 而非手寫：手寫的完整回應當夾具，遮罩改錯測試照樣綠燈，那就白測了。
+
+/** 依括號深度切分，使括號內的分隔符不被誤切。 */
+function splitTop(text: string, sep: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === sep && depth === 0) { out.push(text.slice(start, i)); start = i + 1; }
+  }
+  out.push(text.slice(start));
+  return out.map(x => x.trim()).filter(Boolean);
+}
+
+/** 把 `fields` 遮罩展開為葉路徑清單。 */
+function maskPaths(mask: string): string[][] {
+  const out: string[][] = [];
+  for (const selector of splitTop(mask, ',')) {
+    const segments = splitTop(selector, '/');
+    const prefix: string[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const grouped = /^([^(]+)\((.*)\)$/.exec(segment);
+      if (grouped) {
+        const base = [...prefix, grouped[1]];
+        for (const sub of maskPaths(grouped[2])) out.push([...base, ...sub]);
+      } else if (i === segments.length - 1) {
+        out.push([...prefix, segment]);
+      } else {
+        prefix.push(segment);
+      }
+    }
+  }
+  return out;
+}
+
+/** 只保留 `paths` 指定的路徑，其餘一律移除（陣列逐元素套用）。 */
+function pick(value: any, paths: string[][]): any {
+  if (Array.isArray(value)) return value.map(v => pick(v, paths));
+  if (value === null || typeof value !== 'object') return value;
+
+  const byHead = new Map<string, string[][]>();
+  for (const path of paths) {
+    if (path.length === 0) continue;
+    const [head, ...rest] = path;
+    if (!byHead.has(head)) byHead.set(head, []);
+    byHead.get(head)!.push(rest);
+  }
+
+  const out: any = {};
+  for (const [head, rests] of byHead) {
+    if (!(head in value)) continue;
+    const isLeaf = rests.some(r => r.length === 0);
+    out[head] = isLeaf ? value[head] : pick(value[head], rests.filter(r => r.length > 0));
+  }
+  return out;
+}
+
+/** 模擬服務端套用 `fields` 後的回應。 */
+const applyMask = (json: any, mask: string) => pick(json, maskPaths(mask));
+
+describe('遮罩展開與裁剪工具本身', () => {
+  it('展開巢狀括號與斜線混用的選擇器', () => {
+    expect(maskPaths('items(id,snippet/liveBroadcastContent)')).toEqual([
+      ['items', 'id'],
+      ['items', 'snippet', 'liveBroadcastContent'],
+    ]);
+    expect(maskPaths('items/snippet/title')).toEqual([['items', 'snippet', 'title']]);
+    expect(maskPaths('items(a(b,c),d/e)')).toEqual([
+      ['items', 'a', 'b'],
+      ['items', 'a', 'c'],
+      ['items', 'd', 'e'],
+    ]);
+  });
+
+  it('裁剪會移除未列於遮罩的欄位，並逐元素套用於陣列', () => {
+    const got = applyMask(
+      { items: [{ id: 'x', extra: 1, snippet: { title: 't', description: 'd' } }], pageInfo: {} },
+      'items(id,snippet/title)'
+    );
+    expect(got).toEqual({ items: [{ id: 'x', snippet: { title: 't' } }] });
+  });
+});
+
+describe('playlistItems 遮罩與 parsePlaylistItems 一致', () => {
+  /** 貼近真實的完整回應：含所有我們**不**索取的欄位 */
+  const fullResponse = {
+    kind: 'youtube#playlistItemListResponse',
+    etag: 'etag-abc',
+    nextPageToken: 'TOKEN',
+    pageInfo: { totalResults: 500, resultsPerPage: 50 },
+    items: [
+      {
+        kind: 'youtube#playlistItem',
+        etag: 'etag-1',
+        id: 'playlist-item-id-1',
+        snippet: {
+          publishedAt: '2026-09-09T01:00:00Z',
+          channelId: 'UCchannel',
+          title: '康普茶品質優劣原來差這麼多！',
+          description: 'x'.repeat(3000),
+          thumbnails: {
+            default: { url: 'https://i.ytimg.com/vi/v1/default.jpg', width: 120, height: 90 },
+            medium: { url: 'https://i.ytimg.com/vi/v1/mqdefault.jpg', width: 320, height: 180 },
+            high: { url: 'https://i.ytimg.com/vi/v1/hqdefault.jpg', width: 480, height: 360 },
+            standard: { url: 'https://i.ytimg.com/vi/v1/sddefault.jpg', width: 640, height: 480 },
+            maxres: { url: 'https://i.ytimg.com/vi/v1/maxresdefault.jpg', width: 1280, height: 720 },
+          },
+          channelTitle: '某某頻道',
+          playlistId: 'UUchannel',
+          position: 0,
+          resourceId: { kind: 'youtube#video', videoId: 'v1' },
+          videoOwnerChannelTitle: '某某頻道',
+          videoOwnerChannelId: 'UCchannel',
+        },
+        contentDetails: {
+          videoId: 'v1',
+          videoPublishedAt: '2026-09-09T01:00:00Z',
+          note: '',
+        },
+      },
+    ],
+  };
+
+  it('遮罩裁剪後解析結果與完整回應完全相同', () => {
+    const masked = applyMask(fullResponse, PLAYLIST_ITEMS_FIELDS);
+    expect(parsePlaylistItems(masked)).toEqual(parsePlaylistItems(fullResponse));
+  });
+
+  it('裁剪後的最小回應仍解析出完整的識別碼、標題與精確發布時間', () => {
+    const got = parsePlaylistItems(applyMask(fullResponse, PLAYLIST_ITEMS_FIELDS));
+    expect(got).toHaveLength(1);
+    expect(got[0].videoId).toBe('v1');
+    expect(got[0].title).toBe('康普茶品質優劣原來差這麼多！');
+    // 0 代表發布時間退化 —— 那會使錨點永遠不推進，是本改動最需要防的靜默故障
+    expect(got[0].publishedTime).toBe(Date.parse('2026-09-09T01:00:00Z'));
+    expect(got[0].publishedTime).not.toBe(0);
+  });
+
+  it('遮罩確實排除了那些被丟棄的大欄位', () => {
+    const masked = applyMask(fullResponse, PLAYLIST_ITEMS_FIELDS) as any;
+    expect(masked.items[0].snippet.description).toBeUndefined();
+    expect(masked.items[0].snippet.thumbnails).toBeUndefined();
+    expect(masked.items[0].snippet.channelTitle).toBeUndefined();
+    expect(masked.items[0].snippet.position).toBeUndefined();
+    expect(masked.items[0].snippet.videoOwnerChannelTitle).toBeUndefined();
+    expect(masked.nextPageToken).toBeUndefined();
+    expect(masked.pageInfo).toBeUndefined();
+  });
+
+  it('後備欄位也在遮罩內 —— contentDetails 缺漏時仍能自 snippet 取得', () => {
+    const withoutContentDetails = {
+      items: [{ snippet: (fullResponse.items[0].snippet as any) }],
+    };
+    const got = parsePlaylistItems(applyMask(withoutContentDetails, PLAYLIST_ITEMS_FIELDS));
+    expect(got[0].videoId).toBe('v1');
+    expect(got[0].publishedTime).toBe(Date.parse('2026-09-09T01:00:00Z'));
+  });
+
+  it('遮罩的葉路徑集合即為程式實際讀取的欄位，不多不少', () => {
+    // 這個斷言是「MUST NOT 索取系統不會讀取的欄位」的防線：
+    // 往遮罩加一個沒人讀的欄位，此處就會失敗，迫使加的人說明理由。
+    expect(maskPaths(PLAYLIST_ITEMS_FIELDS).map(p => p.join('/')).sort()).toEqual([
+      'items/contentDetails/videoId',
+      'items/contentDetails/videoPublishedAt',
+      'items/snippet/publishedAt',
+      'items/snippet/resourceId/videoId',
+      'items/snippet/title',
+    ]);
+  });
+});
+
+describe('videos 遮罩與直播狀態判定一致', () => {
+  const fullResponse = {
+    kind: 'youtube#videoListResponse',
+    etag: 'etag-v',
+    pageInfo: { totalResults: 3, resultsPerPage: 3 },
+    items: [
+      {
+        kind: 'youtube#video',
+        etag: 'e1',
+        id: 'live1',
+        snippet: {
+          title: '直播中',
+          description: 'y'.repeat(2000),
+          thumbnails: { default: { url: 'u', width: 1, height: 1 } },
+          liveBroadcastContent: 'live',
+          channelTitle: '某頻道',
+          tags: ['a', 'b'],
+        },
+        liveStreamingDetails: { actualStartTime: '2026-09-09T00:00:00Z', concurrentViewers: '123' },
+      },
+      {
+        id: 'vod1',
+        snippet: { title: '存檔', liveBroadcastContent: 'none', description: 'z'.repeat(500) },
+        liveStreamingDetails: { actualStartTime: '2026-09-01T00:00:00Z', actualEndTime: '2026-09-01T02:00:00Z' },
+      },
+      {
+        id: 'weird1',
+        snippet: { title: '沒有直播欄位', description: 'w' },
+      },
+    ],
+  };
+
+  it('遮罩裁剪後三態判定與完整回應完全相同', () => {
+    const masked = applyMask(fullResponse, VIDEOS_FIELDS) as any;
+    for (let i = 0; i < fullResponse.items.length; i++) {
+      expect(mapLiveStatus(masked.items[i])).toBe(mapLiveStatus(fullResponse.items[i]));
+    }
+    expect(masked.items.map((x: any) => mapLiveStatus(x))).toEqual(['live', 'not_live', 'unknown']);
+  });
+
+  it('遮罩排除了從未被讀取的 liveStreamingDetails 與 description', () => {
+    const masked = applyMask(fullResponse, VIDEOS_FIELDS) as any;
+    expect(masked.items[0].liveStreamingDetails).toBeUndefined();
+    expect(masked.items[0].snippet.description).toBeUndefined();
+    expect(masked.items[0].snippet.thumbnails).toBeUndefined();
+    expect(masked.items[0].snippet.title).toBeUndefined();
+    // 但識別碼與直播狀態必須留著 —— 少了任一個，整批都會退化為 unknown
+    expect(masked.items[0].id).toBe('live1');
+    expect(masked.items[0].snippet.liveBroadcastContent).toBe('live');
+  });
+
+  it('批次解析在遮罩後的回應上仍正確對號入座', async () => {
+    const masked = applyMask(fullResponse, VIDEOS_FIELDS);
+    const got = await resolveLiveStatusesViaApi(
+      ['live1', 'vod1', 'weird1'], FAKE_KEY, async () => masked
+    );
+    expect(got.get('live1')).toBe('live');
+    expect(got.get('vod1')).toBe('not_live');
+    expect(got.get('weird1')).toBe('unknown');
+  });
+
+  it('videos 請求不再索取 liveStreamingDetails', () => {
+    const req = buildVideosRequest(['a'], FAKE_KEY);
+    expect(req.url).toContain('part=snippet');
+    expect(req.url).not.toContain('liveStreamingDetails');
+  });
+
+  it('遮罩的葉路徑集合即為程式實際讀取的欄位，不多不少', () => {
+    expect(maskPaths(VIDEOS_FIELDS).map(p => p.join('/')).sort()).toEqual([
+      'items/id',
+      'items/snippet/liveBroadcastContent',
+    ]);
+  });
+});
+
+describe('channels 兩個遮罩與其解析一致', () => {
+  const uploadsFull = {
+    items: [{
+      kind: 'youtube#channel',
+      etag: 'e',
+      id: 'UCchannel',
+      contentDetails: {
+        relatedPlaylists: { likes: 'LLxxx', uploads: 'UUchannel', favorites: 'FLxxx' },
+      },
+    }],
+  };
+
+  const snippetFull = {
+    items: [{
+      id: 'UCchannel',
+      snippet: {
+        title: '某某頻道',
+        description: 'd'.repeat(1000),
+        customUrl: '@someone',
+        publishedAt: '2020-01-01T00:00:00Z',
+        thumbnails: { high: { url: 'u', width: 800, height: 800 } },
+        localized: { title: '某某頻道', description: 'd' },
+        country: 'TW',
+      },
+    }],
+  };
+
+  it('uploads 清單識別碼在遮罩後仍取得，且無關的 relatedPlaylists 被排除', () => {
+    const masked = applyMask(uploadsFull, CHANNEL_UPLOADS_FIELDS) as any;
+    expect(parseUploadsPlaylistId(masked)).toBe(parseUploadsPlaylistId(uploadsFull));
+    expect(parseUploadsPlaylistId(masked)).toBe('UUchannel');
+    expect(masked.items[0].contentDetails.relatedPlaylists.likes).toBeUndefined();
+    expect(masked.items[0].id).toBeUndefined();
+  });
+
+  it('頻道名稱在遮罩後仍取得，且 description 與縮圖被排除', () => {
+    const masked = applyMask(snippetFull, CHANNEL_SNIPPET_FIELDS) as any;
+    expect(parseChannelTitle(masked)).toBe(parseChannelTitle(snippetFull));
+    expect(parseChannelTitle(masked)).toBe('某某頻道');
+    expect(masked.items[0].snippet.description).toBeUndefined();
+    expect(masked.items[0].snippet.thumbnails).toBeUndefined();
+    expect(masked.items[0].snippet.localized).toBeUndefined();
+  });
+
+  it('頻道不存在時，遮罩後的空 items 仍正確回報取不到', () => {
+    expect(parseUploadsPlaylistId(applyMask({ items: [] }, CHANNEL_UPLOADS_FIELDS))).toBeNull();
+    expect(parseChannelTitle(applyMask({ items: [] }, CHANNEL_SNIPPET_FIELDS))).toBe('');
+  });
+
+  it('兩個遮罩的葉路徑集合即為程式實際讀取的欄位，不多不少', () => {
+    expect(maskPaths(CHANNEL_UPLOADS_FIELDS).map(p => p.join('/'))).toEqual([
+      'items/contentDetails/relatedPlaylists/uploads',
+    ]);
+    expect(maskPaths(CHANNEL_SNIPPET_FIELDS).map(p => p.join('/'))).toEqual([
+      'items/snippet/title',
+    ]);
+  });
+});
+
+describe('四個請求皆帶遮罩，且遮罩不含金鑰片段', () => {
+  it('每個請求的網址都帶 fields 參數', () => {
+    for (const req of [
+      buildPlaylistItemsRequest(UU, FAKE_KEY),
+      buildVideosRequest(['a', 'b'], FAKE_KEY),
+      buildChannelUploadsRequest(CH, FAKE_KEY),
+      buildChannelSnippetRequest(CH, FAKE_KEY),
+    ]) {
+      expect(req.url).toContain('fields=');
+      expect(req.url).not.toContain(FAKE_KEY);
+      expect(req.url).not.toContain('AIza');
+    }
+  });
+});
+
+describe('檢查進度文案', () => {
+  it('同時含已完成數、總數與當前頻道名稱', () => {
+    const text = describeCheckProgress({ done: 2, total: 20, currentTitle: '某某頻道' });
+    expect(text).toContain('3/20');
+    expect(text).toContain('某某頻道');
+  });
+
+  it('沒有進行中的檢查時為空字串 —— 結束後不得殘留於畫面', () => {
+    expect(describeCheckProgress({ done: 0, total: 0, currentTitle: '' })).toBe('');
+    expect(describeCheckProgress({ done: 5, total: 0, currentTitle: '某頻道' })).toBe('');
+  });
+
+  it('頻道名稱缺漏時仍顯示計數，不產生空洞的冒號', () => {
+    const text = describeCheckProgress({ done: 0, total: 3, currentTitle: '' });
+    expect(text).toContain('1/3');
+    expect(text.endsWith('：')).toBe(false);
+  });
+
+  it('計數不超出總數，也不出現負值', () => {
+    expect(describeCheckProgress({ done: 9, total: 3, currentTitle: 'x' })).toContain('3/3');
+    expect(describeCheckProgress({ done: -5, total: 3, currentTitle: 'x' })).toContain('1/3');
+  });
+
+  it('MUST NOT 含金鑰片段 —— 函式不接受金鑰參數即結構性保證', () => {
+    // 頻道名稱由使用者資料而來，即使有人把金鑰貼成頻道名，文案本身也不引入金鑰
+    const text = describeCheckProgress({ done: 1, total: 2, currentTitle: '正常頻道' });
+    expect(text).not.toContain('AIza');
+    expect(text).not.toContain(FAKE_KEY);
   });
 });

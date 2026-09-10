@@ -7,11 +7,15 @@ import {
   totalBackoffMs,
   describeRateLimit,
   isDeviceOfflineError,
+  isRequestTimeoutError,
+  requestTimeoutError,
+  API_REQUEST_TIMEOUT_MS,
   describeEarlyStop,
   RATE_LIMIT_MAX_RETRIES,
   RATE_LIMIT_BASE_DELAY_MS
 } from '../rateLimit';
 import { matchPermanentError } from '../downloadErrors';
+import { classifyApiError } from '../youtubeDataApi';
 import { PARSE_TIMEOUT_MS } from '../parseScope';
 
 describe('isRateLimited', () => {
@@ -198,5 +202,54 @@ describe('裝置離線的判定與提早停止', () => {
 
   it('下載路徑的限流退避維持原樣，不受頻道追蹤改動影響', () => {
     expect(totalBackoffMs()).toBe(14000);
+  });
+});
+
+describe('請求逾時的辨識', () => {
+  it('自建的逾時錯誤可被辨識，且訊息不帶請求網址', () => {
+    const err = requestTimeoutError();
+    expect(isRequestTimeoutError(err)).toBe(true);
+    expect(err.message).toContain(String(API_REQUEST_TIMEOUT_MS));
+    // 錯誤訊息會寫進 avd_error_log，而該日誌就是要讓使用者複製出來求助
+    expect(err.message).not.toContain('http');
+    expect(err.message).not.toContain('?');
+  });
+
+  it('邊界層加上的前綴可被辨識，不論來自哪個平台', () => {
+    // Rust 的 fetch_http_text 對逾時的 Transport 錯誤加上此前綴
+    expect(isRequestTimeoutError('REQUEST_TIMEOUT:Network Error: connection timed out')).toBe(true);
+    expect(isRequestTimeoutError(new Error('取得頻道影片失敗: REQUEST_TIMEOUT:10000ms'))).toBe(true);
+  });
+
+  it('其他兩類錯誤不被誤判為逾時', () => {
+    for (const err of [
+      'NETWORK_ERROR:Dns Failed: failed to resolve host name',
+      'HTTP_STATUS:403:quotaExceeded',
+      'HTTP_STATUS:500:server unavailable',
+      new TypeError('Failed to fetch'),
+      null,
+      undefined,
+    ]) {
+      expect(isRequestTimeoutError(err), String(err)).toBe(false);
+    }
+  });
+});
+
+describe('【紅線】三類傳輸錯誤互斥', () => {
+  const timeout = requestTimeoutError();
+
+  it('逾時 MUST NOT 被判為裝置離線 —— 否則一個慢頻道會讓整輪其餘頻道全被跳過', () => {
+    expect(isDeviceOfflineError(timeout)).toBe(false);
+    expect(isDeviceOfflineError('REQUEST_TIMEOUT:connection timed out')).toBe(false);
+  });
+
+  it('逾時 MUST NOT 被歸為配額耗盡或金鑰無效 —— 否則追蹤會無故停擺到太平洋時間午夜', () => {
+    expect(classifyApiError(timeout)).toBe('other');
+    expect(classifyApiError('REQUEST_TIMEOUT:10000ms')).toBe('other');
+  });
+
+  it('裝置離線仍照常被判為離線 —— 逾時的排除 MUST NOT 波及提早停止', () => {
+    expect(isDeviceOfflineError('NETWORK_ERROR:Dns Failed')).toBe(true);
+    expect(isDeviceOfflineError(new TypeError('Failed to fetch'))).toBe(true);
   });
 });

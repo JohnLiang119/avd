@@ -47,20 +47,57 @@ function buildRequest(path: string, params: Record<string, string>, apiKey: stri
   };
 }
 
+// ============================================================================
+// 回應欄位遮罩（`fields`）
+// ============================================================================
+//
+// 每個遮罩正下方就是唯一會讀取該回應的解析函式 —— 兩者是一條**隱性耦合**，
+// 而它斷裂時**不會拋錯**：遮罩少寫一個仍在讀的欄位，該欄位只會變成
+// `undefined`，於是影片被略過（缺 videoId）或發布時間退化為 `0`（錨點自此
+// 不再推進）。兩者都只表現為「這個頻道好像沒有新片」。
+//
+// 因此改動任一邊時 MUST 同步改另一邊，且 MUST 更新
+// `youtubeDataApi.spec.ts` 的**最小回應夾具** —— 那份夾具刻意只含遮罩允許
+// 的欄位，是這條耦合唯一的自動防線。用手寫的完整回應當夾具，遮罩改錯測試
+// 照樣綠燈。
+//
+// `fields` 不影響配額（配額按請求數計，不按欄位數），純粹省下傳輸與解析。
+
+/** `playlistItems` 的欄位遮罩。對應 `parsePlaylistItems`。 */
+export const PLAYLIST_ITEMS_FIELDS =
+  'items(contentDetails(videoId,videoPublishedAt),snippet(title,publishedAt,resourceId/videoId))';
+
+/** `videos` 的欄位遮罩。對應 `resolveLiveStatusesViaApi` 與 `mapLiveStatus`。 */
+export const VIDEOS_FIELDS = 'items(id,snippet/liveBroadcastContent)';
+
+/** `channels?part=contentDetails` 的欄位遮罩。對應 `parseUploadsPlaylistId`。 */
+export const CHANNEL_UPLOADS_FIELDS = 'items/contentDetails/relatedPlaylists/uploads';
+
+/** `channels?part=snippet` 的欄位遮罩。對應 `parseChannelTitle`。 */
+export const CHANNEL_SNIPPET_FIELDS = 'items/snippet/title';
+
 /** 取得某 uploads 播放清單最新一頁影片的請求。 */
 export function buildPlaylistItemsRequest(playlistId: string, apiKey: string): ApiRequest {
   return buildRequest('playlistItems', {
     part: 'snippet,contentDetails',
     playlistId,
     maxResults: String(API_ROUND_LIMIT),
+    fields: PLAYLIST_ITEMS_FIELDS,
   }, apiKey);
 }
 
-/** 批次查詢多支影片直播狀態的請求。 */
+/**
+ * 批次查詢多支影片直播狀態的請求。
+ *
+ * `part` 只取 `snippet`：`mapLiveStatus` 唯一讀取的是
+ * `snippet.liveBroadcastContent`，先前一併索取的 `liveStreamingDetails`
+ * 從未被任何程式讀取過。
+ */
 export function buildVideosRequest(videoIds: string[], apiKey: string): ApiRequest {
   return buildRequest('videos', {
-    part: 'snippet,liveStreamingDetails',
+    part: 'snippet',
     id: videoIds.join(','),
+    fields: VIDEOS_FIELDS,
   }, apiKey);
 }
 
@@ -74,6 +111,7 @@ export function buildChannelSnippetRequest(channelId: string, apiKey: string): A
   return buildRequest('channels', {
     part: 'snippet',
     id: channelId,
+    fields: CHANNEL_SNIPPET_FIELDS,
   }, apiKey);
 }
 
@@ -90,6 +128,7 @@ export function buildChannelUploadsRequest(channelId: string, apiKey: string): A
   return buildRequest('channels', {
     part: 'contentDetails',
     id: channelId,
+    fields: CHANNEL_UPLOADS_FIELDS,
   }, apiKey);
 }
 
@@ -538,6 +577,38 @@ function formatQuotaResetHint(resetAt?: number): string {
   } catch {
     return '';
   }
+}
+
+// ============================================================================
+// 檢查進行中的進度回饋
+// ============================================================================
+
+/** 一輪檢查的進度。`total` 為 0 代表沒有進行中的檢查。 */
+export interface ChannelCheckProgress {
+  /** 已完成的頻道數 */
+  done: number;
+  /** 本輪涵蓋的頻道總數 */
+  total: number;
+  /** 當前正在檢查的頻道名稱 */
+  currentTitle: string;
+}
+
+/**
+ * 產生進度文案。
+ *
+ * 頻道名稱是此文案的重點而非裝飾：逐頻道循序進行時，一個緩慢或無回應的
+ * 頻道會拖住整輪，而在有這則文案之前，使用者與開發者都無從指認是哪一個。
+ *
+ * 本函式不接受金鑰參數，故「MUST NOT 包含金鑰片段」是結構性保證。
+ */
+export function describeCheckProgress(progress: ChannelCheckProgress): string {
+  const total = Math.max(0, progress?.total || 0);
+  if (total === 0) return '';
+
+  const done = Math.min(Math.max(0, progress?.done || 0), total);
+  const title = (progress?.currentTitle || '').trim();
+  const counter = `檢查中 ${Math.min(done + 1, total)}/${total}`;
+  return title ? `${counter}：${title}` : counter;
 }
 
 // ============================================================================
