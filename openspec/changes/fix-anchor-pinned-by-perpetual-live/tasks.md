@@ -78,6 +78,9 @@
 
 - [x] 6.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
   - 含判定純函式與測試、兩平台接線、檢查迴圈收斂，以及以實機 feed 寫成的迴歸測試。
-- [ ] 6.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處一致
-- [ ] 6.3 【發布說明須含遷移提示】既有已被污染的頻道錨點不會自動復原 —— 修正後第一次檢查仍會把舊錨點之後的影片判定為新片（實測案例為 32 支）。發布說明 MUST 告知使用者可能有一次性的舊片湧入，清空佇列一次即可；完成方式：`publish_all.ps1` 的預設 `$Message` 含該提示
-- [ ] 6.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 6.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+- [x] 6.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增），並更新 `avd_s/publish_all.ps1` 的版本化預設發布說明；以跨檔比對確認七處一致
+  - 七處同步至 1.0.90（`versionCode` 127），跨檔比對一致、無 1.0.89 殘留。
+- [x] 6.3 【發布說明須含遷移提示】既有已被污染的頻道錨點不會自動復原 —— 修正後第一次檢查仍會把舊錨點之後的影片判定為新片（實測案例為 32 支）。發布說明 MUST 告知使用者可能有一次性的舊片湧入，清空佇列一次即可；完成方式：`publish_all.ps1` 的預設 `$Message` 含該提示
+  - 發布說明含遷移提示：「升級後受影響的頻道第一次檢查仍可能湧入一批舊影片，清空佇列一次即可，之後不再重複」。
+- [x] 6.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 6.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+  - 1.0.90 下五項驗證全數通過（320 個測試）。進版 commit 與 6.1 的功能 commit 分開。
