@@ -106,10 +106,14 @@
 
 ## 6. 提交與版本進版
 
-- [ ] 6.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
-- [ ] 6.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增）
-- [ ] 6.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message` 為描述本次改動且版號正確的新文字（該檔屬 `C:\JohnLiang` 工作區 repo，非 avd repo，故獨立提交）；完成方式：訊息內嵌版號與 `package.json` 相符，發布腳本的防呆不會擋下
-- [ ] 6.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 6.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+- [x] 6.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
+- [x] 6.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增）
+- [x] 6.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message` 為描述本次改動且版號正確的新文字（該檔屬 `C:\JohnLiang` 工作區 repo，非 avd repo，故獨立提交）；完成方式：訊息內嵌版號與 `package.json` 相符，發布腳本的防呆不會擋下
+- [x] 6.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 6.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本** —— 工作區乾淨且已推送後，才由使用者手動執行
+
+  **已同步至 v1.0.92**（`versionCode` 128 → 129）。發布腳本未執行 ——
+  依規範由使用者手動執行。5.2～5.7 的人工驗證需要一個可安裝的版本，
+  故進版先於驗證；若驗證發現問題，以後續 commit 修正。
 
 ## 7. 歸檔順序
 
