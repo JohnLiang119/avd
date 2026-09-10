@@ -60,7 +60,19 @@
 
 **Rationale:** 規格明訂「兩平台對『已判定為直播』與『狀態無法判定』的區分 MUST 一致」。若只修桌面端，Android 上的錨點仍會卡死，而使用者主要在手機上使用追蹤功能 —— 那等於沒修。
 
-Android 端的 yt-dlp 由 `youtubedl-android` 函式庫驅動，錯誤訊息來源與桌面 sidecar 相同（皆為 yt-dlp 本身的輸出），因此樣式可共用。**但實作時必須實際確認該訊息確實傳達到 Java 層的 catch**，而非被函式庫改寫或吞掉 —— 這是本 change 最主要的實作風險。
+Android 端的 yt-dlp 由 `youtubedl-android` 函式庫驅動，錯誤訊息來源與桌面 sidecar 相同（皆為 yt-dlp 本身的輸出），因此樣式可共用。
+
+**【已於規劃階段驗證】訊息確實會抵達 Java 層。** 反組譯 `io.github.junkfood02.youtubedl-android:library:0.18.1` 的 `YoutubeDL.execute()` 位元組碼：
+
+```
+624: astore 19   <- outBuffer.toString()   (stdout)
+638: astore 20   <- errBuffer.toString()   (stderr)
+642: ifle   699                            <- exitCode <= 0 則跳過拋出
+689: new    YoutubeDLException
+693: aload  20                             <- 例外訊息即為完整 stderr
+```
+
+`YoutubeDLException` 以 `errBuffer.toString()` 建構，而 `YoutubeDlPlugin.checkVideoLiveStatus` 的 catch 是 `call.reject("查詢直播狀態失敗: " + e.getMessage())`，故 yt-dlp 的原始錯誤（`ERROR: [youtube] xxx: This live event will begin in 6 hours.`）會原樣傳到前端。樣式比對在 Android 上可行，無須改採其他訊號。
 
 **Alternatives:** 只修桌面端並記為已知限制 —— 不可接受，主要使用平台就是 Android。
 
@@ -76,13 +88,13 @@ Android 端的 yt-dlp 由 `youtubedl-android` 函式庫驅動，錯誤訊息來�
 
 - **[直播結束轉存檔後不再被下載]** → 這是使用者明確要求的取捨，已寫入規格的 Scenario 與其理由。若日後改變心意，回頭採用 `deferredVideoIds`（見 proposal 的替代方案）。
 - **[yt-dlp 錯誤訊息用詞變動使辨識失效]** → 退化行為是回到目前的 `'unknown'`，即錨點重新被壓住 —— 是既有的故障而非新的故障，且不會造成錯誤放行。以較寬鬆的關鍵片段比對降低發生率；yt-dlp 自動更新後若卡死重現，此處是第一個要看的地方。
-- **[Android 端錯誤訊息可能不會原樣傳到 Java catch]** → 本 change 最主要的實作風險。實作時 MUST 先實測確認，若訊息被函式庫改寫，需改以其他訊號辨識（例如該函式庫是否有結構化的錯誤型別）。這項在寫程式前就要先驗證，不能寫完才發現。
+- **[Android 端錯誤訊息可能不會原樣傳到 Java catch]** → **已於規劃階段以位元組碼驗證排除**（見決策 3）：`YoutubeDLException` 以完整 stderr 建構。殘餘風險僅在於日後函式庫升級改變此行為 —— 屆時的退化是回到 `unknown`（既有故障），不會錯誤放行。
 - **[既有錨點已被污染的頻道不會自動復原]** → 修正後錨點會正常推進，但已卡在舊時間點的頻道，第一次檢查仍會把那之後的影片判定為新片（本案是 32 支）。使用者需清空一次佇列，或接受該輪的湧入。這不需要程式處理，但**須在發布說明中告知**。
 - **[`'unknown'` 仍可能壓住錨點]** → 若某支影片持續查詢失敗且長留在候選視窗中，仍會卡住。與排程直播不同的是，這種情況不會被系統性地每日補充，且影片離開視窗後即自然解除。暫不處理，但若實際遇到，`deferredVideoIds` 是通用解。
 
 ## Migration Plan
 
-1. 先實測 Android 端 yt-dlp 的排程直播錯誤訊息是否原樣抵達 Java 層（決策 3 的風險前提）。若否，先調整辨識方式再繼續。
+1. ~~先實測 Android 端訊息可得性~~ —— 已於規劃階段以位元組碼驗證，見決策 3。
 2. 加入判定樣式的純函式與單元測試。
 3. 接上桌面 `checkVideoLiveStatus`，確認排程直播回傳 `'live'`。
 4. Android 原生外掛比照，兩處樣式與測試案例對齊。

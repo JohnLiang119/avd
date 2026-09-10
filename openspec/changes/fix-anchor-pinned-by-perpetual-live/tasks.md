@@ -1,9 +1,7 @@
 ﻿## 0. 前置驗證與測試可行性（先讀）
 
-**阻擋性前置條件**：第 3 節倚賴「yt-dlp 的排程直播錯誤訊息會原樣抵達 Android 的 Java catch」。
-`YoutubeDlPlugin.checkVideoLiveStatus` 目前是 `catch (Exception e)` → `e.getMessage()`，訊息是否
-包含 yt-dlp 的 stderr 取決於 `youtubedl-android` 函式庫。**任務 1.1 必須先確認，確認不成立就要改用
-其他訊號**，不可寫完才發現。
+**~~阻擋性前置條件~~ 已解除**：第 3 節倚賴「yt-dlp 的排程直播錯誤訊息會原樣抵達 Android 的 Java catch」。
+該前提已於規劃階段以位元組碼驗證成立（見任務 1.1），無須實機確認，第 3 節可直接開工。
 
 可測性分層（不得混寫）：
 
@@ -17,7 +15,10 @@
 
 ## 1. 前置確認
 
-- [ ] 1.1 【阻擋性】實測 Android 端 yt-dlp 對排程直播的錯誤訊息是否抵達 Java catch：於實機或模擬器對一支 `is_upcoming` 影片呼叫 `checkVideoLiveStatus`，以 logcat 檢視 `Log.e(TAG, "Failed to check live status", e)` 的內容；完成方式：記錄實際的 `e.getMessage()` 字串。**若訊息不含 yt-dlp 的原始輸出，停止並改採其他辨識方式**（例如檢視 `youtubedl-android` 是否提供結構化錯誤，或改以 `--flat-playlist` 查 `/streams` 分頁），並更新 design 決策 3
+- [x] 1.1 【原為阻擋性，已於規劃階段解決】確認 Android 端 yt-dlp 的排程直播錯誤訊息可抵達 Java catch
+  - 反組譯 `io.github.junkfood02.youtubedl-android:library:0.18.1` 的 `YoutubeDL.execute()`：`638: astore 20 <- errBuffer.toString()`（stderr），`642: ifle 699`（exitCode 判斷），`689: new YoutubeDLException` / `693: aload 20` —— 例外訊息即為**完整 stderr**。
+  - 外掛的 catch 為 `call.reject("查詢直播狀態失敗: " + e.getMessage())`，故 yt-dlp 原始錯誤會原樣傳到前端。**不需實機驗證，也不需改採其他辨識方式。**
+
 - [ ] 1.2 蒐集判定樣式的實際樣本：至少涵蓋桌面 sidecar 與 Android 兩處的訊息，以及不同剩餘時間的措辭（實測已知 `This live event will begin in 6 hours` / `in 5 hours`）；完成方式：把樣本寫入 1.3 的測試案例，作為樣式比對的依據
 
 ## 2. 判定樣式純函式（可自動測試）
