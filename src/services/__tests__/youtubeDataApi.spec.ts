@@ -184,6 +184,18 @@ describe('批次狀態解析的保守處置', () => {
     expect([...got.values()].every(v => v === 'unknown')).toBe(true);
   });
 
+  it('批次失敗會上報錯誤，使呼叫端能觸發抑制', async () => {
+    // 若在此靜默吞掉，配額耗盡就永遠不會觸發抑制，每輪都重打必然失敗的請求
+    const err = new Error('HTTP_STATUS:403:quotaExceeded');
+    const fetchJson = vi.fn().mockRejectedValue(err);
+    const seen: unknown[] = [];
+    const got = await resolveLiveStatusesViaApi(ids, FAKE_KEY, fetchJson, e => seen.push(e));
+    expect(seen).toHaveLength(1);
+    expect(classifyApiError(seen[0])).toBe('quota');
+    // 回傳仍維持保守契約
+    expect([...got.values()].every(v => v === 'unknown')).toBe(true);
+  });
+
   it('一批失敗不影響其餘批次', async () => {
     const many = Array.from({ length: 60 }, (_, i) => `v${i}`);
     const fetchJson = vi.fn()

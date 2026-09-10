@@ -2140,8 +2140,19 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 
       // reverse() 使較舊的影片先進入佇列，較新者最後 unshift 而位於最前。
       // matched 為 partitionByKeywords 產生的新陣列，reverse 不影響 videos 的順序。
-      for (const vid of matched.reverse()) {
-        const liveStatus = await DownloadService.checkVideoLiveStatus(vid.url);
+      const ordered = matched.reverse();
+
+      // 兩段式：先一次解析整組候選的直播狀態，再走訪建立任務。
+      // 交織在同一輪走訪中就無法批次 —— API 可用時單次請求可涵蓋 50 支，
+      // 取代逐支各開一個 yt-dlp 行程。無金鑰時內部自動退回逐支，
+      // 故此處不需要知道金鑰是否存在。
+      const liveStatuses = await DownloadService.resolveLiveStatuses(ordered, {
+        api: buildApiOptions(channel)
+      });
+
+      for (const vid of ordered) {
+        // 查不到一律視為 unknown —— 保守處置，阻擋錨點並於下輪重新評估
+        const liveStatus = liveStatuses.get(vid.videoId) ?? 'unknown';
         if (liveStatus !== 'not_live') {
           // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
           // 兩者皆未被實際處理，記錄下來以阻止錨點越過它們。

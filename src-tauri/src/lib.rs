@@ -140,6 +140,18 @@ fn probe_internet_connectivity(timeout_ms: u64) -> bool {
     }
 }
 
+/// 自訊息中移除網址的 query string。
+///
+/// 抽為自由函式以便單元測試：這是機密不外流的最後一道防線，
+/// 而它保護的東西（API 金鑰）一旦寫進 avd_error_log 就等同公開
+/// —— 錯誤日誌的設計目的就是讓使用者複製出來求助。
+fn redact_query(message: String, query: Option<&str>) -> String {
+    match query {
+        Some(q) => message.replace(q, ""),
+        None => message,
+    }
+}
+
 #[tauri::command]
 fn fetch_http_text(
     url: String,
@@ -156,10 +168,7 @@ fn fetch_http_text(
     // 前綴（HTTP_STATUS: / NETWORK_ERROR:）刻意保留不變：channelRssRetryDelays
     // 依該前綴分層決定重試時間表，破壞它會使重試策略失效。
     let query = url.find('?').map(|i| url[i..].to_string());
-    let redact = |message: String| match &query {
-        Some(q) => message.replace(q.as_str(), ""),
-        None => message,
-    };
+    let redact = |message: String| redact_query(message, query.as_deref());
 
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
@@ -303,4 +312,55 @@ pub fn run() {
         .setup(|_app| Ok(()))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_query;
+
+    #[test]
+    fn removes_query_string_from_message() {
+        let url = "https://www.googleapis.com/youtube/v3/videos?part=snippet&id=abc";
+        let query = url.find('?').map(|i| &url[i..]);
+        let message = format!("{}: status code 403", url);
+        let got = redact_query(message, query);
+        assert_eq!(got, "https://www.googleapis.com/youtube/v3/videos: status code 403");
+        assert!(!got.contains("part="));
+        assert!(!got.contains("id=abc"));
+    }
+
+    #[test]
+    fn removes_secret_bearing_query_even_if_key_were_in_url() {
+        // 金鑰現在走 X-goog-api-key 標頭，此處為縱深防禦：
+        // 即使日後有人把金鑰放回網址，也不得從錯誤訊息漏出。
+        let url = "https://www.googleapis.com/youtube/v3/videos?key=AIzaSECRET123";
+        let query = url.find('?').map(|i| &url[i..]);
+        let message = format!("{}: status code 400", url);
+        let got = redact_query(message, query);
+        assert!(!got.contains("AIzaSECRET123"));
+        assert!(!got.contains("key="));
+    }
+
+    #[test]
+    fn channel_rss_query_is_removed_but_host_kept() {
+        let url = "https://www.youtube.com/feeds/videos.xml?channel_id=UCtest";
+        let query = url.find('?').map(|i| &url[i..]);
+        let got = redact_query(format!("{}: status code 404", url), query);
+        assert_eq!(got, "https://www.youtube.com/feeds/videos.xml: status code 404");
+    }
+
+    #[test]
+    fn message_without_query_is_unchanged() {
+        let got = redact_query("https://example.com/x: status code 500".to_string(), None);
+        assert_eq!(got, "https://example.com/x: status code 500");
+    }
+
+    #[test]
+    fn removes_every_occurrence_in_message() {
+        let url = "https://a.test/p?k=v";
+        let query = url.find('?').map(|i| &url[i..]);
+        let got = redact_query(format!("{} failed; retried {}", url, url), query);
+        assert!(!got.contains("k=v"));
+    }
 }

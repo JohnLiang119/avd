@@ -18,6 +18,7 @@ import { buildDownloadFileName, nextAvailableName } from './fileNaming';
 import {
   selectFirstChannel,
   fetchChannelVideosViaApi,
+  resolveLiveStatusesViaApi,
   classifyApiError,
   type ApiRequest,
   type ApiErrorKind,
@@ -457,6 +458,59 @@ function parseFallbackNdjson(ndjson: string, limit = 2): MonitoredVideoResult[] 
  * `classifyApiError` 能自 body 的 JSON 區分配額耗盡與金鑰無效 ——
  * 單看狀態碼不足，403 兩者皆可能。
  */
+/**
+ * API 通道的呼叫端選項。`fetchChannelVideos` 與 `resolveLiveStatuses` 共用，
+ * 使抑制狀態、用量計數與錯誤回報在兩條路徑上一致。
+ */
+export interface ChannelApiOptions {
+  apiKey: string;
+  now?: number;
+  /** 配額耗盡的抑制解除時點 */
+  quotaSuppressedUntil?: number;
+  /** 被拒金鑰的指紋；與當前金鑰相符時跳過 API */
+  rejectedKeyFingerprint?: string;
+  /** 已知的 uploads 播放清單識別碼（快取），省去推導與後備查詢 */
+  uploadsPlaylistId?: string;
+  /** API 成功時回報確定的 uploads 清單識別碼，供呼叫端快取 */
+  onResolved?: (uploadsPlaylistId: string) => void;
+  /** API 失敗時回報錯誤類別，供呼叫端寫入抑制狀態與回饋 */
+  onError?: (kind: ApiErrorKind) => void;
+  /** 每次請求送達服務後回報其配額成本，供呼叫端累計當日用量估算 */
+  onUnitsConsumed?: (units: number) => void;
+}
+
+/** 本輪是否該走 API 通道。 */
+function shouldUseApi(api?: ChannelApiOptions): api is ChannelApiOptions {
+  if (!api) return false;
+  return selectFirstChannel({
+    apiKey: api.apiKey,
+    now: api.now ?? Date.now(),
+    quotaSuppressedUntil: api.quotaSuppressedUntil,
+    rejectedKeyFingerprint: api.rejectedKeyFingerprint,
+  }) === 'api';
+}
+
+/**
+ * 包出一個會累計用量的請求執行函式。
+ *
+ * 計數時機為「請求已送達服務」：傳輸層錯誤未達 Google 故不計入，
+ * 其餘（含配額耗盡的 403）一律計入 —— 那些請求確實被服務處理過。
+ */
+function countedApiFetch(api: ChannelApiOptions) {
+  return async (request: ApiRequest) => {
+    try {
+      const json = await fetchApiJson(request);
+      api.onUnitsConsumed?.(1);
+      return json;
+    } catch (e: any) {
+      const message = e?.message || String(e);
+      const isTransport = /^NETWORK_ERROR:/i.test(message) || e instanceof TypeError;
+      if (!isTransport) api.onUnitsConsumed?.(1);
+      throw e;
+    }
+  };
+}
+
 async function fetchApiJson(request: ApiRequest): Promise<any> {
   if (isTauri()) {
     const text = await invoke<string>('fetch_http_text', {
@@ -1409,56 +1463,67 @@ export const DownloadService = {
    * 未提供 `api` 選項或其金鑰為空時，MUST NOT 發出任何 API 請求 ——
    * 那是完全正常的預設狀態，行為與導入 API 通道前逐位元相同。
    */
+  /**
+   * 解析一組影片的直播狀態，回傳 `videoId → 狀態` 的對照表。
+   *
+   * API 可用時以批次查詢（單次最多 50 支、僅 1 unit），否則逐支呼叫
+   * `checkVideoLiveStatus`（桌面每支開一個 yt-dlp 行程）。兩種實作對上層
+   * 等價，故呼叫端**不需要知道是否有金鑰**。
+   *
+   * 批次途中若有任何一批失敗，先把錯誤分類上報（使配額耗盡與金鑰無效能
+   * 觸發抑制），再改以逐支查詢完成本輪 —— 而不是讓那些影片停在 `unknown`。
+   * 停在 unknown 雖然安全（它們會阻擋錨點、下輪重新評估），但等於本輪白做；
+   * 逐支路徑是已知可用的，值得為此多付一次查詢。
+   *
+   * 查不到的影片一律為 `'unknown'`，MUST NOT 樂觀視為 `'not_live'` ——
+   * 錯放一支未開播的直播進佇列，下載必然失敗。
+   */
+  async resolveLiveStatuses(
+    videos: { videoId: string; url: string }[],
+    options?: { api?: ChannelApiOptions }
+  ): Promise<Map<string, LiveCheckResult>> {
+    const list = videos || [];
+    if (list.length === 0) return new Map();
+
+    const api = options?.api;
+
+    if (shouldUseApi(api)) {
+      const errors: unknown[] = [];
+      const map = await resolveLiveStatusesViaApi(
+        list.map(v => v.videoId),
+        api.apiKey,
+        countedApiFetch(api),
+        e => errors.push(e)
+      );
+
+      if (errors.length === 0) return map;
+
+      // 有批次失敗：先記錄抑制，再降級逐支完成本輪
+      for (const e of errors) api.onError?.(classifyApiError(e));
+      console.warn(`直播狀態批次查詢有 ${errors.length} 批失敗，改以逐支查詢完成本輪`);
+    }
+
+    const map = new Map<string, LiveCheckResult>();
+    for (const video of list) {
+      map.set(video.videoId, await DownloadService.checkVideoLiveStatus(video.url));
+    }
+    return map;
+  },
+
   async fetchChannelVideos(
     channelId: string,
     options?: {
       enableFallback?: boolean;
       noRetry?: boolean;
-      api?: {
-        apiKey: string;
-        now?: number;
-        /** 配額耗盡的抑制解除時點 */
-        quotaSuppressedUntil?: number;
-        /** 被拒金鑰的指紋；與當前金鑰相符時跳過 API */
-        rejectedKeyFingerprint?: string;
-        /** 已知的 uploads 播放清單識別碼（快取），省去推導與後備查詢 */
-        uploadsPlaylistId?: string;
-        /** API 成功時回報確定的 uploads 清單識別碼，供呼叫端快取 */
-        onResolved?: (uploadsPlaylistId: string) => void;
-        /** API 失敗時回報錯誤類別，供呼叫端寫入抑制狀態與回饋 */
-        onError?: (kind: ApiErrorKind) => void;
-        /** 每次請求送達服務後回報其配額成本，供呼叫端累計當日用量估算 */
-        onUnitsConsumed?: (units: number) => void;
-      };
+      api?: ChannelApiOptions;
     }
   ): Promise<MonitoredVideoResult[]> {
     const api = options?.api;
-    const useApi = !!api && selectFirstChannel({
-      apiKey: api.apiKey,
-      now: api.now ?? Date.now(),
-      quotaSuppressedUntil: api.quotaSuppressedUntil,
-      rejectedKeyFingerprint: api.rejectedKeyFingerprint,
-    }) === 'api';
 
-    if (api && useApi) {
-      // 計數時機為「請求已送達服務」：傳輸層錯誤未達 Google 故不計入，
-      // 其餘（含配額耗盡的 403）一律計入 —— 那些請求確實被服務處理過。
-      const countedFetch = async (request: ApiRequest) => {
-        try {
-          const json = await fetchApiJson(request);
-          api.onUnitsConsumed?.(1);
-          return json;
-        } catch (e: any) {
-          const message = e?.message || String(e);
-          const isTransport = /^NETWORK_ERROR:/i.test(message) || e instanceof TypeError;
-          if (!isTransport) api.onUnitsConsumed?.(1);
-          throw e;
-        }
-      };
-
+    if (shouldUseApi(api)) {
       try {
         const { videos, uploadsPlaylistId } = await fetchChannelVideosViaApi(
-          channelId, api.apiKey, countedFetch, api.uploadsPlaylistId
+          channelId, api.apiKey, countedApiFetch(api), api.uploadsPlaylistId
         );
         api.onResolved?.(uploadsPlaylistId);
         return videos;

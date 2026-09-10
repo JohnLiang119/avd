@@ -166,7 +166,8 @@ export function mapLiveStatus(item: any): LiveCheckResult {
 export async function resolveLiveStatusesViaApi(
   videoIds: string[],
   apiKey: string,
-  fetchJson: (request: ApiRequest) => Promise<any>
+  fetchJson: (request: ApiRequest) => Promise<any>,
+  onBatchError?: (error: unknown) => void
 ): Promise<Map<string, LiveCheckResult>> {
   const result = new Map<string, LiveCheckResult>();
   const ids = (videoIds || []).filter(Boolean);
@@ -177,8 +178,13 @@ export async function resolveLiveStatusesViaApi(
     let json: any;
     try {
       json = await fetchJson(buildVideosRequest(batch, apiKey));
-    } catch {
-      // 整批失敗：該批全部維持 unknown，繼續處理其餘批次
+    } catch (e) {
+      // 整批失敗：該批全部維持 unknown，繼續處理其餘批次。
+      //
+      // 但錯誤本身 MUST 上報 —— 若在此靜默吞掉，配額耗盡與金鑰無效
+      // 就永遠不會觸發抑制，每輪都會對每個批次重打一次必然失敗的請求。
+      // 呼叫端據此決定抑制，並可改以逐支查詢完成本輪。
+      onBatchError?.(e);
       continue;
     }
     const items = json?.items;
