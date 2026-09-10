@@ -805,6 +805,25 @@ public class YoutubeDlPlugin extends Plugin {
                 ret.put("liveStatus", status);
                 call.resolve(ret);
             } catch (Exception e) {
+                // yt-dlp 對尚未開播的排程直播會直接報錯而非輸出 live_status。
+                // youtubedl-android 的 YoutubeDLException 以完整 stderr 建構
+                // （已於位元組碼確認：execute() 的 errBuffer.toString() 即例外訊息），
+                // 故此處拿得到 yt-dlp 的原始錯誤。
+                //
+                // 若不辨識出來，這類影片會落入「狀態無法判定」而阻擋時間錨點推進 ——
+                // 對每日建立排程直播的頻道（如新聞台），錨點會因此永久卡死。
+                //
+                // 樣式與前端 src/services/downloadErrors.ts 的 UPCOMING_LIVE_ERRORS
+                // 對應，兩處必須同步；刻意比「直播相關錯誤」更窄，誤判為排程直播會
+                // 使一般影片被錨點越過而永久漏抓。
+                String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+                if (message.contains("this live event will begin in")) {
+                    Log.i(TAG, "Scheduled live not yet started, skipping permanently");
+                    JSObject ret = new JSObject();
+                    ret.put("liveStatus", "is_upcoming");
+                    call.resolve(ret);
+                    return;
+                }
                 Log.e(TAG, "Failed to check live status", e);
                 call.reject("查詢直播狀態失敗: " + e.getMessage());
             }

@@ -46,3 +46,41 @@ export const matchPermanentError = (msg: string): { permanent: boolean; liveRela
     liveRelated: LIVE_RELATED_ERRORS.some(k => lower.includes(k)),
   };
 };
+
+/**
+ * 查詢工具因「影片是尚未開播的排程直播」而失敗時的訊息樣式。
+ *
+ * 本清單刻意**比 `LIVE_RELATED_ERRORS` 更窄**，不含
+ * `'requested format is not available'` —— 那則訊息也可能出現在一般影片
+ * 的格式問題上。兩者的誤判代價不對稱：
+ *
+ * - 太窄：排程直播被判為「狀態無法判定」，錨點照舊被壓住 —— 即現況，
+ *   不會產生新故障。
+ * - 太寬：一般影片被誤判為排程直播，錨點會**越過**它，該片永久漏抓。
+ *
+ * 因此只納入語意上唯一指向「排程直播尚未開播」的訊息。新樣本出現時
+ * 再逐一加入，不預先臆測未經實測的措辭。
+ *
+ * 實測樣本（yt-dlp 2026 版，`--print live_status --skip-download`）：
+ *   ERROR: [youtube] 4y6daUqsp5c: This live event will begin in 6 hours.
+ */
+export const UPCOMING_LIVE_ERRORS = [
+  'this live event will begin in',
+] as const;
+
+/**
+ * 錯誤訊息是否代表「該影片為尚未開播的排程直播」。
+ *
+ * 供直播狀態查詢的錯誤處理使用：命中者判為「排程未開播」（永久略過、
+ * 錨點得以越過），未命中者維持「狀態無法判定」（暫時保留、壓住錨點）。
+ *
+ * 兩者的處置相反，故此判定本身即為行為契約的一部分 —— 見
+ * `auto-check-filtering` 的「排程直播的狀態須可辨識，不得退化為狀態未知」。
+ *
+ * **Android 端的 `YoutubeDlPlugin.checkVideoLiveStatus` 有一份對應的
+ * Java 實作，兩處的樣式與測試案例必須同步。**
+ */
+export const isUpcomingLiveError = (msg: string): boolean => {
+  const lower = (msg || '').toLowerCase();
+  return UPCOMING_LIVE_ERRORS.some(k => lower.includes(k));
+};

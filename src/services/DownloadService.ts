@@ -15,6 +15,7 @@ import {
 } from './enrichment';
 import { shouldBackoff, rateLimitBackoffMs, RATE_LIMIT_MAX_RETRIES, channelRssRetryDelays } from './rateLimit';
 import { buildDownloadFileName, nextAvailableName } from './fileNaming';
+import { isUpcomingLiveError } from './downloadErrors';
 import {
   selectFirstChannel,
   fetchChannelVideosViaApi,
@@ -1449,7 +1450,15 @@ export const DownloadService = {
       const normalized = status.toLowerCase();
       if (!normalized) return 'unknown';
       return normalized === 'is_live' || normalized === 'is_upcoming' ? 'live' : 'not_live';
-    } catch (e) {
+    } catch (e: any) {
+      // yt-dlp 對尚未開播的排程直播會直接報錯而非輸出 live_status。
+      // 若不辨識出來，這類影片會落入 'unknown' 而阻擋時間錨點推進 ——
+      // 對每日建立排程直播的頻道（如新聞台），錨點會因此永久卡死。
+      // 判定樣式與 Android 端的 YoutubeDlPlugin 共用，兩處須同步。
+      if (isUpcomingLiveError(e?.message || String(e))) {
+        console.log(`[直播狀態] 排程未開播，永久略過: ${url}`);
+        return 'live';
+      }
       console.warn(`檢查直播狀態失敗 (${url}):`, e);
       return 'unknown';
     }

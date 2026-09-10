@@ -479,3 +479,63 @@ describe('conservativeAnchor —— 還原時取較舊者', () => {
     expect(conservativeAnchor(0, 0)).toBeUndefined();
   });
 });
+
+describe('迴歸：排程直播不得釘住錨點（2026-09-10 實機案例）', () => {
+  // 取自使用者實機的真實 feed（中廣新聞網 UCkqrvXuqW7dN3E2_4v8Ha5Q）。
+  // 該頻道每日固定節目會提前建立 is_upcoming 的排程直播，因此 feed 中
+  // 永遠存在直播項目。錨點若被它們釘住，其後所有影片每輪重新判定為新片，
+  // 使用者清空下載佇列後即全部湧入（實測 32 支）。
+  const T = (iso: string) => Date.parse(iso);
+  const feed: MatchableVideo[] = [
+    vid('u6EySITKmOw', T('2026-09-09T02:06:00Z')),
+    vid('4y6daUqsp5c', T('2026-09-09T03:15:00Z')),   // 排程直播
+    vid('3jPB4Vrf5Vk', T('2026-09-09T03:55:00Z')),   // 排程直播
+    vid('WJBnl1H9SLs', T('2026-09-09T03:57:00Z')),   // 排程直播
+    vid('VN7nFTOwKB4', T('2026-09-09T04:14:00Z')),
+    vid('9jx_r9nyAOI', T('2026-09-09T11:46:00Z')),
+    vid('T4Ha357a9mA', T('2026-09-09T21:50:00Z')),
+    vid('en3Wvo6rnEA', T('2026-09-09T22:20:00Z')),
+    vid('PyHMh0FtECs', T('2026-09-10T01:03:00Z')),   // 最新
+  ];
+  const UPCOMING = ['4y6daUqsp5c', '3jPB4Vrf5Vk', 'WJBnl1H9SLs'];
+  // 穩態下的錨點：位於本輪 feed 的涵蓋範圍內，故候選視窗上限不介入，
+  // 單獨檢驗「未處理集合」這個變因。
+  const steady = T('2026-09-09T02:06:00Z');
+
+  it('修正前的行為：排程直播進入未處理集合會使錨點完全無法推進', () => {
+    // 舊佈線把 live 與 unknown 一併放入未處理集合。最早的排程直播在 03:15，
+    // 錨點候選必須嚴格早於它 —— 只剩 02:06 那支，而它正是現有錨點，故不推進。
+    const got = nextChannelBaseline(feed, steady, new Set(UPCOMING));
+    expect(got).toBeNull();
+    // 錨點之後仍有 8 支影片，每輪重新判定為新片
+    expect(feed.filter(v => v.publishedTime > steady)).toHaveLength(8);
+  });
+
+  it('修正後：排程直播不列入未處理集合，錨點推進至最新', () => {
+    // 新佈線只把 unknown 放入未處理集合；已知的排程直播不放
+    const got = nextChannelBaseline(feed, steady, new Set());
+    expect(got?.videoId).toBe('PyHMh0FtECs');
+    expect(got?.publishedTime).toBe(T('2026-09-10T01:03:00Z'));
+    // 錨點之後沒有殘留影片 —— 下一輪不會重複判定，清空佇列也不會湧回
+    expect(feed.filter(v => v.publishedTime > (got?.publishedTime ?? 0))).toHaveLength(0);
+  });
+
+  it('狀態無法判定者仍阻擋錨點 —— 保守處置未被一併放寬', () => {
+    // 查詢失敗屬暫時性，仍須壓住錨點以便下輪重新評估
+    const got = nextChannelBaseline(feed, steady, new Set(['9jx_r9nyAOI']));
+    expect(got?.videoId).toBe('VN7nFTOwKB4');
+    expect(got?.publishedTime).toBe(T('2026-09-09T04:14:00Z'));
+  });
+
+  it('錨點遠落後於 feed 時分兩輪追上，不會卡死', () => {
+    // 實機當下的狀態：錨點 09-07，而 feed 最舊者為 09-09 —— 視窗未涵蓋錨點，
+    // 故第一輪受候選視窗上限約束只推進到本輪最舊者（09-07～09-09 之間可能
+    // 有未取回的影片，不得跳過）。第二輪視窗已涵蓋錨點，即推進至最新。
+    const stale = T('2026-09-07T11:06:00Z');
+    const first = nextChannelBaseline(feed, stale, new Set());
+    expect(first?.videoId).toBe('u6EySITKmOw');
+
+    const second = nextChannelBaseline(feed, first!.publishedTime, new Set());
+    expect(second?.videoId).toBe('PyHMh0FtECs');
+  });
+});

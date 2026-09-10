@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchPermanentError } from '../downloadErrors';
+import { matchPermanentError, isUpcomingLiveError } from '../downloadErrors';
 
 describe('matchPermanentError', () => {
   it('確定性錯誤不重試', () => {
@@ -50,5 +50,46 @@ describe('matchPermanentError', () => {
   it('null 與 undefined 不拋例外', () => {
     expect(matchPermanentError(null as any).permanent).toBe(false);
     expect(matchPermanentError(undefined as any).permanent).toBe(false);
+  });
+});
+
+describe('isUpcomingLiveError', () => {
+  it('實測樣本判為排程直播', () => {
+    for (const msg of [
+      'ERROR: [youtube] 4y6daUqsp5c: This live event will begin in 6 hours.',
+      'ERROR: [youtube] 3jPB4Vrf5Vk: This live event will begin in 5 hours.',
+      '查詢直播狀態失敗: ERROR: [youtube] x: This live event will begin in 21 minutes',
+    ]) {
+      expect(isUpcomingLiveError(msg), msg).toBe(true);
+    }
+  });
+
+  it('比對不分大小寫', () => {
+    expect(isUpcomingLiveError('THIS LIVE EVENT WILL BEGIN IN 2 HOURS')).toBe(true);
+  });
+
+  it('無法辨識的失敗不判為排程直播 —— 保守預設為狀態未知', () => {
+    for (const msg of [
+      'ERROR: Unable to download webpage: HTTP Error 429: Too Many Requests',
+      'ERROR: [youtube] x: Video unavailable',
+      'ERROR: Private video. Sign in if you have been granted access',
+      'NETWORK_ERROR: dns error',
+      '查詢直播狀態失敗: timeout',
+    ]) {
+      expect(isUpcomingLiveError(msg), msg).toBe(false);
+    }
+  });
+
+  it('刻意比 LIVE_RELATED_ERRORS 窄 —— 格式不可用不算排程直播', () => {
+    // 誤判代價不對稱：太寬會讓一般影片被錨點越過而永久漏抓
+    const msg = 'ERROR: Requested format is not available';
+    expect(matchPermanentError(msg).liveRelated).toBe(true);
+    expect(isUpcomingLiveError(msg)).toBe(false);
+  });
+
+  it('null 與 undefined 不拋例外', () => {
+    expect(isUpcomingLiveError(null as any)).toBe(false);
+    expect(isUpcomingLiveError(undefined as any)).toBe(false);
+    expect(isUpcomingLiveError('')).toBe(false);
   });
 });

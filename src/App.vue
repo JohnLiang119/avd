@@ -2154,14 +2154,22 @@ const checkAllMonitoredChannels = async (isManual = false) => {
         // 查不到一律視為 unknown —— 保守處置，阻擋錨點並於下輪重新評估
         const liveStatus = liveStatuses.get(vid.videoId) ?? 'unknown';
         if (liveStatus !== 'not_live') {
-          // 'live' 為直播中或排程未開播；'unknown' 為查詢失敗而無從判定。
-          // 兩者皆未被實際處理，記錄下來以阻止錨點越過它們。
-          unhandledVideoIds.add(vid.videoId);
-          console.log(
-            liveStatus === 'live'
-              ? `[自動追蹤] 跳過直播/首播影片: ${vid.title}`
-              : `[自動追蹤] 直播狀態查詢失敗，暫不處理: ${vid.title}`
-          );
+          // 兩種狀態的處置刻意不同：
+          //
+          // 'live'（直播中或排程未開播）—— 系統**已知**且明確不予下載，與未命中
+          //   關鍵字的影片同列，錨點得以越過。以壓住錨點來表達「之後再看」，在
+          //   每日建立排程直播的頻道（如新聞台）上會使錨點永久卡死：feed 中永遠
+          //   有未處理影片，每輪把錨點之後的所有影片重新判定為新片，僅靠佇列去重
+          //   掩蓋，使用者清空佇列時即全部湧入。
+          //
+          // 'unknown'（查詢失敗而無從判定）—— 尚未確定，仍須阻擋錨點以便下輪
+          //   重新評估。此狀態為暫時性，且影片離開候選視窗後即自然停止阻擋。
+          if (liveStatus === 'unknown') {
+            unhandledVideoIds.add(vid.videoId);
+            console.log(`[自動追蹤] 直播狀態查詢失敗，暫不處理: ${vid.title}`);
+          } else {
+            console.log(`[自動追蹤] 跳過直播/首播影片（錨點得以越過）: ${vid.title}`);
+          }
           continue;
         }
 
