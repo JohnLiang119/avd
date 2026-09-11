@@ -113,8 +113,16 @@
         <!-- 網路狀態標籤（正常／檢查中，置左，與右側兩排按鈕等高）＋ 重整/清除/刪除/設定、音訊/頻道/快傳/收合 -->
         <div style="display: flex; align-items: stretch; gap: 8px;">
           <div v-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
+            <!--
+              連線正常時保留狀態色。這是全應用程式唯一用於「狀態」的顏色，
+              與 `danger` 分屬兩個用途軸（一個說「現在如何」、一個說「按下
+              去會怎樣」），兩者不會出現在同一個元素上，故不互相稀釋。
+              顏色是輔助 —— 標籤同時帶有文字與形狀標示。
+            -->
             <span
-              :style="`display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; color: ${UI_COLOR.textMuted};`"
+              :style="networkStatusState === 'online'
+                ? `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px; background: ${UI_COLOR.okSurface}; color: ${UI_COLOR.ok}; border: 1px solid ${UI_COLOR.okLine};`
+                : `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; color: ${UI_COLOR.textMuted};`"
             >
               <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
               <span v-for="(line, i) in networkStatusBadgeLines" :key="i">{{ line }}</span>

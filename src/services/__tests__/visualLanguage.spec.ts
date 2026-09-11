@@ -56,11 +56,26 @@ describe('顏色的語意', () => {
     }
   });
 
-  it('中性色階之外只有一個顏色', () => {
-    // 藍、綠、橘、琥珀一個都不該回來 —— 它們會把 danger 稀釋成五分之一
+  it('中性色階之外只有兩個互不重疊的用途軸', () => {
+    // 顏色只能落在「操作軸」（danger）與「狀態軸」（ok）上。
+    // 藍、橘、琥珀一個都不該回來 —— 裝飾性用色會把 danger 稀釋。
+    // 要加第三個顏色就會在此失敗，迫使加的人說明它屬於哪一軸。
     const neutral = ['text', 'textMuted', 'textFaint', 'line', 'surface', 'surfaceMuted'];
     const accents = Object.keys(UI_COLOR).filter(k => !neutral.includes(k));
-    expect(accents).toEqual(['danger']);
+    expect(accents.sort()).toEqual(['danger', 'ok', 'okLine', 'okSurface']);
+  });
+
+  it('操作軸與狀態軸的顏色互異 —— 否則兩個軸會被混為一談', () => {
+    expect(UI_COLOR.ok).not.toBe(UI_COLOR.danger);
+    expect(UI_COLOR.okSurface).not.toBe(UI_COLOR.danger);
+  });
+
+  it('狀態色 MUST NOT 用於任何可點擊的控制項', () => {
+    // 字元按鈕是全應用程式唯一套用顏色的控制項，兩種樣式都不得帶狀態色
+    for (const style of [GLYPH_BUTTON_STYLE, GLYPH_BUTTON_DANGER_STYLE]) {
+      expect(style).not.toContain(UI_COLOR.ok);
+      expect(style).not.toContain(UI_COLOR.okSurface);
+    }
   });
 
   it('可復原與不可逆的按鈕樣式只差顏色，其餘完全相同', () => {
