@@ -168,6 +168,24 @@ describe('decideJournalTransition —— 持續性狀況只記轉換', () => {
     expect(writes).toBe(1);
   });
 
+  it('恢復後若只走「正常」路徑也必須記下解除 —— 否則停了多久讀不出來', () => {
+    // 實測回歸（v1.0.95）：使用者全程按模擬測試，填回金鑰後那條路徑
+    // 在狀態正常時直接返回而未入帳，於是「已恢復」永遠不會出現。
+    let journaled = '';
+    const writes: string[] = [];
+    const step = (current: string) => {
+      const got = decideJournalTransition(journaled, current);
+      journaled = got.nextJournaled;
+      if (got.kind !== 'none') writes.push(got.kind);
+    };
+    step('missing_key');   // 金鑰空白，第一次觸發
+    step('missing_key');   // 再按幾次
+    step('missing_key');
+    step('');              // 填回金鑰後的任一次操作
+    step('');              // 之後不再重複
+    expect(writes).toEqual(['started', 'cleared']);
+  });
+
   it('一輪正常檢查不產生任何寫入決定', () => {
     // 【紅線】日誌只有 50 筆，正常運作絕不能佔用任何一筆
     expect(decideJournalTransition('', '').kind).toBe('none');

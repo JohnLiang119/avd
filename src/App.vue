@@ -779,16 +779,12 @@
                 </van-button>
               </div>
             </div>
-            <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint}; margin-top: 4px; line-height: 1.6;`">
-              {{ intervalFloorReason }}
-            </div>
           </div>
 
           <!-- 啟動時是否補做檢查。預設開啟，維持既有行為 -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
             <div style="flex: 1; min-width: 0; margin-right: 8px;">
               <div :style="`font-size: 12px; color: ${UI_COLOR.text};`">啟動時檢查</div>
-              <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint};`">開啟應用程式時，若距上次檢查已達間隔就補做一次</div>
             </div>
             <van-switch v-model="checkOnStartupEnabled" size="18px" />
           </div>
@@ -799,9 +795,6 @@
               <div :style="`font-size: 12px; color: ${UI_COLOR.text};`">
                 YouTube Data API 金鑰
                 <span :style="`font-size: 10px; margin-left: 6px; color: ${UI_COLOR.textFaint};`">{{ youtubeApiKey.trim() ? '已設定' : '未設定' }}</span>
-              </div>
-              <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint};`">
-                頻道追蹤的唯一通道，未設定即停止追蹤
               </div>
             </div>
             <van-button size="mini" :style="`${GLYPH_BUTTON_STYLE} min-width: 44px; font-size: 12px;`" @click="openApiKeyEditor">
@@ -2367,6 +2360,22 @@ const journalTrackingStatus = (current: ChannelTrackingStatus | '') => {
   journalOnly('頻道追蹤（已停止）', describeTrackingBlocked(status as ChannelTrackingStatus));
 };
 
+/**
+ * 追蹤狀態一改變就入帳，不必等使用者按任何按鈕。
+ *
+ * 少了這道，**填回金鑰卻沒有手動檢查**時「已恢復」永遠不會被記錄，
+ * 而規格要求「停了多久」須能自日誌讀出；配額於太平洋時間午夜自行重置的
+ * 恢復同理 —— 那是使用者完全沒有操作的時刻。
+ *
+ * 與各入口的明確呼叫並存而不衝突：`decideJournalTransition` 對相同狀態
+ * 一律回傳 `none`，故重複呼叫不會多寫。兩者的分工是「watch 捕捉**轉換**、
+ * 明確呼叫捕捉**首次觀測**」—— app 啟動時若本來就停擺，狀態從頭到尾
+ * 沒有改變過，watch 不會觸發，得靠檢查時的明確呼叫記下那一筆。
+ */
+watch(trackingStatus, (status) => {
+  journalTrackingStatus(status);
+});
+
 /** 停擺原因對應的檢查回饋文案。 */
 const describeTrackingBlocked = (status: ChannelTrackingStatus): string => {
   if (status === 'missing_key') return describeMissingKeyCheck();
@@ -2641,7 +2650,12 @@ const checkAllMonitoredChannels = async (isManual = false) => {
 const blockSimulationIfTrackingUnavailable = (): boolean => {
   uiNow.value = Date.now();
   const status = trackingStatus.value;
-  if (status === 'ok') return false;
+  if (status === 'ok') {
+    // 正常時也要走一次入帳 —— 否則使用者若全程只按模擬測試，
+    // 「已恢復」永遠不會被記錄，而規格要求「停了多久」須能自日誌讀出。
+    journalTrackingStatus('ok');
+    return false;
+  }
 
   // 走與自動檢查同一條「只記轉換」路徑，故不會每按一次就多一筆
   journalTrackingStatus(status);
