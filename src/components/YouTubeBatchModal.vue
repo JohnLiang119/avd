@@ -1,9 +1,9 @@
 <template>
   <van-dialog
     :show="show"
-    :title="'📺 ' + (channelTitle || '頻道主') + ' / 📂 ' + (playlistTitle || '播放清單')"
+    :title="(channelTitle || '頻道主') + ' / ' + (playlistTitle || '播放清單')"
     show-cancel-button
-    confirm-button-text="🚀 開始批次下載"
+    confirm-button-text="開始批次下載"
     cancel-button-text="取消"
     @confirm="handleConfirm"
     @cancel="handleCancel"
@@ -12,8 +12,8 @@
   >
     <div style="padding: 12px 16px; max-height: 400px; overflow-y: auto;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; background: #f8fafc; padding: 8px 12px; border-radius: 6px;">
-        <span style="font-size: 13px; color: #475569; font-weight: 500;">
-          共 {{ items.length }} 部影片，已選取 <strong style="color: #2563eb;">{{ selectedIds.length }}</strong> 部
+        <span style="font-size: 13px; color: #64748b; font-weight: 500;">
+          共 {{ items.length }} 部影片，已選取 <strong style="color: #64748b;">{{ selectedIds.length }}</strong> 部
         </span>
         <div style="display: flex; gap: 6px;">
           <van-button size="mini" type="primary" plain @click="selectAll">全選</van-button>
@@ -31,11 +31,11 @@
             style="padding: 10px 12px;"
           >
             <template #title>
-              <div style="font-size: 13px; font-weight: 500; color: #1e293b; word-break: break-all; line-height: 1.4;">
+              <div style="font-size: 13px; font-weight: 500; color: #0f172a; word-break: break-all; line-height: 1.4;">
                 {{ item.title }}
               </div>
               <div v-if="item.durationStr" style="font-size: 11px; color: #64748b; margin-top: 2px;">
-                ⏱️ 片長: {{ item.durationStr }}
+                片長 {{ item.durationStr }}
               </div>
             </template>
             <template #right-icon>

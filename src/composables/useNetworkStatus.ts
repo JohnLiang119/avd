@@ -23,7 +23,19 @@ export interface NetworkStatusText {
   sub?: string;
 }
 
-/** 依狀態決定顯示文案；圖示與文字並列，不單獨依賴顏色傳達狀態。 */
+/**
+ * 依狀態決定顯示文案；標示與文字並列，不單獨依賴顏色傳達狀態。
+ *
+ * 四個標示構成一組**同一形狀的漸變**：實心圓為完全連通、半圓為部分連通、
+ * 空心圓為不通、刪節號為判定中。使用者不需要學習對照表就看得出彼此的關係。
+ *
+ * 刻意不使用表情符號（見 `visual-language` 的「介面不得以裝飾性圖像傳達
+ * 資訊」），也刻意避開 `▸ ↑ × ↓` 那組**動作**字元 —— 狀態與動作若共用字元，
+ * 使用者會以為那是可以點的。
+ *
+ * 標示本身不可省略：調色盤收斂為灰階之後，顏色能傳達的訊息更少，
+ * 而「不單獨依賴顏色」這個性質反而更重要。
+ */
 export function describeNetworkStatus(state: NetworkStatusState): NetworkStatusText {
   switch (state) {
     case 'checking':
@@ -33,14 +45,14 @@ export function describeNetworkStatus(state: NetworkStatusState): NetworkStatusT
     case 'degraded':
       return {
         compact: false,
-        icon: '⚠️',
+        icon: '◐',
         main: '網路不穩定',
         sub: '已連線但暫時無法連上網際網路，部分功能可能較慢或失敗',
       };
     case 'offline':
       return {
         compact: false,
-        icon: '⛔',
+        icon: '○',
         main: '目前無法連上網際網路',
         sub: '請確認 Wi-Fi 或行動網路已開啟',
       };

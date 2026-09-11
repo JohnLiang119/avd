@@ -22,6 +22,10 @@ import {
   describeApiFetchFailure,
   buildChannelSnippetRequest,
   parseChannelTitle,
+  parseChannelSnippet,
+  isUnresolvedChannelTitle,
+  needsIdentityRepair,
+  isGenericChannelThumbnail,
   PLAYLIST_ITEMS_FIELDS,
   VIDEOS_FIELDS,
   CHANNEL_UPLOADS_FIELDS,
@@ -914,7 +918,11 @@ describe('channels 兩個遮罩與其解析一致', () => {
         description: 'd'.repeat(1000),
         customUrl: '@someone',
         publishedAt: '2020-01-01T00:00:00Z',
-        thumbnails: { high: { url: 'u', width: 800, height: 800 } },
+        thumbnails: {
+          default: { url: 'https://yt3.ggpht.com/avatar88', width: 88, height: 88 },
+          medium: { url: 'https://yt3.ggpht.com/avatar240', width: 240, height: 240 },
+          high: { url: 'https://yt3.ggpht.com/avatar800', width: 800, height: 800 },
+        },
         localized: { title: '某某頻道', description: 'd' },
         country: 'TW',
       },
@@ -929,13 +937,25 @@ describe('channels 兩個遮罩與其解析一致', () => {
     expect(masked.items[0].id).toBeUndefined();
   });
 
-  it('頻道名稱在遮罩後仍取得，且 description 與縮圖被排除', () => {
+  it('名稱與頭像在遮罩後皆取得，且 description 與其餘尺寸被排除', () => {
     const masked = applyMask(snippetFull, CHANNEL_SNIPPET_FIELDS) as any;
-    expect(parseChannelTitle(masked)).toBe(parseChannelTitle(snippetFull));
-    expect(parseChannelTitle(masked)).toBe('某某頻道');
+    expect(parseChannelSnippet(masked)).toEqual(parseChannelSnippet(snippetFull));
+    expect(parseChannelSnippet(masked)).toEqual({
+      title: '某某頻道',
+      thumbnail: 'https://yt3.ggpht.com/avatar88',
+    });
     expect(masked.items[0].snippet.description).toBeUndefined();
-    expect(masked.items[0].snippet.thumbnails).toBeUndefined();
     expect(masked.items[0].snippet.localized).toBeUndefined();
+    // 卡片只呈現 32px，取 88px 的 default 即足夠；更大的尺寸只是多付傳輸
+    expect(masked.items[0].snippet.thumbnails.medium).toBeUndefined();
+    expect(masked.items[0].snippet.thumbnails.high).toBeUndefined();
+  });
+
+  it('名稱與頭像各自獨立 —— 只缺其一時另一個仍須被採用', () => {
+    expect(parseChannelSnippet({ items: [{ snippet: { title: '只有名稱' } }] }))
+      .toEqual({ title: '只有名稱', thumbnail: '' });
+    expect(parseChannelSnippet({ items: [{ snippet: { thumbnails: { default: { url: 'u' } } } }] }))
+      .toEqual({ title: '', thumbnail: 'u' });
   });
 
   it('頻道不存在時，遮罩後的空 items 仍正確回報取不到', () => {
@@ -947,7 +967,8 @@ describe('channels 兩個遮罩與其解析一致', () => {
     expect(maskPaths(CHANNEL_UPLOADS_FIELDS).map(p => p.join('/'))).toEqual([
       'items/contentDetails/relatedPlaylists/uploads',
     ]);
-    expect(maskPaths(CHANNEL_SNIPPET_FIELDS).map(p => p.join('/'))).toEqual([
+    expect(maskPaths(CHANNEL_SNIPPET_FIELDS).map(p => p.join('/')).sort()).toEqual([
+      'items/snippet/thumbnails/default/url',
       'items/snippet/title',
     ]);
   });
@@ -996,5 +1017,66 @@ describe('檢查進度文案', () => {
     const text = describeCheckProgress({ done: 1, total: 2, currentTitle: '正常頻道' });
     expect(text).not.toContain('AIza');
     expect(text).not.toContain(FAKE_KEY);
+  });
+});
+
+describe('頻道識別資訊的修復判定', () => {
+  const CHID = 'UCUexfyzlAnIiCIcUqrZDFBA';
+
+  it('名稱仍是識別碼時視為未修復', () => {
+    expect(isUnresolvedChannelTitle(CHID, CHID)).toBe(true);
+    expect(isUnresolvedChannelTitle(CHID)).toBe(true);
+    expect(isUnresolvedChannelTitle('')).toBe(true);
+    expect(isUnresolvedChannelTitle('   ')).toBe(true);
+  });
+
+  it('真實名稱不被誤判為識別碼', () => {
+    expect(isUnresolvedChannelTitle('中廣新聞網', CHID)).toBe(false);
+    expect(isUnresolvedChannelTitle('Frank 賈楓下雜談', CHID)).toBe(false);
+    // 以 UC 開頭的正常頻道名不該被誤殺 —— 長度與字元集都不符
+    expect(isUnresolvedChannelTitle('UCLA 校園頻道', CHID)).toBe(false);
+  });
+
+  it('四種組合的修復判定', () => {
+    const cases: [string, string, boolean][] = [
+      // 名稱,        頭像,    需要修復嗎
+      [CHID,          '',      true],   // 兩者皆缺
+      [CHID,          'u',     true],   // 只有名稱缺
+      ['中廣新聞網',   '',      true],   // 只有頭像缺  <- 舊條件漏掉的正是這個
+      ['中廣新聞網',   'u',     false],  // 兩者皆有
+    ];
+    for (const [title, thumbnail, expected] of cases) {
+      expect(needsIdentityRepair({ title, thumbnail, channelId: CHID }), `${title}/${thumbnail}`)
+        .toBe(expected);
+    }
+  });
+
+  it('名稱正常但頭像缺失 MUST 觸發修復 —— 舊條件對這種頻道永遠不成立', () => {
+    // 使用者目前兩個頻道正是此狀態：名稱已被先前的修復補好，頭像卻始終空白
+    expect(needsIdentityRepair({ title: '中廣新聞網', thumbnail: '', channelId: CHID })).toBe(true);
+    expect(needsIdentityRepair({ title: 'Frank 賈楓下雜談', thumbnail: '   ', channelId: CHID })).toBe(true);
+  });
+
+  it('舊版存入的平台通用標誌視同未取得 —— 既有使用者能被修復的前提', () => {
+    // 舊版本取不到頭像時會存入 YouTube 網站圖示。少了這條判定，既有頻道
+    // 看起來「有頭像」而永遠不會進入修復，本功能對他們完全無效。
+    expect(isGenericChannelThumbnail('https://www.youtube.com/favicon.ico')).toBe(true);
+    expect(isGenericChannelThumbnail('HTTPS://WWW.YOUTUBE.COM/FAVICON.ICO')).toBe(true);
+    expect(isGenericChannelThumbnail('')).toBe(true);
+    expect(isGenericChannelThumbnail('   ')).toBe(true);
+    expect(isGenericChannelThumbnail(undefined)).toBe(true);
+    // 真正的頻道頭像不得被誤殺
+    expect(isGenericChannelThumbnail('https://yt3.ggpht.com/avatar88')).toBe(false);
+
+    expect(needsIdentityRepair({
+      title: '中廣新聞網',
+      thumbnail: 'https://www.youtube.com/favicon.ico',
+      channelId: CHID,
+    })).toBe(true);
+  });
+
+  it('欄位缺漏或形態不符時不拋例外', () => {
+    expect(needsIdentityRepair({} as any)).toBe(true);
+    expect(needsIdentityRepair({ title: undefined, thumbnail: undefined, channelId: CHID } as any)).toBe(true);
   });
 });

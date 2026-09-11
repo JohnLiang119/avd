@@ -73,8 +73,16 @@ export const VIDEOS_FIELDS = 'items(id,snippet/liveBroadcastContent)';
 /** `channels?part=contentDetails` 的欄位遮罩。對應 `parseUploadsPlaylistId`。 */
 export const CHANNEL_UPLOADS_FIELDS = 'items/contentDetails/relatedPlaylists/uploads';
 
-/** `channels?part=snippet` 的欄位遮罩。對應 `parseChannelTitle`。 */
-export const CHANNEL_SNIPPET_FIELDS = 'items/snippet/title';
+/**
+ * `channels?part=snippet` 的欄位遮罩。對應 `parseChannelSnippet`。
+ *
+ * 名稱與頭像來自**同一個回應**，故一併索取而非分兩次請求 —— 配額按請求數計，
+ * 分開打等於為同一份資料付兩次。
+ *
+ * 頭像取 `default`（88px）而非 `medium`／`high`：卡片只呈現 32px，
+ * 取更大的尺寸只是多付傳輸與解碼。
+ */
+export const CHANNEL_SNIPPET_FIELDS = 'items/snippet(title,thumbnails/default/url)';
 
 /** 取得某 uploads 播放清單最新一頁影片的請求。 */
 export function buildPlaylistItemsRequest(playlistId: string, apiKey: string): ApiRequest {
@@ -115,12 +123,87 @@ export function buildChannelSnippetRequest(channelId: string, apiKey: string): A
   }, apiKey);
 }
 
-/** 自 `channels.list?part=snippet` 回應取出頻道名稱；取不到時為空字串。 */
-export function parseChannelTitle(json: any): string {
+/** 自 `channels.list?part=snippet` 回應取出的頻道識別資訊；取不到者為空字串。 */
+export interface ChannelSnippet {
+  title: string;
+  /** 頻道頭像網址。空字串代表這次沒取到 —— 呼叫端據此維持「待修復」狀態 */
+  thumbnail: string;
+}
+
+/**
+ * 自 `channels.list?part=snippet` 回應取出頻道名稱與頭像。
+ *
+ * 兩者分別可能缺漏，故各自獨立判定 —— 只有名稱沒有頭像（或反之）時，
+ * 取得到的那一個仍 MUST 被採用，不得因另一個缺漏而一併丟棄。
+ */
+export function parseChannelSnippet(json: any): ChannelSnippet {
   const items = json?.items;
-  if (!Array.isArray(items) || items.length === 0) return '';
-  const title = items[0]?.snippet?.title;
-  return typeof title === 'string' ? title : '';
+  if (!Array.isArray(items) || items.length === 0) return { title: '', thumbnail: '' };
+
+  const snippet = items[0]?.snippet;
+  const title = snippet?.title;
+  const thumbnail = snippet?.thumbnails?.default?.url;
+  return {
+    title: typeof title === 'string' ? title : '',
+    thumbnail: typeof thumbnail === 'string' ? thumbnail : '',
+  };
+}
+
+/** 只取頻道名稱的便利包裝，保留既有呼叫路徑。 */
+export function parseChannelTitle(json: any): string {
+  return parseChannelSnippet(json).title;
+}
+
+// ============================================================================
+// 頻道識別資訊的修復判定
+// ============================================================================
+
+/** 修復判定所需的頻道現況。 */
+export interface ChannelIdentityState {
+  title: string;
+  thumbnail: string;
+  channelId: string;
+}
+
+/**
+ * 頻道名稱是否仍是未修復的識別碼。
+ *
+ * 加入頻道時若解析不出真實名稱，會以頻道識別碼充當暫時名稱。
+ */
+export function isUnresolvedChannelTitle(title: string, channelId?: string): boolean {
+  const text = (title || '').trim();
+  if (!text) return true;
+  if (channelId && text === channelId) return true;
+  return /^UC[A-Za-z0-9_-]{22}$/.test(text);
+}
+
+/**
+ * 頭像網址是否為平台通用標誌，而非真正的頻道頭像。
+ *
+ * 舊版本在取不到頭像時會填入 YouTube 網站圖示，使「尚未取得」與「已取得」
+ * 在資料上無法分辨 —— 已儲存的頻道因此看起來「有頭像」而不會進入修復。
+ * 此判定把那些值視同未取得，是既有使用者能被修復的**前提**：少了它，
+ * 名稱正常、頭像是通用標誌的頻道永遠不會被修好。
+ */
+export function isGenericChannelThumbnail(url?: string): boolean {
+  const text = (url || '').trim();
+  if (!text) return true;
+  return text.toLowerCase().includes('youtube.com/favicon.ico');
+}
+
+/**
+ * 該頻道是否需要向 API 修復其識別資訊。
+ *
+ * 判定刻意**逐項檢查「這個欄位缺了嗎」**，而非以名稱當作整體健康度的代理。
+ * 舊的作法只看名稱像不像識別碼，於是「名稱正常但頭像缺失」的頻道永遠不會
+ * 被修復 —— 而那正是多數受影響頻道的實際狀態：頻道識別碼與 `/channel/...`
+ * 形式的網址在解析時根本不產生頭像，名稱卻可能自其他來源取得。
+ *
+ * 頭像為平台通用標誌者視同缺失，見 `isGenericChannelThumbnail`。
+ */
+export function needsIdentityRepair(channel: ChannelIdentityState): boolean {
+  if (isUnresolvedChannelTitle(channel?.title ?? '', channel?.channelId)) return true;
+  return isGenericChannelThumbnail(channel?.thumbnail);
 }
 
 /** 查詢頻道的 uploads 播放清單識別碼（前綴推導失敗時的後備）。 */
@@ -483,7 +566,7 @@ function isPlaylistNotFound(error: unknown): boolean {
  * 頻道追蹤完全停止。同時明說會自動恢復，避免使用者去做無效的手動處理。
  */
 export function describeApiQuotaExhausted(): string {
-  return '（⚠️ 今日 API 配額已用盡，頻道追蹤暫停，太平洋時間午夜重置後自動恢復）';
+  return '（今日 API 配額已用盡，頻道追蹤暫停，太平洋時間午夜重置後自動恢復）';
 }
 
 /**
@@ -493,7 +576,7 @@ export function describeApiQuotaExhausted(): string {
  * MUST NOT 包含金鑰的任何片段 —— 本函式不接受金鑰參數即結構性保證。
  */
 export function describeApiKeyRejected(): string {
-  return '（⚠️ API 金鑰無效或該專案未啟用 YouTube Data API v3，頻道追蹤已停止，請於頻道設定中檢查金鑰）';
+  return '（API 金鑰無效或該專案未啟用 YouTube Data API v3，頻道追蹤已停止，請於頻道設定中檢查金鑰）';
 }
 
 /**
@@ -551,20 +634,20 @@ export function describeTrackingStatus(
 
   if (status === 'missing_key') {
     return {
-      title: '⛔ 頻道追蹤已停止：未設定 API 金鑰',
+      title: '頻道追蹤已停止：未設定 API 金鑰',
       detail: '頻道追蹤只有 YouTube Data API 一條通道。請於上方「YouTube Data API 金鑰」填入自備的金鑰，追蹤即恢復。',
     };
   }
 
   if (status === 'key_rejected') {
     return {
-      title: '⛔ 頻道追蹤已停止：金鑰無效',
+      title: '頻道追蹤已停止：金鑰無效',
       detail: '金鑰被 YouTube 拒絕，或該 Google Cloud 專案未啟用 YouTube Data API v3。請於上方重新設定正確的金鑰，追蹤即恢復。',
     };
   }
 
   return {
-    title: '⏸️ 頻道追蹤暫停：今日配額已用盡',
+    title: '頻道追蹤暫停：今日配額已用盡',
     detail: `每日配額於太平洋時間午夜重置${formatQuotaResetHint(options.quotaResetAt)}，屆時追蹤自動恢復，無須任何操作。`,
   };
 }

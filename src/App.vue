@@ -3,49 +3,49 @@
     <div class="content">
 
       <div v-if="serverStatus.isActive && !isTvMode" class="transfer-btn-wrapper" style="margin-bottom: 12px; display: flex; justify-content: center; flex-direction: column; align-items: center; gap: 8px;">
-        <div class="server-status-card" style="width: 100%; max-width: 320px; background: white; border-radius: 8px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+        <div class="server-status-card" style="width: 100%; max-width: 320px; background: white; border-radius: 8px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; gap: 12px;">
           <div style="display: flex; align-items: center; gap: 6px; width: 100%;">
-            <span style="display: inline-block; width: 8px; height: 8px; background-color: #10b981; border-radius: 50%;"></span>
-            <span style="font-size: 13px; font-weight: bold; color: #374151;">伺服器運行中</span>
-            <span style="font-size: 11px; color: #6b7280; margin-left: auto;">{{ serverStatus.ip }}</span>
+            <span style="display: inline-block; width: 8px; height: 8px; background-color: #64748b; border-radius: 50%;"></span>
+            <span style="font-size: 13px; font-weight: bold; color: #0f172a;">伺服器運行中</span>
+            <span style="font-size: 11px; color: #64748b; margin-left: auto;">{{ serverStatus.ip }}</span>
           </div>
           
           <div style="text-align: center; margin: 8px 0; width: 100%;">
-            <van-tabs v-if="wifiSsid" v-model:active="activeTab" type="card" color="#1989fa" style="margin-bottom: 8px;">
-              <van-tab title="🔗 1. 連線 Wi-Fi">
+            <van-tabs v-if="wifiSsid" v-model:active="activeTab" type="card" color="#0f172a" style="margin-bottom: 8px;">
+              <van-tab title=" 1. 連線 Wi-Fi">
                 <div style="padding-top: 12px;">
                   <qrcode-vue :value="wifiQrCodeValue" :size="140" level="M" />
-                  <p style="font-size: 11px; color: #666; margin-top: 8px;">掃描即可自動連上熱點</p>
+                  <p style="font-size: 11px; color: #64748b; margin-top: 8px;">掃描即可自動連上熱點</p>
                 </div>
               </van-tab>
-              <van-tab title="🌍 2. 開啟網頁">
+              <van-tab title=" 2. 開啟網頁">
                 <div style="padding-top: 12px;">
                   <qrcode-vue v-if="serverStatus.ip" :value="serverStatus.ip" :size="140" level="M" />
-                  <p style="font-size: 11px; color: #666; margin-top: 8px;">連上 Wi-Fi 後掃描開啟</p>
+                  <p style="font-size: 11px; color: #64748b; margin-top: 8px;">連上 Wi-Fi 後掃描開啟</p>
                 </div>
               </van-tab>
             </van-tabs>
 
             <div v-else>
-              <p style="font-size: 12px; color: #666; margin-bottom: 8px;">請確保 iPad 與本設備連線至同一個 Wi-Fi，然後使用相機掃描</p>
+              <p style="font-size: 12px; color: #64748b; margin-bottom: 8px;">請確保 iPad 與本設備連線至同一個 Wi-Fi，然後使用相機掃描</p>
               <qrcode-vue v-if="serverStatus.ip" :value="serverStatus.ip" :size="160" level="M" />
             </div>
 
             <van-button size="mini" type="primary" plain @click="showWifiModal = true" style="margin-top: 8px;">
-              ⚙️ {{ wifiSsid ? '修改 Wi-Fi QR Code 設定' : '設定 Wi-Fi 自動連線 QR Code' }}
+               {{ wifiSsid ? '修改 Wi-Fi QR Code 設定' : '設定 Wi-Fi 自動連線 QR Code' }}
             </van-button>
           </div>
 
-          <div style="font-size: 12px; color: #4b5563; display: flex; flex-direction: column; width: 100%; padding-top: 8px; border-top: 1px solid #f3f4f6;">
+          <div style="font-size: 12px; color: #64748b; display: flex; flex-direction: column; width: 100%; padding-top: 8px; border-top: 1px solid #f8fafc;">
             <div style="display: flex; justify-content: space-between;">
               <span>目前傳輸給設備總速度:</span>
-              <span style="font-family: monospace; font-weight: bold; color: #2563eb;">{{ formattedUploadSpeed }}</span>
+              <span style="font-family: monospace; font-weight: bold; color: #64748b;">{{ formattedUploadSpeed }}</span>
             </div>
             
-            <div v-if="Object.keys(serverStatus.devices).length > 0" style="margin-top: 4px; border-top: 1px dashed #e5e7eb; padding-top: 4px;">
+            <div v-if="Object.keys(serverStatus.devices).length > 0" style="margin-top: 4px; border-top: 1px dashed #e2e8f0; padding-top: 4px;">
               <div v-for="(speed, ip) in serverStatus.devices" :key="ip" style="display: flex; justify-content: space-between; margin-left: 8px; margin-top: 2px;">
-                <span style="color: #6b7280;">📱 {{ ip }}</span>
-                <span style="font-family: monospace; font-weight: bold; color: #10b981;">{{ formatSpeedBps(speed) }}</span>
+                <span style="color: #64748b;">{{ ip }}</span>
+                <span style="font-family: monospace; font-weight: bold; color: #64748b;">{{ formatSpeedBps(speed) }}</span>
               </div>
             </div>
           </div>
@@ -68,7 +68,6 @@
             plain
             round
             type="primary"
-            icon="folder-o"
             @click="openDownloadFolder"
             style="padding: 0 10px; flex-shrink: 0;"
           >
@@ -79,40 +78,34 @@
             plain
             round
             :type="driveToken ? 'success' : 'primary'" 
-            icon="share-o" 
             @click="showTokenModal = true"
             style="padding: 0 10px; flex-shrink: 0;"
           >
             {{ driveToken ? 'Drive 已連結' : '連結 Drive' }}
           </van-button>
-          <van-button 
-            size="small"
-            round 
-            type="primary" 
-            native-type="submit"
-            icon="down"
-            style="padding: 0; width: 32px; height: 32px; flex-shrink: 0;"
-          />
+          <!-- native-type="submit" 是功能屬性，視覺收斂 MUST NOT 連它一起拿掉 -->
+          <van-button size="mini" native-type="submit" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.submit }}</van-button>
         </div>
       </van-form>
 
-      <div class="control-panel-wrapper" style="padding: 0 10px 10px; margin-bottom: 10px; border-bottom: 1px solid #eee;" v-show="!isTvMode">
+      <div class="control-panel-wrapper" style="padding: 0 10px 10px; margin-bottom: 10px; border-bottom: 1px solid #e2e8f0;" v-show="!isTvMode">
         <!-- 網路狀態（不穩定／離線）：獨立全寬提示列，位於「重整」列上方 -->
+        <!--
+          不動用唯一的強調色 —— 網路不通是需要注意的狀態，但不是不可逆的
+          操作，用紅色會稀釋掉刪檔的警示。改以左側粗邊線加狀態標示表達。
+        -->
         <div
           v-if="!networkStatusText.compact"
-          style="width: 100%; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; border: 1px solid transparent;"
-          :style="networkStatusState === 'offline'
-            ? 'background: #fef2f2; border-color: #fecaca; color: #b91c1c;'
-            : 'background: #fffbeb; border-color: #fde68a; color: #92400e;'"
+          :style="`width: 100%; padding: 8px 0 8px 10px; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; font-size: 12.5px; border-left: 3px solid ${UI_COLOR.text}; color: ${UI_COLOR.text};`"
         >
-          <span style="font-size: 18px; flex-shrink: 0; line-height: 1;">{{ networkStatusText.icon }}</span>
-          <div style="flex: 1; line-height: 1.4;">
-            <span style="font-weight: 700; display: block; margin-bottom: 1px;">{{ networkStatusText.main }}</span>
-            <span v-if="networkStatusText.sub" style="font-size: 11px; opacity: 0.85;">{{ networkStatusText.sub }}</span>
+          <span style="font-size: 16px; flex-shrink: 0; line-height: 1;">{{ networkStatusText.icon }}</span>
+          <div style="flex: 1; line-height: 1.5;">
+            <span style="font-weight: 600; display: block; margin-bottom: 1px;">{{ networkStatusText.main }}</span>
+            <span v-if="networkStatusText.sub" :style="`font-size: 11px; color: ${UI_COLOR.textMuted};`">{{ networkStatusText.sub }}</span>
           </div>
           <button
             type="button"
-            style="flex-shrink: 0; border: 1px solid currentColor; background: transparent; color: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;"
+            :style="`flex-shrink: 0; border: none; background: transparent; color: ${UI_COLOR.textMuted}; font-size: 11.5px; padding: 8px 4px; cursor: pointer; white-space: nowrap;`"
             @click="networkStatus.recheck()"
           >重新檢查</button>
         </div>
@@ -121,10 +114,7 @@
         <div style="display: flex; align-items: stretch; gap: 8px;">
           <div v-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <span
-              style="display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; font-weight: 600; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px;"
-              :style="networkStatusState === 'online'
-                ? 'background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0;'
-                : 'background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb;'"
+              :style="`display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; color: ${UI_COLOR.textMuted};`"
             >
               <span v-if="networkStatusState === 'checking'" class="ns-spinner"></span>
               <span v-for="(line, i) in networkStatusBadgeLines" :key="i">{{ line }}</span>
@@ -138,7 +128,6 @@
                 size="small"
                 round
                 type="default"
-                icon="replay"
                 @click="batchRetryDownloads"
                 class="top-ctrl-btn"
                 title="批次重新下載失敗/中止的任務"
@@ -147,7 +136,6 @@
                 size="small"
                 round
                 type="default"
-                icon="delete-o"
                 @click="clearCompleted"
                 class="top-ctrl-btn"
                 title="清除已完成紀錄"
@@ -156,7 +144,6 @@
                 size="small"
                 round
                 type="default"
-                icon="delete"
                 @click="deleteAllFiles"
                 class="top-ctrl-btn"
                 title="刪除全部實體檔案"
@@ -165,7 +152,6 @@
                 size="small"
                 round
                 type="default"
-                icon="setting-o"
                 @click="showSettingsModal = true"
                 class="top-ctrl-btn"
                 title="偏好設定"
@@ -179,7 +165,6 @@
                 round
                 type="default"
                 :class="['top-ctrl-btn', { 'btn-active': mp3Mode }]"
-                :icon="mp3Mode ? 'music' : 'music-o'"
                 @click="mp3Mode = !mp3Mode"
                 :title="mp3Mode ? '目前為 MP3 音訊下載模式 (點擊切換為影片)' : '目前為 影片下載模式 (點擊切換為 MP3)'"
               >音訊</van-button>
@@ -189,7 +174,6 @@
                 round
                 type="default"
                 class="top-ctrl-btn"
-                icon="bullhorn-o"
                 @click="showChannelModal = true"
                 :title="`YouTube 頻道自動追蹤 (${monitoredChannels.length} 個頻道)`"
               >頻道</van-button>
@@ -199,7 +183,6 @@
                 round
                 type="default"
                 :class="['top-ctrl-btn', { 'btn-active': serverStatus.isActive }]"
-                :icon="serverStatus.isActive ? 'stop-circle-o' : 'scan'"
                 @click="toggleLocalServer"
                 title="開啟/關閉 快傳伺服器"
               >快傳</van-button>
@@ -208,7 +191,6 @@
                 size="small"
                 round
                 type="default"
-                :icon="isAllExpanded ? 'arrow-up' : 'arrow-down'"
                 @click="toggleExpandAll"
                 class="top-ctrl-btn"
                 :title="isAllExpanded ? '全部收合' : '全部展開'"
@@ -220,18 +202,18 @@
 
       <!-- TV 模式專屬大字體接收端畫面 (未推播時) -->
       <div v-if="isTvMode && remoteTasks.length === 0" class="tv-receiver-screen" style="display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 60vh; padding: 20px; text-align: center;">
-        <h1 style="font-size: 28px; color: #1e40af; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
-          📺 TV 接收模式運作中
+        <h1 style="font-size: 28px; color: #0f172a; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+           TV 接收模式運作中
         </h1>
-        <p style="font-size: 16px; color: #4b5563; margin-bottom: 32px;">請在電腦版 AVD 點擊影片下方的「推播至 TV」並輸入以下 IP</p>
+        <p style="font-size: 16px; color: #64748b; margin-bottom: 32px;">請在電腦版 AVD 點擊影片下方的「推播至 TV」並輸入以下 IP</p>
         
-        <div v-if="serverStatus.isActive" style="background: white; padding: 24px 36px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 2px solid #3b82f6;">
-          <div style="font-size: 32px; font-weight: bold; font-family: monospace; color: #10b981; letter-spacing: 2px;">
+        <div v-if="serverStatus.isActive" style="background: white; padding: 24px 36px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 2px solid #64748b;">
+          <div style="font-size: 32px; font-weight: bold; font-family: monospace; color: #64748b; letter-spacing: 2px;">
             {{ serverStatus.ip.replace('http://', '').replace(':8080', '') }}
           </div>
-          <div style="font-size: 14px; color: #9ca3af; margin-top: 8px;">Port: 8080</div>
+          <div style="font-size: 14px; color: #94a3b8; margin-top: 8px;">Port: 8080</div>
         </div>
-        <div v-else style="color: #ee0a24; font-size: 18px; display: flex; align-items: center; gap: 8px;">
+        <div v-else style="color: #64748b; font-size: 18px; display: flex; align-items: center; gap: 8px;">
           伺服器啟動中...
         </div>
 
@@ -240,27 +222,27 @@
 
       <div class="task-list" v-if="isTvMode && remoteTasks.length > 0">
         <!-- TV 模式已連線狀態標頭 -->
-        <div style="padding: 16px; background: #ecfdf5; border-radius: 12px; margin-bottom: 16px; border: 1px solid #34d399; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.1);">
+        <div style="padding: 16px; background: #f8fafc; border-radius: 12px; margin-bottom: 16px; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; ">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <van-icon name="checked" color="#059669" size="24px" />
-            <div style="color: #065f46; font-size: 16px; font-weight: bold; display: flex; flex-direction: column;">
+            <van-icon name="checked" color="#64748b" size="24px" />
+            <div style="color: #0f172a; font-size: 16px; font-weight: bold; display: flex; flex-direction: column;">
               <span>已接收電腦端清單 (共 {{ remoteTasks.length }} 個頻道)</span>
               <span v-if="serverStatus.isActive" style="font-size: 12px; font-weight: normal; opacity: 0.8; margin-top: 2px;">
                 本機接收端 IP: {{ serverStatus.ip.replace('http://', '').replace(':8080', '') }}
               </span>
             </div>
           </div>
-          <van-button size="small" type="success" plain round icon="replay" @click="fetchRemoteTasks" style="border-width: 2px;">
+          <van-button size="small" plain round @click="fetchRemoteTasks">
             手動更新
           </van-button>
         </div>
         <div v-for="task in remoteTasks.slice().reverse()" :key="task.id">
           <!-- 一級 Menu 卡片 (Remote ChannelGroupTask 頻道) -->
-          <div v-if="task.type === 'channel'" class="task-card status-channel" style="border-left: 4px solid #3b82f6; background: #eff6ff;">
+          <div v-if="task.type === 'channel'" class="task-card status-channel" style="border-left: 4px solid #64748b; background: #f8fafc;">
             <div class="task-header" style="cursor: pointer;" @click="task.expanded = !task.expanded">
               <div class="task-title-group">
-                <div class="task-title" style="font-weight: bold; color: #1e40af; display: flex; align-items: center; gap: 6px; font-size: 15px;">
-                  <span>📺 {{ task.channelTitle }}</span>
+                <div class="task-title" style="font-weight: bold; color: #0f172a; display: flex; align-items: center; gap: 6px; font-size: 15px;">
+                  <span>{{ task.channelTitle }}</span>
                 </div>
               </div>
               <div style="display: flex; gap: 4px; align-items: center;">
@@ -271,36 +253,36 @@
             </div>
 
             <!-- 二級 Menu 播放清單列表 (Remote) -->
-            <div v-if="task.expanded" class="playlists-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px; padding-left: 8px; border-left: 2px dashed #93c5fd;">
-              <div v-for="playlist in task.playlists" :key="playlist.id" class="playlist-card" style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 10px;">
+            <div v-if="task.expanded" class="playlists-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px; padding-left: 8px; border-left: 2px dashed #e2e8f0;">
+              <div v-for="playlist in task.playlists" :key="playlist.id" class="playlist-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
                 <div class="playlist-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" @click="playlist.expanded = !playlist.expanded">
-                  <div style="font-weight: 600; color: #6b21a8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-                    <span>📂 {{ playlist.playlistTitle }}</span>
+                  <div style="font-weight: 600; color: #0f172a; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                    <span>{{ playlist.playlistTitle }}</span>
                   </div>
                   <div style="display: flex; gap: 4px; align-items: center;">
-                    <van-button size="mini" plain round type="primary" style="color: #8b5cf6; border-color: #c084fc; padding: 0 8px;" @click.stop="playlist.expanded = !playlist.expanded">
+                    <van-button size="mini" plain round type="primary" style="color: #64748b; border-color: #e2e8f0; padding: 0 8px;" @click.stop="playlist.expanded = !playlist.expanded">
                       {{ playlist.expanded ? '▲' : '▼' }}
                     </van-button>
                   </div>
                 </div>
 
                 <!-- 三級 Menu 影片項目列表 (Remote) -->
-                <div v-if="playlist.expanded" class="subtasks-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding-left: 8px; border-left: 2px dashed #d8b4fe;">
-                  <div v-for="subTask in playlist.subTasks" :key="subTask.id" class="task-card status-success" style="padding: 8px; border: 1px solid #86efac; background: white;">
+                <div v-if="playlist.expanded" class="subtasks-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding-left: 8px; border-left: 2px dashed #e2e8f0;">
+                  <div v-for="subTask in playlist.subTasks" :key="subTask.id" class="task-card status-success" style="padding: 8px; border: 1px solid #e2e8f0; background: white;">
                     <div class="task-header" style="margin-bottom: 0;">
                       <div class="task-title-group" style="width: 100%;">
-                        <div class="task-title" style="font-size: 13px; color: #15803d; line-height: 1.4;">{{ subTask.title }}</div>
+                        <div class="task-title" style="font-size: 13px; color: #0f172a; line-height: 1.4;">{{ subTask.title }}</div>
                       </div>
                     </div>
-                    <div style="margin-top: 4px; padding: 4px 6px; background: #f0f0f0; border-radius: 4px; word-break: break-all; font-size: 10px; color: #666; font-family: monospace;">
-                      🔗 {{ subTask.mediaUri || '(無 mediaUri)' }}
+                    <div style="margin-top: 4px; padding: 4px 6px; background: #f8fafc; border-radius: 4px; word-break: break-all; font-size: 10px; color: #64748b; font-family: monospace;">
+                       {{ subTask.mediaUri || '(無 mediaUri)' }}
                     </div>
                     <div class="task-footer success-action" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
                       <div style="display: flex; gap: 4px; align-items: center;">
                         <span v-if="subTask.quality" class="quality-badge" :class="'quality-' + subTask.quality.split(' ')[0]">{{ subTask.quality }}</span>
                       </div>
                       <div style="display: flex; gap: 4px;">
-                        <van-button size="small" round type="success" plain icon="play-circle-o" @click="playVideo(subTask)" style="padding: 0; width: 32px; height: 32px;" />
+                        <van-button size="mini" @click="playVideo(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
                       </div>
                     </div>
                   </div>
@@ -310,21 +292,21 @@
           </div>
 
           <!-- TV 模式：單一影片卡片 (Remote Single Task) -->
-          <div v-else-if="task.type !== 'channel' && task.status === 'success'" class="task-card status-success" style="padding: 10px; border: 1px solid #86efac; background: white;">
+          <div v-else-if="task.type !== 'channel' && task.status === 'success'" class="task-card status-success" style="padding: 10px; border: 1px solid #e2e8f0; background: white;">
             <div class="task-header" style="margin-bottom: 0;">
               <div class="task-title-group" style="width: 100%;">
-                <div class="task-title" style="font-size: 14px; color: #15803d; line-height: 1.4;">🎬 {{ task.title }}</div>
+                <div class="task-title" style="font-size: 14px; color: #0f172a; line-height: 1.4;">{{ task.title }}</div>
               </div>
             </div>
-            <div style="margin-top: 4px; padding: 4px 6px; background: #f0f0f0; border-radius: 4px; word-break: break-all; font-size: 10px; color: #666; font-family: monospace;">
-              🔗 {{ task.mediaUri || '(無 mediaUri)' }}
+            <div style="margin-top: 4px; padding: 4px 6px; background: #f8fafc; border-radius: 4px; word-break: break-all; font-size: 10px; color: #64748b; font-family: monospace;">
+               {{ task.mediaUri || '(無 mediaUri)' }}
             </div>
             <div class="task-footer success-action" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; gap: 4px; align-items: center;">
                 <span v-if="task.quality" class="quality-badge" :class="'quality-' + task.quality.split(' ')[0]">{{ task.quality }}</span>
               </div>
               <div style="display: flex; gap: 4px;">
-                <van-button size="small" round type="success" plain icon="play-circle-o" @click="playVideo(task)" style="padding: 0; width: 32px; height: 32px;" />
+                <van-button size="mini" @click="playVideo(task)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
               </div>
             </div>
           </div>
@@ -334,11 +316,11 @@
       <div class="task-list" v-show="!isTvMode">
         <div v-for="task in tasks.slice().reverse()" :key="task.id">
           <!-- 一級 Menu 卡片 (ChannelGroupTask 頻道) -->
-          <div v-if="task.type === 'channel'" class="task-card status-channel" style="border-left: 4px solid #3b82f6; background: #eff6ff;">
+          <div v-if="task.type === 'channel'" class="task-card status-channel" style="border-left: 4px solid #64748b; background: #f8fafc;">
             <div class="task-header" style="cursor: pointer;" @click="task.expanded = !task.expanded">
               <div class="task-title-group">
-                <div class="task-title" style="font-weight: bold; color: #1e40af; display: flex; align-items: center; gap: 6px; font-size: 15px;">
-                  <span>📺 {{ task.channelTitle }}</span>
+                <div class="task-title" style="font-weight: bold; color: #0f172a; display: flex; align-items: center; gap: 6px; font-size: 15px;">
+                  <span>{{ task.channelTitle }}</span>
                   <van-tag type="primary" plain style="font-size: 10px;">{{ getChannelCompletedCount(task) }}</van-tag>
                 </div>
               </div>
@@ -346,25 +328,25 @@
                 <van-button size="mini" plain round type="primary" @click.stop="task.expanded = !task.expanded" style="padding: 0 8px;">
                   {{ task.expanded ? '▲' : '▼' }}
                 </van-button>
-                <van-button size="mini" round type="default" icon="delete-o" title="清理卡片紀錄" @click.stop="removeChannelGroup(task.id)" style="padding: 0; width: 22px; height: 22px;" />
-                <van-button size="mini" round type="danger" plain icon="delete-o" title="徹底刪除實體檔案" @click.stop="deleteChannelFiles(task)" style="padding: 0; width: 22px; height: 22px;" />
+                <van-button size="mini" @click.stop="removeChannelGroup(task.id)" title="清理卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
+                <van-button size="mini" @click.stop="deleteChannelFiles(task)" title="徹底刪除實體檔案" :style="GLYPH_BUTTON_DANGER_STYLE">{{ ACTION_GLYPH.deleteFile }}</van-button>
               </div>
             </div>
 
             <!-- 二級 Menu 播放清單列表 -->
-            <div v-if="task.expanded" class="playlists-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px; padding-left: 8px; border-left: 2px dashed #93c5fd;">
-              <div v-for="playlist in task.playlists" :key="playlist.id" class="playlist-card" style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 10px;">
+            <div v-if="task.expanded" class="playlists-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 10px; padding-left: 8px; border-left: 2px dashed #e2e8f0;">
+              <div v-for="playlist in task.playlists" :key="playlist.id" class="playlist-card" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px;">
                 <div class="playlist-header" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" @click="playlist.expanded = !playlist.expanded">
-                  <div style="font-weight: 600; color: #6b21a8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-                    <span>📂 {{ playlist.playlistTitle }}</span>
-                    <van-tag type="primary" plain style="font-size: 10px; border-color: #c084fc; color: #8b5cf6;">{{ getPlaylistCompletedCount(playlist) }}</van-tag>
+                  <div style="font-weight: 600; color: #0f172a; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                    <span>{{ playlist.playlistTitle }}</span>
+                    <van-tag type="primary" plain style="font-size: 10px; border-color: #e2e8f0; color: #64748b;">{{ getPlaylistCompletedCount(playlist) }}</van-tag>
                   </div>
                   <div style="display: flex; gap: 4px; align-items: center;">
-                    <van-button size="mini" plain round type="primary" style="color: #8b5cf6; border-color: #c084fc; padding: 0 8px;" @click.stop="playlist.expanded = !playlist.expanded">
+                    <van-button size="mini" plain round type="primary" style="color: #64748b; border-color: #e2e8f0; padding: 0 8px;" @click.stop="playlist.expanded = !playlist.expanded">
                       {{ playlist.expanded ? '▲' : '▼' }}
                     </van-button>
-                    <van-button size="mini" round type="default" icon="delete-o" title="清理卡片紀錄" @click.stop="removePlaylistGroup(task, playlist.id)" style="padding: 0; width: 20px; height: 20px;" />
-                    <van-button size="mini" round type="danger" plain icon="delete-o" title="徹底刪除實體檔案" @click.stop="deletePlaylistFiles(task, playlist)" style="padding: 0; width: 20px; height: 20px;" />
+                    <van-button size="mini" @click.stop="removePlaylistGroup(task, playlist.id)" title="清理卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
+                    <van-button size="mini" @click.stop="deletePlaylistFiles(task, playlist)" title="徹底刪除實體檔案" :style="GLYPH_BUTTON_DANGER_STYLE">{{ ACTION_GLYPH.deleteFile }}</van-button>
                   </div>
                 </div>
 
@@ -372,15 +354,15 @@
                   <div class="progress-info" style="font-size: 11px;">
                     <span>播放清單整體進度: {{ getPlaylistProgress(playlist) }}%</span>
                   </div>
-                  <van-progress :percentage="getPlaylistProgress(playlist)" color="#8b5cf6" stroke-width="6" />
+                  <van-progress :percentage="getPlaylistProgress(playlist)" color="#64748b" stroke-width="6" />
                 </div>
 
                 <!-- 三級 Menu 檔案列表 -->
-                <div v-if="playlist.expanded" class="sub-tasks-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding-left: 8px; border-left: 2px dashed #d8b4fe;">
-                  <div v-for="subTask in playlist.subTasks" :key="subTask.id" class="sub-task-item" style="background: white; padding: 8px 10px; border-radius: 6px; border: 1px solid #f3e8ff;">
+                <div v-if="playlist.expanded" class="sub-tasks-container" style="margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding-left: 8px; border-left: 2px dashed #e2e8f0;">
+                  <div v-for="subTask in playlist.subTasks" :key="subTask.id" class="sub-task-item" style="background: white; padding: 8px 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                      <div style="font-size: 12px; font-weight: 600; color: #374151; word-break: break-all;">
-                        🎬 {{ subTask.title || subTask.url }}
+                      <div style="font-size: 12px; font-weight: 600; color: #0f172a; word-break: break-all;">
+                         {{ subTask.title || subTask.url }}
                       </div>
                       <div style="display: flex; gap: 4px; align-items: center; flex-shrink: 0;">
                         <van-tag v-if="subTask.status === 'pending' || subTask.status === 'downloading'" :type="getStatusType(subTask.status)">{{ getStatusText(subTask.status) }}</van-tag>
@@ -392,27 +374,27 @@
                           @click="cancelTask(subTask.id)"
                           style="margin-left: 4px; padding: 0 6px; height: 20px; font-size: 11px;"
                         >中止</van-button>
-                        <van-button v-if="subTask.status === 'pending' || subTask.status === 'error'" size="mini" round type="default" icon="delete-o" title="清除卡片紀錄" @click="removeSubTask(playlist, subTask.id)" style="padding: 0; width: 18px; height: 18px;" />
+                        <van-button v-if="subTask.status === 'pending' || subTask.status === 'error'" size="mini" @click="removeSubTask(playlist, subTask.id)" title="清除卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
                       </div>
                     </div>
 
                     <div v-if="(subTask.status === 'downloading' || subTask.progress > 0) && subTask.status !== 'success'" class="progress-wrapper" style="margin-top: 6px;">
                       <div class="progress-info" style="font-size: 11px;">
                         <span>{{ subTask.progress }}%</span>
-                        <span v-if="subTask.speed" style="color: #2563eb; font-weight: bold; font-family: monospace;">{{ subTask.speed }}</span>
+                        <span v-if="subTask.speed" style="color: #64748b; font-weight: bold; font-family: monospace;">{{ subTask.speed }}</span>
                       </div>
-                      <van-progress :percentage="subTask.progress" :color="subTask.status === 'error' ? '#ee0a24' : '#1989fa'" stroke-width="6" />
+                      <van-progress :percentage="subTask.progress" :color="subTask.status === 'error' ? '#64748b' : '#0f172a'" stroke-width="6" />
                     </div>
 
                     <div v-if="subTask.uploadStatus && subTask.uploadStatus !== 'idle'" class="progress-wrapper upload-wrapper" style="margin-top: 6px;">
                       <div class="progress-info" style="font-size: 11px;">
-                        <span>☁ 雲端備份: {{ subTask.uploadProgress || 0 }}%</span>
+                        <span>雲端備份: {{ subTask.uploadProgress || 0 }}%</span>
                         <span v-if="subTask.uploadStatus === 'uploading'">上傳中...</span>
-                        <span v-if="subTask.uploadStatus === 'success'" style="color: #07c160;">✓ 備份成功</span>
-                        <span v-if="subTask.uploadStatus === 'error'" style="color: #ee0a24;">✕ 備份失敗</span>
+                        <span v-if="subTask.uploadStatus === 'success'" style="color: #64748b;">備份成功</span>
+                        <span v-if="subTask.uploadStatus === 'error'" style="color: #64748b;">備份失敗</span>
                       </div>
-                      <van-progress :percentage="subTask.uploadProgress || 0" :color="subTask.uploadStatus === 'error' ? '#ee0a24' : '#07c160'" stroke-width="6" />
-                      <div v-if="subTask.uploadErrorMsg" class="action-log" style="color: #ee0a24; font-size: 11px;">
+                      <van-progress :percentage="subTask.uploadProgress || 0" :color="subTask.uploadStatus === 'error' ? '#64748b' : '#64748b'" stroke-width="6" />
+                      <div v-if="subTask.uploadErrorMsg" class="action-log" style="color: #64748b; font-size: 11px;">
                         <code>{{ subTask.uploadErrorMsg }}</code>
                       </div>
                     </div>
@@ -424,13 +406,13 @@
                     <div class="task-footer success-action" v-if="subTask.status === 'success'" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
                       <div style="display: flex; gap: 4px; align-items: center;">
                         <span v-if="subTask.quality" class="quality-badge" :class="'quality-' + subTask.quality.split(' ')[0]">{{ subTask.quality }}</span>
-                        <span v-if="subTask.fileSizeBytes" style="font-size: 11px; color: #888; font-weight: 500; white-space: nowrap;">{{ formatBytes(subTask.fileSizeBytes) }}</span>
+                        <span v-if="subTask.fileSizeBytes" style="font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap;">{{ formatBytes(subTask.fileSizeBytes) }}</span>
                       </div>
                       <div style="display: flex; gap: 4px;">
-                        <van-button size="small" round type="success" plain icon="play-circle-o" @click="playVideo(subTask)" style="padding: 0; width: 24px; height: 24px;" />
-                        <van-button size="small" round type="primary" plain icon="share-o" @click="uploadToDrive(subTask)" style="padding: 0; width: 24px; height: 24px;" />
-                        <van-button size="small" round type="default" icon="delete-o" title="清除卡片紀錄" @click="removeSubTask(playlist, subTask.id)" style="padding: 0; width: 24px; height: 24px;" />
-                        <van-button size="small" round type="danger" plain icon="delete-o" title="徹底刪除實體檔案" @click="deleteDownloadedFile(subTask)" style="padding: 0; width: 24px; height: 24px;" />
+                        <van-button size="mini" @click="playVideo(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
+                        <van-button size="mini" @click="uploadToDrive(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.upload }}</van-button>
+                        <van-button size="mini" @click="removeSubTask(playlist, subTask.id)" title="清除卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
+                        <van-button size="mini" @click="deleteDownloadedFile(subTask)" title="徹底刪除實體檔案" :style="GLYPH_BUTTON_DANGER_STYLE">{{ ACTION_GLYPH.deleteFile }}</van-button>
                       </div>
                     </div>
 
@@ -464,16 +446,7 @@
                     @click="cancelTask(task.id)"
                     style="margin-left: 4px; padding: 0 6px; height: 20px; font-size: 11px;"
                   >中止</van-button>
-                  <van-button
-                    v-if="task.status === 'pending' || task.status === 'error'"
-                    size="mini"
-                    round
-                    type="default"
-                    icon="delete-o"
-                    title="清除卡片紀錄"
-                    @click="removeTask(task.id)"
-                    style="padding: 0; width: 20px; height: 20px; margin-left: 4px;"
-                  />
+                  <van-button v-if="task.status === 'pending' || task.status === 'error'" size="mini" @click="removeTask(task.id)" title="清除卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
                 </div>
               </div>
             </div>
@@ -482,22 +455,22 @@
               <div class="progress-info">
                 <span>{{ task.progress }}%</span>
                 <div style="display: flex; gap: 8px;">
-                  <span v-if="task.speed" style="color: #2563eb; font-weight: bold; font-family: monospace;">{{ task.speed }}</span>
+                  <span v-if="task.speed" style="color: #64748b; font-weight: bold; font-family: monospace;">{{ task.speed }}</span>
                   <span v-if="task.eta && task.status === 'downloading'">剩餘 {{ task.eta }} 秒</span>
                 </div>
               </div>
-              <van-progress :percentage="task.progress" :color="task.status === 'error' ? '#ee0a24' : '#1989fa'" stroke-width="8" />
+              <van-progress :percentage="task.progress" :color="task.status === 'error' ? '#64748b' : '#0f172a'" stroke-width="8" />
             </div>
 
             <div v-if="task.uploadStatus && task.uploadStatus !== 'idle'" class="progress-wrapper upload-wrapper">
               <div class="progress-info">
-                <span>☁ 雲端備份: {{ task.uploadProgress || 0 }}%</span>
+                <span>雲端備份: {{ task.uploadProgress || 0 }}%</span>
                 <span v-if="task.uploadStatus === 'uploading'">上傳中...</span>
-                <span v-if="task.uploadStatus === 'success'" style="color: #07c160;">✓ 備份成功</span>
-                <span v-if="task.uploadStatus === 'error'" style="color: #ee0a24;">✕ 備份失敗</span>
+                <span v-if="task.uploadStatus === 'success'" style="color: #64748b;">備份成功</span>
+                <span v-if="task.uploadStatus === 'error'" style="color: #64748b;">備份失敗</span>
               </div>
-              <van-progress :percentage="task.uploadProgress || 0" :color="task.uploadStatus === 'error' ? '#ee0a24' : '#07c160'" stroke-width="6" />
-              <div v-if="task.uploadErrorMsg" class="action-log" style="color: #ee0a24;">
+              <van-progress :percentage="task.uploadProgress || 0" :color="task.uploadStatus === 'error' ? '#64748b' : '#64748b'" stroke-width="6" />
+              <div v-if="task.uploadErrorMsg" class="action-log" style="color: #64748b;">
                 <code>{{ task.uploadErrorMsg }}</code>
               </div>
             </div>
@@ -509,13 +482,13 @@
             <div class="task-footer success-action" v-if="task.status === 'success'" style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; gap: 4px; align-items: center;">
                 <span v-if="task.quality" class="quality-badge" :class="'quality-' + task.quality.split(' ')[0]">{{ task.quality }}</span>
-                <span v-if="task.fileSizeBytes" style="font-size: 11px; color: #888; font-weight: 500; white-space: nowrap;">{{ formatBytes(task.fileSizeBytes) }}</span>
+                <span v-if="task.fileSizeBytes" style="font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap;">{{ formatBytes(task.fileSizeBytes) }}</span>
               </div>
               <div class="footer-buttons" style="display: flex; gap: 6px;">
-                <van-button size="small" round type="success" plain icon="play-circle-o" @click="playVideo(task)" style="padding: 0; width: 28px; height: 28px;" />
-                <van-button size="small" round type="primary" plain icon="share-o" @click="uploadToDrive(task)" style="padding: 0; width: 28px; height: 28px;" />
-                <van-button size="small" round type="default" icon="delete-o" title="清除卡片紀錄" @click="removeTask(task.id)" style="padding: 0; width: 28px; height: 28px;" />
-                <van-button size="small" round type="danger" plain icon="delete-o" title="徹底刪除實體檔案" @click="deleteDownloadedFile(task)" style="padding: 0; width: 28px; height: 28px;" />
+                <van-button size="mini" @click="playVideo(task)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
+                <van-button size="mini" @click="uploadToDrive(task)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.upload }}</van-button>
+                <van-button size="mini" @click="removeTask(task.id)" title="清除卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
+                <van-button size="mini" @click="deleteDownloadedFile(task)" title="徹底刪除實體檔案" :style="GLYPH_BUTTON_DANGER_STYLE">{{ ACTION_GLYPH.deleteFile }}</van-button>
               </div>
             </div>
             <div class="task-footer error-action" v-if="task.status === 'error'" style="display: flex; justify-content: space-between; align-items: center;">
@@ -531,22 +504,22 @@
       </div>
     </div>
 
-    <van-dialog v-model:show="showTokenModal" :title="isTauri() ? '⚙️ Rclone 雲端同步設定' : '🔑 啟用 0%~100% 實時進度模式'" show-cancel-button confirm-button-text="儲存並啟用" @confirm="saveDriveToken">
+    <van-dialog v-model:show="showTokenModal" :title="isTauri() ? ' Rclone 雲端同步設定' : ' 啟用 0%~100% 實時進度模式'" show-cancel-button confirm-button-text="儲存並啟用" @confirm="saveDriveToken">
       <div style="padding: 16px;">
         <template v-if="isTauri()">
-          <p style="font-size: 13px; color: #323233; margin-bottom: 10px; line-height: 1.5;">
-            💡 <b>提示</b>：Windows 版使用 Rclone 進行永久同步，無需處理 Token 過期問題。
+          <p style="font-size: 13px; color: #0f172a; margin-bottom: 10px; line-height: 1.5;">
+             <b>提示</b>：Windows 版使用 Rclone 進行永久同步，無需處理 Token 過期問題。
           </p>
           <van-field v-model="driveTokenInput" placeholder="例如: yiichungGDGD:avd" clearable label="Rclone 路徑" label-width="85px" />
         </template>
         <template v-else>
-          <p style="font-size: 12px; color: #323233; margin-bottom: 10px; line-height: 1.5;">
-            💡 <b>提示</b>：若未設定 Token，點擊「雲端備份」會<b>直接呼叫 Google Drive App 上傳</b>（無需任何設定）。
+          <p style="font-size: 12px; color: #0f172a; margin-bottom: 10px; line-height: 1.5;">
+             <b>提示</b>：若未設定 Token，點擊「雲端備份」會<b>直接呼叫 Google Drive App 上傳</b>（無需任何設定）。
           </p>
-          <van-button block type="primary" icon="search" size="small" style="margin-bottom: 10px;" @click="openOAuthPage">
+          <van-button block type="primary" size="small" style="margin-bottom: 10px;" @click="openOAuthPage">
             點此開啟 Google 官方授權取得網頁
           </van-button>
-          <p style="font-size: 11px; color: #969799; margin-bottom: 8px; line-height: 1.4;">
+          <p style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; line-height: 1.4;">
             (點擊授權 -> 登入 Google 帳號 -> 點擊 Exchange 即可複製 Access Token 貼在下方)
           </p>
           <van-field v-model="driveTokenInput" placeholder="請貼上 Access Token (ya29...)" clearable label="Token" />
@@ -557,36 +530,36 @@
     <van-dialog v-model:show="showCastListModal" title="推播清單至 TV" show-cancel-button confirm-button-text="推播" cancel-button-text="取消" @confirm="pushListToTv">
       <div style="padding: 16px;">
         <van-field v-model="targetTvIp" label="TV IP" placeholder="例如: 10.10.11.200" required />
-        <div style="font-size: 12px; color: #6b7280; margin-top: 8px; text-align: center;">
+        <div style="font-size: 12px; color: #64748b; margin-top: 8px; text-align: center;">
           請查看 TV 畫面上顯示的 IP 位址。
         </div>
       </div>
     </van-dialog>
 
-    <van-dialog v-model:show="showWifiModal" title="⚙️ Wi-Fi 熱點設定" show-cancel-button confirm-button-text="儲存" @confirm="saveWifiConfig">
+    <van-dialog v-model:show="showWifiModal" title=" Wi-Fi 熱點設定" show-cancel-button confirm-button-text="儲存" @confirm="saveWifiConfig">
       <div style="padding: 16px;">
-        <p style="font-size: 12px; color: #666; margin-bottom: 16px; line-height: 1.5;">
+        <p style="font-size: 12px; color: #64748b; margin-bottom: 16px; line-height: 1.5;">
           請輸入您的手機「無線基地台」名稱與密碼。這只會儲存在本機，用來產生 QR Code 讓其他設備能一鍵掃描連線。
         </p>
-        <van-cell-group inset style="margin: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border: 1px solid #ebedf0;">
+        <van-cell-group inset style="margin: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;">
           <van-field v-model="wifiSsid" label="熱點名稱" placeholder="例如: My_Hotspot" required />
           <van-field v-model="wifiPassword" label="密碼" placeholder="熱點連線密碼" type="password" />
         </van-cell-group>
       </div>
     </van-dialog>
 
-    <van-dialog v-model:show="showSettingsModal" title="⚙️ 偏好設定" confirm-button-text="關閉">
+    <van-dialog v-model:show="showSettingsModal" title=" 偏好設定" confirm-button-text="關閉">
       <div style="padding: 12px 16px;">
-        <p style="font-size: 13px; color: #4b5563; margin-bottom: 8px; font-weight: bold;">
+        <p style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: bold;">
           確認視窗 (防呆)
         </p>
-        <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
+        <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
           <van-cell title="刪除檔案" center>
             <template #right-icon>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #999;">全部</span>
+                <span style="font-size: 11px; color: #94a3b8;">全部</span>
                 <van-switch v-model="confirmDeleteAll" size="18px" />
-                <span style="font-size: 11px; color: #999; margin-left: 4px;">單一</span>
+                <span style="font-size: 11px; color: #94a3b8; margin-left: 4px;">單一</span>
                 <van-switch v-model="confirmDeleteSingle" size="18px" />
               </div>
             </template>
@@ -594,19 +567,19 @@
           <van-cell title="清除列表" center>
             <template #right-icon>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #999;">全部</span>
+                <span style="font-size: 11px; color: #94a3b8;">全部</span>
                 <van-switch v-model="confirmClearAll" size="18px" />
-                <span style="font-size: 11px; color: #999; margin-left: 4px;">單一</span>
+                <span style="font-size: 11px; color: #94a3b8; margin-left: 4px;">單一</span>
                 <van-switch v-model="confirmClearSingle" size="18px" />
               </div>
             </template>
           </van-cell>
         </van-cell-group>
 
-        <p style="font-size: 13px; color: #4b5563; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+        <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
           診斷
         </p>
-        <van-cell-group inset style="margin: 0 0 16px 0; border: 1px solid #ebedf0;">
+        <van-cell-group inset style="margin: 0 0 16px 0; border: 1px solid #e2e8f0;">
           <van-cell
             title="錯誤紀錄"
             :value="errorLog.length ? `${errorLog.length} 筆` : '無'"
@@ -615,10 +588,10 @@
           />
         </van-cell-group>
 
-        <p style="font-size: 13px; color: #4b5563; margin-bottom: 8px; font-weight: bold;">
+        <p style="font-size: 13px; color: #64748b; margin-bottom: 8px; font-weight: bold;">
           版本與更新
         </p>
-        <van-cell-group inset style="margin: 0; border: 1px solid #ebedf0;">
+        <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
           <van-cell title="App 版本" :value="`v${version}`" is-link @click="handleManualCheckUpdate" />
           <van-cell title="yt-dlp" :value="ytDlpVersion" :label="`更新: ${ytDlpLastUpdate}`" is-link @click="handleManualUpdateYtDlp" title-style="flex: none; margin-right: 16px;" />
           <van-cell title="測試版更新" center label="Pre-release">
@@ -641,13 +614,13 @@
     >
       <div style="padding: 26px 20px 18px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
         <van-loading size="26px" />
-        <span style="font-size: 14px; color: #1f2937; text-align: center;">{{ parsingMessage }}</span>
+        <span style="font-size: 14px; color: #0f172a; text-align: center;">{{ parsingMessage }}</span>
       </div>
     </van-dialog>
 
     <van-dialog
       v-model:show="showErrorLogModal"
-      title="🧾 錯誤紀錄"
+      title=" 錯誤紀錄"
       show-cancel-button
       confirm-button-text="複製全部"
       cancel-button-text="關閉"
@@ -656,7 +629,7 @@
     >
       <div style="padding: 12px 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-          <span style="font-size: 12px; color: #6b7280;">
+          <span style="font-size: 12px; color: #64748b;">
             共 {{ errorLog.length }} 筆，最新在最上面
           </span>
           <van-button size="mini" type="danger" plain :disabled="!errorLog.length" @click="clearErrorLog">
@@ -664,35 +637,35 @@
           </van-button>
         </div>
 
-        <div v-if="!errorLog.length" style="padding: 24px 0; text-align: center; color: #9ca3af; font-size: 13px;">
+        <div v-if="!errorLog.length" style="padding: 24px 0; text-align: center; color: #94a3b8; font-size: 13px;">
           目前沒有錯誤紀錄
         </div>
 
-        <div v-else style="max-height: 340px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 6px;">
+        <div v-else style="max-height: 340px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
           <div
             v-for="(item, idx) in displayedErrorLog"
             :key="item.time + '_' + idx"
-            style="padding: 8px 10px; border-bottom: 1px solid #f1f3f5;"
+            style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;"
           >
-            <div style="font-size: 11px; color: #6b7280; margin-bottom: 3px;">
+            <div style="font-size: 11px; color: #64748b; margin-bottom: 3px;">
               {{ formatPublishTime(item.time) }} · {{ item.context }}
             </div>
-            <div style="font-size: 12px; color: #1f2937; word-break: break-all; line-height: 1.5; white-space: pre-wrap;">
+            <div style="font-size: 12px; color: #0f172a; word-break: break-all; line-height: 1.5; white-space: pre-wrap;">
               {{ item.message }}
             </div>
           </div>
         </div>
 
-        <p style="font-size: 11px; color: #9ca3af; margin: 10px 0 0 0; line-height: 1.5;">
+        <p style="font-size: 11px; color: #94a3b8; margin: 10px 0 0 0; line-height: 1.5;">
           紀錄僅存於本機、不會自動上傳。複製前請確認內容不含你不願外流的資訊（例如帶權杖的網址）。
         </p>
       </div>
     </van-dialog>
 
-    <!-- 🚀 應用程式更新彈窗 -->
+    <!--  應用程式更新彈窗 -->
     <van-dialog
       v-model:show="showUpdateModal"
-      :title="`🚀 發現新版本 v${updateInfo.latestVersion}`"
+      :title="` 發現新版本 v${updateInfo.latestVersion}`"
       :show-confirm-button="!isUpdating"
       :show-cancel-button="!isUpdating"
       :confirm-button-text="updateFailed ? '重試下載' : '立即更新'"
@@ -701,33 +674,33 @@
       :before-close="handleBeforeCloseUpdateModal"
     >
       <div style="padding: 16px; max-height: 380px; overflow-y: auto;">
-        <div style="font-size: 13px; color: #4b5563; margin-bottom: 8px; display: flex; justify-content: space-between;">
+        <div style="font-size: 13px; color: #64748b; margin-bottom: 8px; display: flex; justify-content: space-between;">
           <span>目前版本: <b>v{{ version }}</b></span>
-          <span style="color: #10b981; font-weight: bold;">最新: v{{ updateInfo.latestVersion }}</span>
+          <span style="color: #64748b; font-weight: bold;">最新: v{{ updateInfo.latestVersion }}</span>
         </div>
 
-        <div v-if="!isUpdating && !updateFailed" style="background: #f9fafb; border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid #e5e7eb;">
-          <div style="font-size: 12px; font-weight: bold; color: #374151; margin-bottom: 4px;">📝 更新說明:</div>
-          <div style="font-size: 12px; color: #4b5563; white-space: pre-wrap; line-height: 1.5;">{{ updateInfo.releaseNotes }}</div>
+        <div v-if="!isUpdating && !updateFailed" style="background: #f8fafc; border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid #e2e8f0;">
+          <div style="font-size: 12px; font-weight: bold; color: #0f172a; margin-bottom: 4px;">更新說明:</div>
+          <div style="font-size: 12px; color: #64748b; white-space: pre-wrap; line-height: 1.5;">{{ updateInfo.releaseNotes }}</div>
         </div>
 
         <!-- 下載進度條 -->
         <div v-if="isUpdating" style="padding: 16px 0; text-align: center;">
-          <div style="font-size: 14px; color: #1f2937; margin-bottom: 12px; font-weight: 600;">
+          <div style="font-size: 14px; color: #0f172a; margin-bottom: 12px; font-weight: 600;">
             {{ updateStatusText || `正在下載更新檔 (${updateProgress.percent}%)...` }}
           </div>
-          <van-progress :percentage="updateProgress.percent" stroke-width="10" color="#10b981" />
-          <div v-if="updateProgress.totalBytes > 0" style="font-size: 12px; color: #6b7280; text-align: right; margin-top: 8px;">
+          <van-progress :percentage="updateProgress.percent" stroke-width="10" color="#64748b" />
+          <div v-if="updateProgress.totalBytes > 0" style="font-size: 12px; color: #64748b; text-align: right; margin-top: 8px;">
             {{ formatBytes(updateProgress.downloadedBytes) }} / {{ formatBytes(updateProgress.totalBytes) }}
           </div>
-          <div v-if="updateProgress.percent >= 100" style="font-size: 12px; color: #10b981; margin-top: 10px; font-weight: 500;">
-            ⚡ 下載完成，正在啟動安裝程序...
+          <div v-if="updateProgress.percent >= 100" style="font-size: 12px; color: #64748b; margin-top: 10px; font-weight: 500;">
+             下載完成，正在啟動安裝程序...
           </div>
         </div>
 
         <!-- 錯誤狀態 -->
-        <div v-if="updateFailed" style="padding: 12px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; margin-top: 8px;">
-          <div style="font-size: 12px; color: #b91c1c; font-weight: 500;">⚠️ 下載失敗: {{ updateErrorMsg }}</div>
+        <div v-if="updateFailed" style="padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 8px;">
+          <div style="font-size: 12px; color: #0f172a; font-weight: 500;">下載失敗: {{ updateErrorMsg }}</div>
           <div style="display: flex; gap: 8px; margin-top: 10px;">
             <van-button size="small" type="primary" block @click="startDownloadAndInstall">
               重試下載
@@ -741,21 +714,24 @@
     </van-dialog>
 
     <!-- 頻道自動追蹤管理彈窗 -->
-    <van-dialog v-model:show="showChannelModal" title="📡 頻道自動追蹤排程" confirm-button-text="關閉" :show-cancel-button="false">
+    <van-dialog v-model:show="showChannelModal" title="頻道自動追蹤排程" confirm-button-text="關閉" :show-cancel-button="false">
       <div style="padding: 16px; max-height: 70vh; overflow-y: auto;">
         <!--
-          追蹤停擺的持續狀態指示。移除 RSS 與 yt-dlp 備援後，API 不可用即等於
-          追蹤完全停止 —— 一則飄過的 Toast 不足以讓使用者察覺，錯過那一則可能
-          數日後才發現完全沒有新片。此處常駐於頻道管理彈窗頂部，恢復後自動消失。
+          追蹤停擺的持續狀態指示。移除備援後 API 不可用即等於追蹤完全停止，
+          一則飄過的 Toast 不足以讓使用者察覺 —— 錯過那一則可能數日後才發現
+          完全沒有新片。此處常駐於彈窗頂部，恢復後自動消失。
+
+          停擺是需要使用者注意的狀態，但不是不可逆的操作，故以左側粗邊線
+          與文字層級表達，不動用唯一的強調色。
         -->
         <div
           v-if="trackingNotice"
-          style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;"
+          :style="`border-left: 3px solid ${UI_COLOR.text}; padding: 2px 0 2px 10px; margin-bottom: 14px;`"
         >
-          <div style="font-size: 12.5px; font-weight: 700; color: #b91c1c; margin-bottom: 4px;">
+          <div :style="`font-size: 12.5px; font-weight: 600; color: ${UI_COLOR.text}; margin-bottom: 3px;`">
             {{ trackingNotice.title }}
           </div>
-          <div style="font-size: 11px; color: #7f1d1d; line-height: 1.5;">
+          <div :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; line-height: 1.6;`">
             {{ trackingNotice.detail }}
           </div>
         </div>
@@ -766,82 +742,83 @@
         -->
         <div
           v-if="intervalBelowFloor"
-          style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px;"
+          :style="`border-left: 3px solid ${UI_COLOR.textMuted}; padding: 2px 0 2px 10px; margin-bottom: 14px;`"
         >
-          <div style="font-size: 12.5px; font-weight: 700; color: #b45309; margin-bottom: 4px;">
-            ⚠️ 檢查間隔已低於安全下限
+          <div :style="`font-size: 12.5px; font-weight: 600; color: ${UI_COLOR.text}; margin-bottom: 3px;`">
+            檢查間隔已低於安全下限
           </div>
-          <div style="font-size: 11px; color: #92400e; line-height: 1.5;">
+          <div :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; line-height: 1.6;`">
             目前設定 {{ monitorConfig.checkIntervalMinutes }} 分鐘。{{ intervalFloorReason }}
             請於下方調整，否則每日配額可能提前耗盡而使追蹤停止。
           </div>
         </div>
 
-        <!-- 頂部控制面板 -->
-        <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 13px; font-weight: 600; color: #1e293b;">定時自動檢查新片</span>
+        <!-- 頂部控制面板。拆掉容器，改以留白與分隔線分組 -->
+        <div style="margin-bottom: 18px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <span :style="`font-size: 13px; font-weight: 600; color: ${UI_COLOR.text};`">定時自動檢查新片</span>
             <van-switch v-model="monitorConfig.autoCheckEnabled" size="20px" />
           </div>
-          <div style="font-size: 11px; color: #64748b; margin-bottom: 10px;">
-            上次檢查: {{ monitorConfig.lastGlobalCheckTime ? new Date(monitorConfig.lastGlobalCheckTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '尚未檢查' }}
+          <div :style="`font-size: 11px; color: ${UI_COLOR.textFaint}; margin-bottom: 14px;`">
+            上次檢查 {{ monitorConfig.lastGlobalCheckTime ? new Date(monitorConfig.lastGlobalCheckTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '尚未檢查' }}
           </div>
 
-          <!-- 檢查間隔。下限依頻道數與每日配額推導，低於下限一律拒絕而非靜默接受 -->
-          <div style="margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+          <!-- 檢查間隔。下限依頻道數與每日配額推導，低於下限一律拒絕 -->
+          <div style="margin-bottom: 14px;">
             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-              <div style="font-size: 12px; font-weight: 500; color: #1e293b; flex-shrink: 0;">檢查間隔（分鐘）</div>
-              <div style="display: flex; align-items: center; gap: 6px;">
+              <div :style="`font-size: 12px; color: ${UI_COLOR.text}; flex-shrink: 0;`">檢查間隔（分鐘）</div>
+              <div style="display: flex; align-items: center; gap: 4px;">
                 <van-field
                   v-model="checkIntervalDraft"
                   type="digit"
                   :placeholder="String(intervalFloorMinutes)"
-                  style="background: #f1f5f9; border-radius: 6px; font-size: 12px; padding: 4px 8px; width: 76px;"
+                  :style="`background: ${UI_COLOR.surfaceMuted}; font-size: 12px; padding: 4px 8px; width: 68px;`"
                 />
-                <van-button size="mini" type="primary" plain round @click="applyCheckInterval" style="padding: 0 10px; height: 22px; font-size: 10px;">
+                <van-button size="mini" :style="`${GLYPH_BUTTON_STYLE} min-width: 44px; font-size: 12px;`" @click="applyCheckInterval">
                   套用
                 </van-button>
               </div>
             </div>
-            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; line-height: 1.5;">
+            <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint}; margin-top: 4px; line-height: 1.6;`">
               {{ intervalFloorReason }}
             </div>
           </div>
 
           <!-- 啟動時是否補做檢查。預設開啟，維持既有行為 -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
             <div style="flex: 1; min-width: 0; margin-right: 8px;">
-              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">啟動時檢查</div>
-              <div style="font-size: 10px; color: #94a3b8;">開啟應用程式時，若距上次檢查已達間隔就補做一次（預設開啟）</div>
+              <div :style="`font-size: 12px; color: ${UI_COLOR.text};`">啟動時檢查</div>
+              <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint};`">開啟應用程式時，若距上次檢查已達間隔就補做一次</div>
             </div>
             <van-switch v-model="checkOnStartupEnabled" size="18px" />
           </div>
 
           <!-- YouTube Data API 金鑰：頻道追蹤的必要條件，未設定即停止追蹤 -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-top: 8px; border-top: 1px dashed #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
             <div style="flex: 1; min-width: 0; margin-right: 8px;">
-              <div style="font-size: 12px; font-weight: 500; color: #1e293b;">
+              <div :style="`font-size: 12px; color: ${UI_COLOR.text};`">
                 YouTube Data API 金鑰
-                <span
-                  :style="{ fontSize: '10px', marginLeft: '6px', color: youtubeApiKey.trim() ? '#16a34a' : '#dc2626' }"
-                >{{ youtubeApiKey.trim() ? '● 已設定' : '○ 未設定' }}</span>
+                <span :style="`font-size: 10px; margin-left: 6px; color: ${UI_COLOR.textFaint};`">{{ youtubeApiKey.trim() ? '已設定' : '未設定' }}</span>
               </div>
-              <div style="font-size: 10px; color: #94a3b8;">
-                頻道追蹤的唯一通道，未設定即停止追蹤（下載與播放清單解析不受影響）
+              <div :style="`font-size: 10px; color: ${UI_COLOR.textFaint};`">
+                頻道追蹤的唯一通道，未設定即停止追蹤
               </div>
             </div>
-            <van-button size="mini" plain round @click="openApiKeyEditor" style="padding: 0 10px; height: 22px; font-size: 10px; flex-shrink: 0;">
+            <van-button size="mini" :style="`${GLYPH_BUTTON_STYLE} min-width: 44px; font-size: 12px;`" @click="openApiKeyEditor">
               設定
             </van-button>
           </div>
 
-          <div style="display: flex; gap: 8px;">
-            <van-button size="small" type="primary" plain block icon="replay" :loading="isCheckingChannels" @click="checkAllMonitoredChannels(true)">
-              立即檢查
-            </van-button>
-            <van-button size="small" type="warning" plain block icon="play-circle-o" @click="simulateGlobalNewVideo">
-              🧪 模擬測試
-            </van-button>
+          <div style="display: flex; gap: 16px;">
+            <van-button
+              :loading="isCheckingChannels"
+              :style="`${GLYPH_BUTTON_STYLE} min-width: 0; padding: 0; font-size: 12.5px; color: ${UI_COLOR.text}; font-weight: 600;`"
+              @click="checkAllMonitoredChannels(true)"
+            >立即檢查</van-button>
+            <van-button
+              :style="`${GLYPH_BUTTON_STYLE} min-width: 0; padding: 0; font-size: 12.5px;`"
+              @click="simulateGlobalNewVideo"
+            >模擬測試</van-button>
           </div>
 
           <!--
@@ -850,115 +827,126 @@
           -->
           <div
             v-if="checkProgressText"
-            style="margin-top: 8px; font-size: 11px; color: #475569; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 5px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+            :style="`margin-top: 8px; font-size: 11px; color: ${UI_COLOR.textMuted}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`"
           >
             {{ checkProgressText }}
           </div>
         </div>
 
-        <!-- 頻道備份與還原面板 -->
-        <div style="background: #f8fafc; border-radius: 12px; padding: 12px; border: 1px solid #e2e8f0; margin-bottom: 16px;">
-          <div style="font-size: 12px; font-weight: 600; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
-            <span>💾 頻道備份與回復</span>
+        <!-- 頻道備份與回復 -->
+        <div :style="`border-top: 1px solid ${UI_COLOR.line}; padding-top: 14px; margin-bottom: 18px;`">
+          <div :style="`font-size: 12px; font-weight: 600; color: ${UI_COLOR.text}; margin-bottom: 8px;`">頻道備份與回復</div>
+          <div style="display: flex; gap: 16px;">
+            <van-button
+              :style="`${GLYPH_BUTTON_STYLE} min-width: 0; padding: 0; font-size: 12px;`"
+              @click="exportChannelsJson"
+            >備份</van-button>
+            <van-button
+              :style="`${GLYPH_BUTTON_STYLE} min-width: 0; padding: 0; font-size: 12px;`"
+              @click="triggerImportChannels"
+            >匯入</van-button>
           </div>
-
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <van-button size="small" type="default" plain block icon="down" @click="exportChannelsJson" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              📁 備份
-            </van-button>
-            <van-button size="small" type="default" plain block icon="upgrade" @click="triggerImportChannels" style="font-size: 11px; height: 32px; border-radius: 6px;">
-              📥 匯入
-            </van-button>
-          </div>
-
-
-
           <!-- 隱藏的本地 JSON 檔案選取 input -->
           <input ref="channelFileInputRef" type="file" accept=".json" style="display: none;" @change="handleChannelFileChange" />
         </div>
 
         <!-- 手動加入頻道輸入框 -->
-        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 18px; align-items: center;">
           <van-field
             v-model="manualChannelInput"
             placeholder="貼上 YouTube 頻道網址或 @handle"
             clearable
-            style="background: #f1f5f9; border-radius: 8px; font-size: 12px; padding: 8px 12px;"
+            :style="`background: ${UI_COLOR.surfaceMuted}; font-size: 12px; padding: 8px 12px;`"
           />
-          <van-button size="small" type="primary" :loading="isAddingManualChannel" @click="addManualChannel" style="flex-shrink: 0; height: 36px; border-radius: 8px;">
-            加入
-          </van-button>
+          <van-button
+            :loading="isAddingManualChannel"
+            :style="`${GLYPH_BUTTON_STYLE} min-width: 44px; font-size: 12.5px; color: ${UI_COLOR.text}; font-weight: 600; flex-shrink: 0;`"
+            @click="addManualChannel"
+          >加入</van-button>
         </div>
 
         <!-- 已追蹤頻道清單 -->
-        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 8px; display: flex; justify-content: space-between;">
-          <span>已追蹤頻道 ({{ monitoredChannels.length }})</span>
-          <span v-if="monitoredChannels.length > 0" style="color: #ef4444; cursor: pointer;" @click="clearAllChannels">清空</span>
+        <div :style="`font-size: 12px; font-weight: 600; color: ${UI_COLOR.textMuted}; margin-bottom: 4px; display: flex; justify-content: space-between; border-top: 1px solid ${UI_COLOR.line}; padding-top: 14px;`">
+          <span>已追蹤頻道（{{ monitoredChannels.length }}）</span>
+          <span v-if="monitoredChannels.length > 0" :style="`color: ${UI_COLOR.textMuted}; cursor: pointer;`" @click="clearAllChannels">清空</span>
         </div>
 
-        <div v-if="monitoredChannels.length === 0" style="text-align: center; color: #94a3b8; padding: 24px 0; font-size: 12px;">
+        <div v-if="monitoredChannels.length === 0" :style="`text-align: center; color: ${UI_COLOR.textFaint}; padding: 24px 0; font-size: 12px;`">
           尚未新增追蹤頻道。<br>請在上方輸入框貼上 YouTube 頻道網址或 @handle 加入追蹤。
         </div>
 
-        <div v-else style="display: flex; flex-direction: column; gap: 8px;">
+        <div v-else>
+          <!--
+            三行卡片。拆掉盒中盒：不再有卡片容器與其內的灰底盒，
+            改以髮絲分隔線與留白分組。第二行因此拿回整行寬度給影片標題。
+          -->
           <div
-            v-for="channel in monitoredChannels"
+            v-for="(channel, channelIndex) in monitoredChannels"
             :key="channel.channelId"
-            style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);"
+            :style="`padding: 12px 0; ${channelIndex > 0 ? `border-top: 1px solid ${UI_COLOR.line};` : ''}`"
           >
-            <!-- 第一行：頭像 + (頻道名稱 + 時間) + Switch開關 + 刪除按鈕 -->
+            <!-- 第一行：頭像、名稱、啟用開關、取消追蹤 -->
             <div style="display: flex; align-items: center; justify-content: space-between;">
               <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; margin-right: 8px;">
+                <!--
+                  頻道頭像 —— 全應用程式唯一保留的圖像，因為它承載識別資訊
+                  而非裝飾：使用者以頭像在清單中辨認頻道。
+
+                  取不到時呈現中性佔位（灰底圓形加頻道名首字），MUST NOT 以
+                  平台通用標誌替代 —— 那會讓「尚未取得」與「這就是該頻道的
+                  樣子」變得無法分辨。
+
+                  載入失敗時**清空已儲存的網址**而非替換圖片：YouTube 的頭像
+                  網址會過期輪替，替換只是把失效狀態藏起來，清空則使它進入
+                  待修復狀態，下次啟動即自動重抓。
+                -->
                 <img
-                  :src="channel.thumbnail || 'https://www.youtube.com/favicon.ico'"
-                  style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #e2e8f0; flex-shrink: 0;"
-                  @error="($event.target as HTMLImageElement).src='https://www.youtube.com/favicon.ico'"
+                  v-if="channel.thumbnail"
+                  :src="channel.thumbnail"
+                  :style="`width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: ${UI_COLOR.line}; flex-shrink: 0;`"
+                  @error="channel.thumbnail = ''"
                 />
-                <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; min-width: 0;">
-                  <div style="font-size: 13px; font-weight: 600; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;">
-                    {{ channel.title }}
-                  </div>
-                  <div v-if="channel.lastPublishedTime" style="font-size: 10.5px; color: #64748b; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="最新影片發布時間">
-                    🕒 {{ formatPublishTime(channel.lastPublishedTime) }}
-                  </div>
+                <div
+                  v-else
+                  :style="`width: 32px; height: 32px; border-radius: 50%; background: ${UI_COLOR.line}; color: ${UI_COLOR.textMuted}; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;`"
+                >{{ channelInitial(channel) }}</div>
+                <div :style="`font-size: 13px; font-weight: 600; color: ${UI_COLOR.text}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;`">
+                  {{ channel.title }}
                 </div>
               </div>
 
-              <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+              <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
                 <van-switch v-model="channel.enabled" size="18px" />
+                <!--
+                  取消追蹤刻意**不**納入字元按鈕的視覺收斂（見 channel-ui-layout
+                  的「取消追蹤按鈕維持既有的視覺辨識度」）：它緊鄰啟用開關且
+                  沒有二次確認，而移除頻道會使該頻道的關鍵字設定永久遺失。
+                  縮小視覺目標會提高誤觸機率，而誤觸的代價無法復原。
+                -->
                 <van-button size="mini" type="danger" plain icon="cross" round @click="removeMonitoredChannel(channel.channelId)" style="padding: 0; width: 22px; height: 22px;" />
               </div>
             </div>
 
-            <!-- 第二行：最新影片標題 + 測試按鈕 -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; background: #f8fafc; padding: 4px 8px; border-radius: 6px; border: 1px solid #f1f5f9;">
-              <div style="font-size: 11px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">
-                {{ channel.lastVideoTitle ? '最新: ' + channel.lastVideoTitle : '等待新片比對中...' }}
-              </div>
-              <!-- 關鍵字入口：只顯示狀態與數量，完整內容留在對話框，維持雙行版面 -->
-              <van-button
-                size="mini"
-                :type="channel.keywords && channel.keywords.length ? 'primary' : 'default'"
-                plain
-                round
+            <!-- 第二行：發布時間與最新影片標題，獨占整行 -->
+            <div :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; margin-top: 6px; padding-left: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`">
+              <template v-if="channel.lastPublishedTime">{{ formatPublishTime(channel.lastPublishedTime) }}</template>
+              <template v-if="channel.lastPublishedTime && channel.lastVideoTitle"> · </template>
+              <template v-if="channel.lastVideoTitle">{{ channel.lastVideoTitle }}</template>
+              <template v-if="!channel.lastPublishedTime && !channel.lastVideoTitle">等待新片比對中</template>
+            </div>
+
+            <!-- 第三行：關鍵字入口與測試 -->
+            <div style="display: flex; align-items: center; gap: 16px; margin-top: 6px; padding-left: 42px;">
+              <span
+                :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; cursor: pointer; padding: 6px 0;`"
                 title="設定此頻道的標題關鍵字篩選"
                 @click="openKeywordEditor(channel)"
-                style="padding: 0 8px; height: 20px; font-size: 10px; flex-shrink: 0;"
-              >
-                {{ keywordEntryLabel(channel) }}
-              </van-button>
-              <van-button 
-                size="mini" 
-                type="warning" 
-                plain 
-                round 
-                icon="play-circle-o" 
-                title="模擬此頻道發布新片（插隊下載最新一部影片）" 
+              >{{ keywordEntryLabel(channel) }}</span>
+              <span
+                :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; cursor: pointer; padding: 6px 0;`"
+                title="模擬此頻道發布新片（插隊下載最新一部影片）"
                 @click="simulateNewVideo(channel)"
-                style="padding: 0 8px; height: 20px; font-size: 10px; flex-shrink: 0;"
-              >
-                測試
-              </van-button>
+              >測試</span>
             </div>
           </div>
         </div>
@@ -969,7 +957,7 @@
     <!-- 頻道標題關鍵字編輯（草稿式：確認才寫回訂閱，取消不影響） -->
     <van-dialog
       v-model:show="showKeywordDialog"
-      :title="`🔎 ${keywordEditingChannelTitle} 的關鍵字`"
+      :title="` ${keywordEditingChannelTitle} 的關鍵字`"
       show-cancel-button
       confirm-button-text="確認"
       cancel-button-text="取消"
@@ -994,19 +982,19 @@
           @update:model-value="(v: string) => { if (/[,，]/.test(v)) commitKeywordInput(); }"
         />
 
-        <div v-if="keywordRejections.length > 0" style="margin-top: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px;">
-          <div v-for="(reason, i) in keywordRejections" :key="i" style="font-size: 11px; color: #b91c1c; line-height: 1.6;">
-            ⚠️ {{ reason }}
+        <div v-if="keywordRejections.length > 0" style="margin-top: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
+          <div v-for="(reason, i) in keywordRejections" :key="i" style="font-size: 11px; color: #0f172a; line-height: 1.6;">
+             {{ reason }}
           </div>
         </div>
 
         <div style="display: flex; align-items: center; justify-content: space-between; margin: 14px 0 6px;">
-          <span style="font-size: 12px; font-weight: 600; color: #475569;">
+          <span style="font-size: 12px; font-weight: 600; color: #64748b;">
             已設定 ({{ keywordDraft.length }}/{{ KEYWORD_MAX_COUNT }})
           </span>
           <span
             v-if="keywordDraft.length > 0"
-            style="font-size: 12px; color: #ef4444; cursor: pointer;"
+            style="font-size: 12px; color: #64748b; cursor: pointer;"
             @click="clearKeywordDraft"
           >
             全部清空
@@ -1036,7 +1024,7 @@
     <!-- YouTube Data API 金鑰編輯（草稿式：確認才寫回，取消不影響） -->
     <van-dialog
       v-model:show="showApiKeyDialog"
-      title="🔑 YouTube Data API 金鑰"
+      title=" YouTube Data API 金鑰"
       show-cancel-button
       confirm-button-text="儲存"
       cancel-button-text="取消"
@@ -1066,11 +1054,11 @@
             style="font-size: 11px; color: #64748b; cursor: pointer;"
             @click="apiKeyVisible = !apiKeyVisible"
           >
-            {{ apiKeyVisible ? '🙈 隱藏金鑰' : '👁 顯示金鑰' }}
+            {{ apiKeyVisible ? ' 隱藏金鑰' : ' 顯示金鑰' }}
           </span>
           <span
             v-if="apiKeyDraft.trim()"
-            style="font-size: 11px; color: #ef4444; cursor: pointer;"
+            style="font-size: 11px; color: #64748b; cursor: pointer;"
             @click="apiKeyDraft = ''"
           >
             清除
@@ -1078,7 +1066,7 @@
         </div>
 
         <div v-if="youtubeApiKey.trim()" style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #475569;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: #64748b;">
             <span>今日用量（估算）</span>
             <span style="font-variant-numeric: tabular-nums;">
               <b>{{ apiUnitsUsedToday }}</b> / {{ DAILY_QUOTA_UNITS }}
@@ -1092,12 +1080,12 @@
         </div>
 
         <div v-if="monitorConfig.apiQuotaSuppressedUntil && Date.now() < monitorConfig.apiQuotaSuppressedUntil"
-             style="margin-top: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #92400e; line-height: 1.6;">
-          ⚠️ 今日配額已用盡，頻道追蹤暫停中。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
+             style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #0f172a; line-height: 1.6;">
+           今日配額已用盡，頻道追蹤暫停中。配額於太平洋時間午夜重置後會自動恢復，不需手動處理。
         </div>
         <div v-else-if="monitorConfig.apiRejectedKeyFingerprint"
-             style="margin-top: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #b91c1c; line-height: 1.6;">
-          ⚠️ 目前的金鑰被 API 拒絕（無效、已撤銷，或該專案未啟用 YouTube Data API v3）。請確認後更換金鑰。
+             style="margin-top: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #0f172a; line-height: 1.6;">
+           目前的金鑰被 API 拒絕（無效、已撤銷，或該專案未啟用 YouTube Data API v3）。請確認後更換金鑰。
         </div>
       </div>
     </van-dialog>
@@ -1150,6 +1138,9 @@ import {
 } from './composables/useErrorLog';
 import { useNetworkStatus, describeNetworkStatus } from './composables/useNetworkStatus';
 import { isDeviceOfflineError, describeEarlyStop, shouldBackoff, describeRateLimit } from './services/rateLimit';
+import {
+  UI_COLOR, GLYPH_BUTTON_STYLE, GLYPH_BUTTON_DANGER_STYLE, ACTION_GLYPH,
+} from './services/visualLanguage';
 import { resolveSourceProfile } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
@@ -1162,6 +1153,8 @@ import {
   describeMissingKeyCheck,
   describeApiFetchFailure,
   describeCheckProgress,
+  needsIdentityRepair,
+  isGenericChannelThumbnail,
   type ChannelCheckProgress,
   describeApiQuotaExhausted,
   describeApiKeyRejected,
@@ -1214,7 +1207,7 @@ const storage = createStorage(
 const taskStore = createTaskStore(storage);
 const { tasks } = taskStore;
 
-// ===== 🚀 自動更新狀態與邏輯 =====
+// ===== 自動更新狀態與邏輯 =====
 const showUpdateModal = ref(false);
 const updateInfo = ref<UpdateInfo>({
   hasUpdate: false,
@@ -1584,21 +1577,24 @@ onMounted(async () => {
     }
   }, 60000);
 
-  // 啟動時自動修復：如果有頻道的 title 是 UC 開頭的 Channel ID，嘗試取得真實名稱
+  // 啟動時自動修復頻道的識別資訊（名稱與頭像）。
+  //
+  // 觸發條件刻意是「逐項檢查這個欄位缺了嗎」而非「名稱像不像識別碼」——
+  // 舊條件只看名稱，於是「名稱正常但頭像缺失」的頻道永遠不會被修復，
+  // 而那正是多數受影響頻道的實際狀態：頻道識別碼與 /channel/... 形式的
+  // 網址在解析時根本不產生頭像，名稱卻可能自其他來源取得。
   setTimeout(async () => {
     for (const channel of monitoredChannels.value) {
-      if (channel.title && channel.title.startsWith('UC') && channel.title.length === 24) {
-        try {
-          const realTitle = await DownloadService.fetchChannelTitle(channel.channelId, {
-            api: buildApiOptions(channel),
-          });
-          if (realTitle) {
-            channel.title = realTitle;
-            console.log(`自動修復頻道標題: ${channel.channelId} -> ${realTitle}`);
-          }
-        } catch (e) {
-          console.warn(`修復頻道標題失敗 (${channel.channelId}):`, e);
-        }
+      if (!needsIdentityRepair(channel)) continue;
+      try {
+        const identity = await DownloadService.fetchChannelIdentity(channel.channelId, {
+          api: buildApiOptions(channel),
+        });
+        // 兩者各自獨立採用 —— 只取到其一時，取到的那個仍要用上
+        if (identity.title) channel.title = identity.title;
+        if (identity.thumbnail) channel.thumbnail = identity.thumbnail;
+      } catch (e) {
+        console.warn(`修復頻道識別資訊失敗 (${channel.channelId}):`, e);
       }
     }
   }, 5000);
@@ -1664,10 +1660,15 @@ const monitoredChannels = storage.defineSetting<MonitoredChannel[]>('avd_monitor
   deserialize: (raw) => {
     const list = typeof raw === 'string' ? JSON.parse(raw || '[]') : (raw ?? []);
     if (!Array.isArray(list)) return [];
-    // 向下相容：舊資料只有 lastCheckTime，且不含 keywords 欄位
+    // 向下相容：舊資料只有 lastCheckTime，且不含 keywords 欄位。
+    //
+    // 頭像亦在此正規化：舊版本取不到頭像時會存入 YouTube 網站圖示的網址，
+    // 那會讓畫面把通用標誌當成「已取得的頭像」顯示，也讓修復判定略過該頻道。
+    // 一律折算為空字串，使其進入待修復狀態。
     return list.map((c: any) => ({
       ...c,
       lastPublishedTime: c.lastPublishedTime || c.lastCheckTime || 0,
+      thumbnail: isGenericChannelThumbnail(c?.thumbnail) ? '' : c.thumbnail,
       keywords: normalizeChannelKeywords(c?.keywords).keywords,
     }));
   },
@@ -1930,6 +1931,12 @@ const onApiKeyDialogBeforeClose = (action: string): boolean => {
   return true;
 };
 
+/** 頻道頭像尚未取得時的中性佔位字元：頻道名的第一個字。 */
+const channelInitial = (channel: MonitoredChannel): string => {
+  const text = (channel?.title || '').trim();
+  return text ? Array.from(text)[0] : '';
+};
+
 const showChannelModal = ref(false);
 
 /** 開啟頻道管理彈窗時重新取樣時間，使停擺指示立即反映當下狀態。 */
@@ -1971,6 +1978,9 @@ const addManualChannel = async () => {
     if (channelTitle.startsWith('UC') && channelTitle.length === 24) {
       channelTitle = '';
     }
+    // 解析階段可能取不到頭像（頻道識別碼與 /channel/... 形式的網址一律取不到），
+    // 留空以進入「待修復」狀態，而非填入平台通用標誌把問題藏起來。
+    let channelThumbnail = res.thumbnail || '';
     let latestVid = '';
     let latestTitle = '';
     let latestPubTime = 0;
@@ -1985,12 +1995,14 @@ const addManualChannel = async () => {
         latestTitle = latest[0].title;
         latestPubTime = latest[0].publishedTime || 0;
       }
-      // 名稱仍為空時以 API 查詢；失敗不阻擋加入，退回使用者輸入的內容，
-      // 待後續檢查成功時由啟動時的名稱修復自動補上。
-      if (!channelTitle) {
-        channelTitle = await DownloadService.fetchChannelTitle(res.channelId, {
+      // 名稱或頭像缺其一即查詢；兩者來自同一個請求，不分開打。
+      // 失敗不阻擋加入，退回使用者輸入的內容，待後續修復自動補上。
+      if (!channelTitle || !channelThumbnail) {
+        const identity = await DownloadService.fetchChannelIdentity(res.channelId, {
           api: buildApiOptions(),
         });
+        if (!channelTitle) channelTitle = identity.title;
+        if (!channelThumbnail) channelThumbnail = identity.thumbnail;
       }
     } catch (e) {
       console.warn('加入頻道時的初次擷取略過（不阻擋加入）', e);
@@ -2004,7 +2016,7 @@ const addManualChannel = async () => {
     monitoredChannels.value.push({
       channelId: res.channelId,
       title: channelTitle,
-      thumbnail: res.thumbnail || 'https://www.youtube.com/favicon.ico',
+      thumbnail: channelThumbnail,
       enabled: true,
       lastPublishedTime: latestPubTime || Date.now(),
       lastCheckTime: Date.now(),
@@ -2211,7 +2223,9 @@ const restoreActions = [
 const buildRestoredChannel = (c: any, anchor?: number): MonitoredChannel => ({
   channelId: c.channelId,
   title: c.title || c.channelId,
-  thumbnail: c.thumbnail || 'https://www.youtube.com/favicon.ico',
+  // 留空即進入「待修復」狀態，由啟動時的識別資訊修復補上。
+  // 舊備份可能帶有平台通用標誌的網址，一併視為未取得。
+  thumbnail: isGenericChannelThumbnail(c.thumbnail) ? '' : c.thumbnail,
   enabled: c.enabled !== false,
   lastPublishedTime: anchor,
   lastCheckTime: anchor,
@@ -2535,7 +2549,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     journalTrackingStatus(blockedMidRound);
 
     if (newVideoCount > 0) {
-      showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ 尚有 ${skippedChannelCount} 個頻道未檢查）${apiHint}`);
+      showToast(`發現 ${newVideoCount} 部新片，已排隊下載。${describeKeywordFilteredSuffix(keywordFilteredCount)}（尚有 ${skippedChannelCount} 個頻道未檢查）${apiHint}`);
       processQueue();
     } else {
       showToast({
@@ -2556,14 +2570,14 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     } catch { /* 記錄失敗不得影響檢查流程 */ }
 
     if (newVideoCount > 0) {
-      showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（⚠️ ${describeEarlyStop(skippedChannelCount)}）${apiHint}`);
+      showToast(`發現 ${newVideoCount} 部新片，已排隊下載。${describeKeywordFilteredSuffix(keywordFilteredCount)}（${describeEarlyStop(skippedChannelCount)}）${apiHint}`);
       processQueue();
     } else if (isManual) {
       const filteredHint = keywordFilteredCount > 0
         ? `${describeKeywordFilteredRound(keywordFilteredCount)}　`
         : '';
       showToast({
-        message: `${filteredHint}⚠️ ${describeEarlyStop(skippedChannelCount)}${apiHint}`,
+        message: `${filteredHint}${describeEarlyStop(skippedChannelCount)}${apiHint}`,
         duration: 5000,
         closeOnClick: true
       });
@@ -2573,19 +2587,19 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     if (isManual) {
       // 逐頻道的原始錯誤已於迴圈中記入日誌，此處只做總結提示。
       showToast({
-        message: `❌ ${describeApiFetchFailure({ offline: allOffline })}${apiHint}`,
+        message: `檢查失敗：${describeApiFetchFailure({ offline: allOffline })}${apiHint}`,
         duration: 5000,
         closeOnClick: true
       });
     }
   } else if (newVideoCount > 0 && failedCount > 0) {
     // 有新影片但部分失敗
-    const failHint = `⚠️ ${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}`;
-    showToast(`🔔 發現 ${newVideoCount} 部新片，已排隊下載！${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）${apiHint}`);
+    const failHint = `${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}`;
+    showToast(`發現 ${newVideoCount} 部新片，已排隊下載。${describeKeywordFilteredSuffix(keywordFilteredCount)}（${failHint}）${apiHint}`);
     processQueue();
   } else if (newVideoCount > 0) {
     // 全部成功且有新影片
-    showToast(`🔔 發現 ${newVideoCount} 部新影片，已優先加入下載佇列！${describeKeywordFilteredSuffix(keywordFilteredCount)}${apiHint}`);
+    showToast(`發現 ${newVideoCount} 部新影片，已優先加入下載佇列。${describeKeywordFilteredSuffix(keywordFilteredCount)}${apiHint}`);
     processQueue();
   } else if (isManual && failedCount > 0) {
     // 沒新影片但部分失敗
@@ -2593,7 +2607,7 @@ const checkAllMonitoredChannels = async (isManual = false) => {
     const noNewHint = keywordFilteredCount > 0
       ? describeKeywordFilteredRound(keywordFilteredCount)
       : '已檢查完成，目前沒有新影片';
-    showToast(`${noNewHint}（⚠️ ${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}）${apiHint}`);
+    showToast(`${noNewHint}（${failedCount} 個頻道${describeApiFetchFailure({ offline: allOffline, compact: true })}）${apiHint}`);
   } else if (isManual) {
     // 全部成功且沒新片。K 大於零代表「有新片但被自己的關鍵字篩掉」，
     // 與「真的沒有新片」是兩回事，MUST 以不同文案區分。
@@ -2648,7 +2662,7 @@ const simulateNewVideo = async (channel: MonitoredChannel) => {
     };
 
     tasks.value.unshift(testTask); // 優先插隊至佇列最前面第一位！
-    showToast(`🔔 成功模擬！已將《${latestVideo.title}》插隊至最前面！`);
+    showToast(`已模擬新片，《${latestVideo.title}》已插隊至最前面。`);
     showChannelModal.value = false; // 關閉彈窗回到主介面直接看下載進度
     processQueue();
   } catch (e: any) {
@@ -2724,7 +2738,7 @@ const simulateGlobalNewVideo = async () => {
 
     closeToast();
     if (totalAdded > 0) {
-      showToast(`🔔 成功！已將各頻道最新影片（共 ${totalAdded} 部）插隊至最前面！`);
+      showToast(`已將各頻道最新影片（共 ${totalAdded} 部）插隊至最前面。`);
       showChannelModal.value = false;
       processQueue();
     } else if (keywordMissChannels > 0) {
@@ -3248,7 +3262,7 @@ const addTask = async (urlToAdd: string) => {
           monitoredChannels.value.push({
             channelId: channelInfo.channelId,
             title: channelInfo.title || urlToAdd,
-            thumbnail: channelInfo.thumbnail || 'https://www.youtube.com/favicon.ico',
+            thumbnail: isGenericChannelThumbnail(channelInfo.thumbnail) ? '' : (channelInfo.thumbnail ?? ''),
             enabled: true,
             lastCheckTime: Date.now(),
             keywords: []
@@ -4109,12 +4123,12 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 <style scoped>
 .app-container {
   min-height: 100vh;
-  background-color: #f7f8fa;
+  background-color: #f8fafc;
 }
 .ns-spinner {
   width: 9px;
   height: 9px;
-  border: 2px solid #9ca3af;
+  border: 2px solid #94a3b8;
   border-top-color: transparent;
   border-radius: 50%;
   animation: ns-spin 0.8s linear infinite;
@@ -4144,7 +4158,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .nav-title-text {
   font-size: 15px;
   font-weight: 600;
-  color: #323233;
+  color: #0f172a;
   white-space: nowrap;
 }
 .nav-mp3-checkbox {
@@ -4154,7 +4168,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 }
 .nav-version-text {
   font-size: 10px;
-  color: #c8c9cc;
+  color: #94a3b8;
   white-space: nowrap;
 }
 .download-form {
@@ -4185,7 +4199,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .queue-header h3 {
   margin: 0;
   font-size: 16px;
-  color: #323233;
+  color: #0f172a;
 }
 .task-list {
   display: flex;
@@ -4197,13 +4211,13 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-  border-left: 4px solid #ebedf0;
+  border-left: 4px solid #e2e8f0;
   transition: all 0.3s ease;
 }
-.task-card.status-pending { border-left-color: #ff976a; }
-.task-card.status-downloading { border-left-color: #1989fa; }
-.task-card.status-success { border-left-color: #07c160; }
-.task-card.status-error { border-left-color: #ee0a24; }
+.task-card.status-pending { border-left-color: #64748b; }
+.task-card.status-downloading { border-left-color: #0f172a; }
+.task-card.status-success { border-left-color: #64748b; }
+.task-card.status-error { border-left-color: #64748b; }
 
 .task-header {
   display: flex;
@@ -4215,7 +4229,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 
 .quality-badge {
   display: inline-block;
-  background-color: #6b7280;
+  background-color: #64748b;
   color: white;
   padding: 0px 4px;
   border-radius: 4px;
@@ -4225,11 +4239,11 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   vertical-align: middle;
   white-space: nowrap;
 }
-.quality-4K { background-color: #ef4444; }
-.quality-1080p { background-color: #f59e0b; }
-.quality-720p { background-color: #3b82f6; }
-.quality-480p { background-color: #10b981; }
-.quality-badge[class*='kbps'], .quality-MP3 { background-color: #8b5cf6; }
+.quality-4K { background-color: #64748b; }
+.quality-1080p { background-color: #64748b; }
+.quality-720p { background-color: #64748b; }
+.quality-480p { background-color: #64748b; }
+.quality-badge[class*='kbps'], .quality-MP3 { background-color: #64748b; }
 
 .task-header-actions {
   display: flex;
@@ -4244,20 +4258,20 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #f2f3f5;
-  color: #969799;
+  background: #f8fafc;
+  color: #94a3b8;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
   transition: all 0.2s;
 }
 .remove-btn:active {
-  background: #ee0a24;
+  background: #64748b;
   color: white;
 }
 .task-url {
   font-size: 11px;
-  color: #969799;
+  color: #94a3b8;
   word-break: break-all;
   line-height: 1.3;
   flex: 1;
@@ -4272,7 +4286,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .task-title {
   font-size: 14px;
   font-weight: 600;
-  color: #323233;
+  color: #0f172a;
   word-break: break-all;
   line-height: 1.35;
 }
@@ -4283,16 +4297,16 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #646566;
+  color: #64748b;
   margin-bottom: 8px;
 }
 .action-log {
   margin-top: 10px;
   padding: 8px 10px;
-  background-color: #f2f3f5;
+  background-color: #f8fafc;
   border-radius: 6px;
   font-size: 11px;
-  color: #646566;
+  color: #64748b;
   max-height: 100px;
   overflow-y: auto;
   word-break: break-all;
@@ -4300,7 +4314,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .task-footer {
   margin-top: 12px;
   font-size: 12px;
-  color: #07c160;
+  color: #64748b;
   font-weight: 500;
   word-break: break-all;
 }
@@ -4316,7 +4330,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .upload-wrapper {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px dashed #ebedf0;
+  border-top: 1px dashed #e2e8f0;
 }
 .footer-buttons {
   display: flex;
@@ -4327,7 +4341,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   text-align: center;
   margin-top: 30px;
   font-size: 12px;
-  color: #c8c9cc;
+  color: #94a3b8;
 }
 
 /* Android TV 模式與 D-Pad 遙控器焦點發光放大樣式 */
@@ -4343,7 +4357,7 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .tv-mode .sub-task-item:focus,
 .tv-mode .van-button:focus,
 .tv-mode .van-button:focus-visible {
-  outline: 3px solid #3b82f6 !important;
+  outline: 3px solid #64748b !important;
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.7) !important;
   transform: scale(1.04);
   transition: all 0.15s ease-in-out;
@@ -4361,8 +4375,8 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   justify-content: center !important;
   flex-shrink: 0 !important;
   border-radius: 999px !important;
-  border: 1px solid #dcdfe6 !important;
-  color: #323233 !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
   background-color: #ffffff !important;
   transition: all 0.2s ease !important;
 }
@@ -4376,16 +4390,16 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 }
 .top-ctrl-btn:hover {
   background-color: #f8fafc !important;
-  border-color: #cbd5e1 !important;
+  border-color: #e2e8f0 !important;
 }
 .top-ctrl-btn:active {
-  background-color: #f1f5f9 !important;
+  background-color: #f8fafc !important;
 }
 /* 當功能處於啟用狀態時的精緻主色高亮 (如: 音訊模式開啟、頻道有追蹤、快傳中) */
 .top-ctrl-btn.btn-active {
-  border-color: #1989fa !important;
-  color: #1989fa !important;
-  background-color: #eff6ff !important;
+  border-color: #0f172a !important;
+  color: #0f172a !important;
+  background-color: #f8fafc !important;
   font-weight: 500 !important;
 }
 </style>

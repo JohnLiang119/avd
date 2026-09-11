@@ -24,7 +24,7 @@ import {
   fetchChannelVideosViaApi,
   resolveLiveStatusesViaApi,
   buildChannelSnippetRequest,
-  parseChannelTitle,
+  parseChannelSnippet,
   classifyApiError,
   type ApiRequest,
   type ApiErrorKind,
@@ -1430,26 +1430,33 @@ export const DownloadService = {
   },
 
   /**
-   * 以 API 取得頻道名稱，供加入頻道與既有頻道的名稱修復使用。
+   * 以 API 取得頻道的名稱與頭像，供加入頻道與既有頻道的識別資訊修復使用。
    *
-   * 查詢失敗一律回傳空字串而非拋錯：名稱屬輔助資訊，MUST NOT 成為加入
+   * **一次請求同時取得兩者**：名稱與頭像來自同一個資源，分開查詢等於為
+   * 同一份資料付兩次配額。
+   *
+   * 查詢失敗一律回傳空字串而非拋錯：兩者皆屬輔助資訊，MUST NOT 成為加入
    * 頻道的阻礙 —— 呼叫端沿用既有退回行為（以使用者輸入作為暫時名稱），
-   * 並於後續檢查成功時修復。
+   * 並於後續修復時自動補上。
    */
-  async fetchChannelTitle(channelId: string, options?: { api?: ChannelApiOptions }): Promise<string> {
+  async fetchChannelIdentity(
+    channelId: string,
+    options?: { api?: ChannelApiOptions }
+  ): Promise<{ title: string; thumbnail: string }> {
     const api = options?.api;
-    if (!api || trackingBlockedReason(api)) return '';
+    if (!api || trackingBlockedReason(api)) return { title: '', thumbnail: '' };
 
     try {
       const json = await countedApiFetch(api)(buildChannelSnippetRequest(channelId, api.apiKey));
-      return convertCnToTw(parseChannelTitle(json));
+      const snippet = parseChannelSnippet(json);
+      return { title: convertCnToTw(snippet.title), thumbnail: snippet.thumbnail };
     } catch (e: any) {
       // 名稱查詢與影片擷取共用同一把金鑰，故此處的失敗同樣值得觸發抑制
       api.onError?.(classifyApiError(e));
-      // 不向使用者提示（名稱取不到不阻擋加入頻道），但頻道會停留在以網址
-      // 為名的狀態 —— 那是使用者看得到的結果差異，故須入帳。
-      api.onFailure?.('取得頻道名稱', e);
-      return '';
+      // 不向使用者提示（取不到不阻擋加入頻道），但頻道會停留在以網址為名、
+      // 或沒有頭像的狀態 —— 那是使用者看得到的結果差異，故須入帳。
+      api.onFailure?.('取得頻道識別資訊', e);
+      return { title: '', thumbnail: '' };
     }
   },
 
