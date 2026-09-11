@@ -2627,7 +2627,31 @@ const checkAllMonitoredChannels = async (isManual = false) => {
   }
 };
 
+/**
+ * 追蹤停擺時擋下模擬入口，回報並入帳一次。
+ *
+ * 模擬入口先前**沒有**這道前置檢查，於是停擺時 `simulateGlobalNewVideo` 會
+ * 逐一走訪每個頻道、每個都拋出同一個停擺錯誤、每個都寫一筆日誌 ——
+ * 20 個頻道就是同一秒 20 筆一模一樣的紀錄，把只保留 50 筆的日誌灌掉大半。
+ * 那正是 `error-journal` 的「持續性狀況只記錄狀態轉換」要防的情形，
+ * 只是先前只在自動檢查的路徑上實作，漏了這兩個入口。
+ *
+ * @returns 已停擺並已擋下時為 true
+ */
+const blockSimulationIfTrackingUnavailable = (): boolean => {
+  uiNow.value = Date.now();
+  const status = trackingStatus.value;
+  if (status === 'ok') return false;
+
+  // 走與自動檢查同一條「只記轉換」路徑，故不會每按一次就多一筆
+  journalTrackingStatus(status);
+  closeToast();
+  showToast({ message: describeTrackingBlocked(status), duration: 6000, closeOnClick: true });
+  return true;
+};
+
 const simulateNewVideo = async (channel: MonitoredChannel) => {
+  if (blockSimulationIfTrackingUnavailable()) return;
   showLoadingToast({ message: '正在模擬抓取最新影片...', forbidClick: true });
   try {
     const videos = await DownloadService.fetchChannelVideos(channel.channelId, {
@@ -2687,12 +2711,14 @@ const simulateGlobalNewVideo = async () => {
     showToast('請先新增並啟用至少一個追蹤頻道');
     return;
   }
+  if (blockSimulationIfTrackingUnavailable()) return;
 
   showLoadingToast({ message: `正在抓取 ${enabledChannels.length} 個頻道最新 2 集影片...`, forbidClick: true });
   let totalAdded = 0;
   // 因關鍵字全數未命中而未建立任務的頻道數與影片數
   let keywordMissChannels = 0;
   let keywordMissVideos = 0;
+  let simulationBlockedMidRound: ChannelTrackingStatus | '' = '';
 
   try {
     for (const channel of enabledChannels) {
@@ -2739,6 +2765,14 @@ const simulateGlobalNewVideo = async () => {
         }
       } catch (err) {
         console.warn(`模擬抓取頻道 ${channel.title} 失敗:`, err);
+        // 追蹤於迴圈中途停擺（例如配額在此時耗盡）：其餘頻道必然同一結果，
+        // 中止整輪而不逐一入帳 —— 那是同一個持續性狀況，只記一次轉換。
+        const blocked = trackingUnavailableStatusOf(err);
+        if (blocked) {
+          journalTrackingStatus(blocked);
+          simulationBlockedMidRound = blocked;
+          break;
+        }
         // 迴圈中不逐一彈提示（結束後有總結），但仍須入帳 —— 否則使用者
         // 只看到「共 N 部」少於預期，卻查不到是哪個頻道失敗。
         journalOnly(`模擬抓取頻道「${channel.title}」`, err);
@@ -2747,7 +2781,14 @@ const simulateGlobalNewVideo = async () => {
 
 
     closeToast();
-    if (totalAdded > 0) {
+    if (simulationBlockedMidRound && totalAdded === 0) {
+      // 中途停擺且一部都沒加到：說出原因，而非誤導為「取不到影片」
+      showToast({
+        message: describeTrackingBlocked(simulationBlockedMidRound),
+        duration: 6000,
+        closeOnClick: true,
+      });
+    } else if (totalAdded > 0) {
       showToast(`已將各頻道最新影片（共 ${totalAdded} 部）插隊至最前面。`);
       showChannelModal.value = false;
       processQueue();
