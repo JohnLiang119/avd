@@ -163,7 +163,7 @@
 
   `npm run build` ✓、`npm test`（376 passed）✓、`npx vue-tsc --noEmit` ✓、
   `cargo check` ✓、`gradlew :app:compileDebugJavaWithJavac` ✓
-- [ ] 8.4 人工驗證【整體一致性】：同一動作在不同畫面使用同一字元；紅色只出現在不可逆或會遺失設定的操作上
+- [x] 8.4 人工驗證【整體一致性】：同一動作在不同畫面使用同一字元；紅色只出現在不可逆或會遺失設定的操作上
 
 ## 9. 提交與版本進版
 
