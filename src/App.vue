@@ -927,15 +927,25 @@
               </div>
             </div>
 
-            <!-- 第二行：發布時間與最新影片標題，獨占整行 -->
-            <div :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; margin-top: 6px; padding-left: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`">
+            <!--
+              第二行：發布時間，獨占一行。
+
+              時間與標題**刻意不併行** —— 時間佔去約二十個字元的固定寬度，
+              併行時標題在手機寬度下只剩六至八個字可見。而標題才是使用者
+              判斷「這支要不要看」的依據，時間只是輔助。
+            -->
+            <div :style="`font-size: 11px; color: ${UI_COLOR.textFaint}; margin-top: 6px; padding-left: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`">
               <template v-if="channel.lastPublishedTime">{{ formatPublishTime(channel.lastPublishedTime) }}</template>
-              <template v-if="channel.lastPublishedTime && channel.lastVideoTitle"> · </template>
-              <template v-if="channel.lastVideoTitle">{{ channel.lastVideoTitle }}</template>
-              <template v-if="!channel.lastPublishedTime && !channel.lastVideoTitle">等待新片比對中</template>
+              <template v-else>等待新片比對中</template>
             </div>
 
-            <!-- 第三行：關鍵字入口與測試 -->
+            <!-- 第三行：最新影片標題，獨占整行以取得完整寬度 -->
+            <div
+              v-if="channel.lastVideoTitle"
+              :style="`font-size: 12px; color: ${UI_COLOR.text}; margin-top: 2px; padding-left: 42px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`"
+            >{{ channel.lastVideoTitle }}</div>
+
+            <!-- 第四行：關鍵字入口與測試 -->
             <div style="display: flex; align-items: center; gap: 16px; margin-top: 6px; padding-left: 42px;">
               <span
                 :style="`font-size: 11px; color: ${UI_COLOR.textMuted}; cursor: pointer; padding: 6px 0;`"
