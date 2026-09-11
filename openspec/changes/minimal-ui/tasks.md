@@ -157,9 +157,12 @@
 ## 9. 提交與版本進版
 
 - [x] 9.1 建立功能修正 commit，並以 `git status --short` 與 commit diff 確認只包含本 change 的程式、測試及 OpenSpec 任務進度
-- [ ] 9.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增）
-- [ ] 9.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message`（該檔屬工作區 repo，非 avd repo，故獨立提交）；發布說明須提及這是**視覺上的大幅改動**，使用者升級後畫面會明顯不同；完成方式：訊息內嵌版號與 `package.json` 相符
-- [ ] 9.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 9.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本**
+- [x] 9.2 將 avd 下一版版號同步更新至七處：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（以 `cargo update --workspace --offline` 同步）、`android/app/build.gradle` 的 `versionName`／`versionCode`（皆須遞增）
+- [x] 9.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message`（該檔屬工作區 repo，非 avd repo，故獨立提交）；發布說明須提及這是**視覺上的大幅改動**，使用者升級後畫面會明顯不同；完成方式：訊息內嵌版號與 `package.json` 相符
+- [x] 9.4 重新執行五項建置驗證全數通過後，建立獨立的版本進版 commit（與 9.1 分開）；**提交與進版期間 MUST NOT 併行執行發布腳本**
+
+  **已同步至 v1.0.93**（`versionCode` 129 → 130）。發布腳本未執行 ——
+  依規範由使用者手動執行。11 項人工驗證需要可安裝的版本，故進版先於驗證。
 
 ## 10. 歸檔順序
 
