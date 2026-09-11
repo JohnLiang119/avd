@@ -154,6 +154,20 @@ describe('decideJournalTransition —— 持續性狀況只記轉換', () => {
     expect(kinds).toEqual(['started', 'none', 'cleared', 'none', 'started']);
   });
 
+  it('一次動作走訪多個頻道時，同一個停擺原因只寫一筆', () => {
+    // 實測回歸（v1.0.93）：模擬測試在未設金鑰時逐一走訪 20 個頻道，
+    // 每個都拋出同一個停擺錯誤並各寫一筆，同一秒灌進 20 筆一模一樣的紀錄，
+    // 把只保留 50 筆的日誌吃掉大半。此處釘住「同一原因只記一次轉換」。
+    let journaled = '';
+    let writes = 0;
+    for (let channel = 0; channel < 20; channel++) {
+      const got = decideJournalTransition(journaled, 'missing_key');
+      if (got.kind !== 'none') writes++;
+      journaled = got.nextJournaled;
+    }
+    expect(writes).toBe(1);
+  });
+
   it('一輪正常檢查不產生任何寫入決定', () => {
     // 【紅線】日誌只有 50 筆，正常運作絕不能佔用任何一筆
     expect(decideJournalTransition('', '').kind).toBe('none');
