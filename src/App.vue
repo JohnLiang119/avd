@@ -286,10 +286,10 @@
                        {{ subTask.mediaUri || '(無 mediaUri)' }}
                     </div>
                     <div class="task-footer success-action" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
-                      <div style="display: flex; gap: 4px; align-items: center;">
+                      <div class="footer-meta" style="display: flex; gap: 4px; align-items: center;">
                         <span v-if="subTask.quality" class="quality-badge" :class="'quality-' + subTask.quality.split(' ')[0]">{{ subTask.quality }}</span>
                       </div>
-                      <div style="display: flex; gap: 4px;">
+                      <div class="footer-buttons" style="display: flex; gap: 4px;">
                         <van-button size="mini" @click="playVideo(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
                       </div>
                     </div>
@@ -310,10 +310,10 @@
                {{ task.mediaUri || '(無 mediaUri)' }}
             </div>
             <div class="task-footer success-action" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; gap: 4px; align-items: center;">
+              <div class="footer-meta" style="display: flex; gap: 4px; align-items: center;">
                 <span v-if="task.quality" class="quality-badge" :class="'quality-' + task.quality.split(' ')[0]">{{ task.quality }}</span>
               </div>
-              <div style="display: flex; gap: 4px;">
+              <div class="footer-buttons" style="display: flex; gap: 4px;">
                 <van-button size="mini" @click="playVideo(task)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
               </div>
             </div>
@@ -412,11 +412,11 @@
                     </div>
 
                     <div class="task-footer success-action" v-if="subTask.status === 'success'" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
-                      <div style="display: flex; gap: 4px; align-items: center;">
+                      <div class="footer-meta" style="display: flex; gap: 4px; align-items: center;">
                         <span v-if="subTask.quality" class="quality-badge" :class="'quality-' + subTask.quality.split(' ')[0]">{{ subTask.quality }}</span>
                         <span v-if="subTask.fileSizeBytes" style="font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap;">{{ formatBytes(subTask.fileSizeBytes) }}</span>
                       </div>
-                      <div style="display: flex; gap: 4px;">
+                      <div class="footer-buttons" style="display: flex; gap: 4px;">
                         <van-button size="mini" @click="playVideo(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.play }}</van-button>
                         <van-button size="mini" @click="uploadToDrive(subTask)" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.upload }}</van-button>
                         <van-button size="mini" @click="removeSubTask(playlist, subTask.id)" title="清除卡片紀錄" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.remove }}</van-button>
@@ -488,7 +488,7 @@
             </div>
             
             <div class="task-footer success-action" v-if="task.status === 'success'" style="display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; gap: 4px; align-items: center;">
+              <div class="footer-meta" style="display: flex; gap: 4px; align-items: center;">
                 <span v-if="task.quality" class="quality-badge" :class="'quality-' + task.quality.split(' ')[0]">{{ task.quality }}</span>
                 <span v-if="task.fileSizeBytes" style="font-size: 11px; color: #94a3b8; font-weight: 500; white-space: nowrap;">{{ formatBytes(task.fileSizeBytes) }}</span>
               </div>
@@ -3259,7 +3259,22 @@ const deleteChannelFiles = async (channel: ChannelGroupTask) => {
 };
 
 const removeSubTask = (playlist: PlaylistGroupTask, subId: number) => {
-  taskStore.removeSubTask(playlist, subId);
+  const doRemove = () => taskStore.removeSubTask(playlist, subId);
+
+  // 這一顆與旁邊的刪檔鍵只差顏色，少了二次確認就沒有挽回的餘地；
+  // 頻道 > 播放清單 > 子項這條路徑先前漏接了「清除列表 - 單一」開關，
+  // 使得同一個動作在單一任務卡片上會問、在子項上卻直接清掉
+  if (confirmClearSingle.value) {
+    showDialog({
+      title: '確認清除紀錄',
+      message: '確定要清除這筆任務紀錄嗎？\n(這只會清除畫面上的紀錄，不會刪除您下載的實體檔案)',
+      showCancelButton: true,
+    }).then(() => {
+      doRemove();
+    }).catch(() => {});
+  } else {
+    doRemove();
+  }
 };
 
 
@@ -4396,6 +4411,15 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  /* 三級子項的這一列（品質、檔案大小加四顆字元按鈕）在手機寬度下放不進卡片：
+     內容約需 270px，而 360px 的畫面扣掉三層巢狀縮排後只剩約 220px。
+     少了這行，最右側的刪檔鍵會被擠出卡片邊界，看不到也按不到 */
+  flex-wrap: wrap;
+}
+/* 空間不足時先由左側的資訊讓出（可收縮、可換行），而非把按鈕推出邊界 */
+.footer-meta {
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .save-path {
   flex: 1;
@@ -4408,7 +4432,11 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .footer-buttons {
   display: flex;
   gap: 6px;
+  /* 按鈕列 MUST NOT 被壓縮：可觸控範圍是規格下限（MIN_TOUCH_TARGET_PX），
+     空間不足時整列換行，不縮小任何一顆 */
   flex-shrink: 0;
+  /* 換行後仍靠右，維持與未換行時相同的位置關係 */
+  margin-left: auto;
 }
 .version-text {
   text-align: center;
