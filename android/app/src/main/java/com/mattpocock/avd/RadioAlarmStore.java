@@ -1,0 +1,159 @@
+package com.mattpocock.avd;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 早報鬧鐘的持久化：設定本身、上次成功的串流網址，以及上次播放的結果。
+ *
+ * **這是本功能設定的唯一權威來源**（見 config-persistence 規格的「原生端為權威來源
+ * 的設定」）。理由是硬性的：鬧鐘必須在 WebView 沒有執行時響，而前端的儲存埠
+ * （localStorage／Tauri Store）此時讀不到 —— 前端因此不持有可獨立寫入的副本，
+ * 每次開啟設定介面都經插件回來這裡讀。
+ *
+ * 使用獨立的 SharedPreferences 檔（avd_radio_alarm）而非既有的 avd_prefs：
+ * 兩者的生命週期與讀取時機完全不同，混在一起只會讓「誰寫壞了誰」難以追查。
+ */
+public final class RadioAlarmStore {
+
+    private static final String PREFS_NAME = "avd_radio_alarm";
+
+    private static final String KEY_CONFIG = "config";
+    private static final String KEY_LAST_GOOD_URL = "last_good_url";
+    /** 已登錄鬧鐘的項目 id 清單，供 rescheduleAll 精準取消已不存在的項目。 */
+    private static final String KEY_SCHEDULED_IDS = "scheduled_ids";
+
+    private static final String KEY_RESULT_TIME = "last_result_time";
+    private static final String KEY_RESULT_SUCCESS = "last_result_success";
+    private static final String KEY_RESULT_MESSAGE = "last_result_message";
+    private static final String KEY_RESULT_PENDING = "last_result_pending_journal";
+
+    /** 上次播放的結果，供介面顯示與延遞寫入錯誤紀錄。 */
+    public static final class Result {
+        /** 事件實際發生的時間（epoch 毫秒），不是寫入錯誤紀錄的時間。 */
+        public final long time;
+        public final boolean success;
+        /** 未經截斷的訊息原文（error-journal 的要求）。 */
+        public final String message;
+        /** 是否仍待寫入前端的錯誤紀錄。 */
+        public final boolean pendingJournal;
+
+        public Result(long time, boolean success, String message, boolean pendingJournal) {
+            this.time = time;
+            this.success = success;
+            this.message = message == null ? "" : message;
+            this.pendingJournal = pendingJournal;
+        }
+    }
+
+    private final SharedPreferences prefs;
+
+    public RadioAlarmStore(Context context) {
+        this.prefs = context.getApplicationContext()
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    // ---- 設定 ----
+
+    public RadioAlarmConfig getConfig() {
+        return RadioAlarmConfig.fromJson(prefs.getString(KEY_CONFIG, null));
+    }
+
+    public void setConfig(RadioAlarmConfig config) {
+        prefs.edit().putString(KEY_CONFIG, config.toJson()).apply();
+    }
+
+    // ---- 上次成功的串流網址（退回鏈的中間層）----
+
+    public String getLastGoodUrl() {
+        return prefs.getString(KEY_LAST_GOOD_URL, "");
+    }
+
+    public void setLastGoodUrl(String url) {
+        if (url == null || url.trim().isEmpty()) return;
+        prefs.edit().putString(KEY_LAST_GOOD_URL, url.trim()).apply();
+    }
+
+    // ---- 已登錄的鬧鐘 id ----
+
+    public List<String> getScheduledIds() {
+        List<String> ids = new ArrayList<String>();
+        String raw = prefs.getString(KEY_SCHEDULED_IDS, "");
+        if (raw == null || raw.trim().isEmpty()) return ids;
+        try {
+            JSONArray arr = new JSONArray(raw);
+            for (int i = 0; i < arr.length(); i++) {
+                String id = arr.optString(i, "");
+                if (!id.isEmpty()) ids.add(id);
+            }
+        } catch (JSONException e) {
+            // 讀不出來就當作沒有登錄過；下一輪 rescheduleAll 會重新寫入正確內容
+        }
+        return ids;
+    }
+
+    public void setScheduledIds(List<String> ids) {
+        JSONArray arr = new JSONArray();
+        for (String id : ids) {
+            arr.put(id);
+        }
+        prefs.edit().putString(KEY_SCHEDULED_IDS, arr.toString()).apply();
+    }
+
+    // ---- 上次播放結果 ----
+
+    /** @return 從未觸發過時回傳 null */
+    public Result getLastResult() {
+        long time = prefs.getLong(KEY_RESULT_TIME, 0L);
+        if (time <= 0L) return null;
+        return new Result(
+                time,
+                prefs.getBoolean(KEY_RESULT_SUCCESS, false),
+                prefs.getString(KEY_RESULT_MESSAGE, ""),
+                prefs.getBoolean(KEY_RESULT_PENDING, false));
+    }
+
+    public void recordSuccess(long time, String message) {
+        prefs.edit()
+                .putLong(KEY_RESULT_TIME, time)
+                .putBoolean(KEY_RESULT_SUCCESS, true)
+                .putString(KEY_RESULT_MESSAGE, message == null ? "" : message)
+                .putBoolean(KEY_RESULT_PENDING, false)
+                .apply();
+    }
+
+    /**
+     * 記錄一次失敗，並標記為待寫入前端的錯誤紀錄。
+     *
+     * 不當場寫入錯誤紀錄的原因：紀錄住在 WebView 的儲存中，而失敗發生時
+     * WebView 多半沒有在跑。改由前端啟動時取走（見 consumeJournal）。
+     */
+    public void recordFailure(long time, String message) {
+        prefs.edit()
+                .putLong(KEY_RESULT_TIME, time)
+                .putBoolean(KEY_RESULT_SUCCESS, false)
+                .putString(KEY_RESULT_MESSAGE, message == null ? "" : message)
+                .putBoolean(KEY_RESULT_PENDING, true)
+                .apply();
+    }
+
+    /**
+     * 取走待寫入錯誤紀錄的失敗摘要並清除待寫標記。
+     *
+     * 清除標記是「不重複寫入」的依據 —— 規格明訂寫入後 MUST NOT 重複寫入。
+     *
+     * @return 待寫入的失敗結果；沒有待寫入者回傳 null
+     */
+    public Result consumeJournal() {
+        Result result = getLastResult();
+        if (result == null || !result.pendingJournal) return null;
+        prefs.edit().putBoolean(KEY_RESULT_PENDING, false).apply();
+        return new Result(result.time, result.success, result.message, true);
+    }
+}

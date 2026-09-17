@@ -1,19 +1,31 @@
 package com.mattpocock.avd;
 
+import android.Manifest;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
+import android.provider.Settings;
 import android.util.Log;
 
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLResponse;
 import com.yausername.ffmpeg.FFmpeg;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
 import android.content.Context;
@@ -27,7 +39,13 @@ import java.net.NetworkInterface;
 import java.util.Enumeration;
 import android.net.wifi.WifiManager;
 
-@CapacitorPlugin(name = "YoutubeDl")
+@CapacitorPlugin(
+        name = "YoutubeDl",
+        permissions = {
+                // 早報鬧鐘的播放通知（含「停止」按鈕）。API 33 起為執行期權限；
+                // 未授予時播放照常進行，失去的只是通知與停止按鈕。
+                @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS})
+        })
 public class YoutubeDlPlugin extends Plugin {
 
     private LocalFileServer localServer;
@@ -1601,5 +1619,238 @@ public class YoutubeDlPlugin extends Plugin {
             Log.e(TAG, "Failed to install APK", e);
             call.reject("喚起安裝失敗: " + e.getMessage());
         }
+    }
+
+    // ================= 早報鬧鐘 =================
+    //
+    // 設定的權威來源在原生端（見 config-persistence 規格的「原生端為權威來源的設定」）：
+    // 鬧鐘必須在 WebView 未執行時響，而前端的儲存埠此時讀不到。前端因此不持有副本，
+    // 每次開啟設定介面都經這些方法回來讀。
+
+    @PluginMethod
+    public void getRadioAlarmConfig(PluginCall call) {
+        try {
+            RadioAlarmConfig config = new RadioAlarmStore(getContext()).getConfig();
+            call.resolve(configToJs(config));
+        } catch (Exception e) {
+            Log.e(TAG, "getRadioAlarmConfig failed", e);
+            call.reject("讀取早報鬧鐘設定失敗: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void setRadioAlarmConfig(PluginCall call) {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("masterEnabled", Boolean.TRUE.equals(call.getBoolean("masterEnabled", false)));
+            root.put("customStreamUrl", call.getString("customStreamUrl", ""));
+
+            JSONArray out = new JSONArray();
+            JSArray incoming = call.getArray("entries");
+            if (incoming != null) {
+                for (int i = 0; i < incoming.length(); i++) {
+                    JSONObject item = incoming.optJSONObject(i);
+                    if (item != null) out.put(item);
+                }
+            }
+            root.put("entries", out);
+
+            // 一律經 fromJson 過濾：前端負責顯示拒絕的原因，這裡是最後一道防守，
+            // 確保寫進持久化的內容必定可用（不合法的時間剔除、重複去除、時長夾回範圍）。
+            RadioAlarmConfig config = RadioAlarmConfig.fromJson(root.toString());
+
+            RadioAlarmStore store = new RadioAlarmStore(getContext());
+            store.setConfig(config);
+
+            // 設定變更 MUST 立即生效，不需重新啟動應用程式。
+            RadioAlarmScheduler.rescheduleAll(getContext());
+
+            call.resolve(configToJs(config));
+        } catch (Exception e) {
+            Log.e(TAG, "setRadioAlarmConfig failed", e);
+            call.reject("寫入早報鬧鐘設定失敗: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getRadioAlarmStatus(PluginCall call) {
+        try {
+            RadioAlarmStore store = new RadioAlarmStore(getContext());
+            RadioAlarmConfig config = store.getConfig();
+
+            JSObject ret = new JSObject();
+            ret.put("nextTriggerAt", RadioAlarmSchedule.earliestNextTrigger(
+                    config, System.currentTimeMillis(), java.util.TimeZone.getDefault()));
+            ret.put("playing", RadioPlaybackService.isPlaying());
+            ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
+            ret.put("notificationsGranted", hasNotificationPermission());
+            ret.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
+
+            RadioAlarmStore.Result last = store.getLastResult();
+            if (last == null) {
+                ret.put("hasLastResult", false);
+            } else {
+                ret.put("hasLastResult", true);
+                ret.put("lastResultTime", last.time);
+                ret.put("lastResultSuccess", last.success);
+                ret.put("lastResultMessage", last.message);
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "getRadioAlarmStatus failed", e);
+            call.reject("讀取早報鬧鐘狀態失敗: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 試播：走與正式觸發**完全相同**的服務入口與來源解析，只有結束時間不同。
+     * 分成兩條路徑是本功能最糟的失敗模式 —— 試播成功讓人放心，早上卻不會響。
+     */
+    @PluginMethod
+    public void testRadioAlarm(PluginCall call) {
+        try {
+            long now = System.currentTimeMillis();
+            Intent intent = new Intent(getContext(), RadioPlaybackService.class);
+            intent.setAction(RadioPlaybackService.ACTION_START);
+            intent.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, now);
+            intent.putExtra(RadioPlaybackService.EXTRA_END_AT, now + RadioAlarmConstants.TEST_PLAY_MS);
+            intent.putExtra(RadioPlaybackService.EXTRA_IS_TEST, true);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(intent);
+            } else {
+                getContext().startService(intent);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("started", true);
+            ret.put("endAt", now + RadioAlarmConstants.TEST_PLAY_MS);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "testRadioAlarm failed", e);
+            call.reject("試播失敗: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void stopRadioAlarm(PluginCall call) {
+        try {
+            Intent intent = new Intent(getContext(), RadioPlaybackService.class);
+            intent.setAction(RadioPlaybackService.ACTION_STOP);
+            getContext().startService(intent);
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "stopRadioAlarm failed", e);
+            call.reject("停止播放失敗: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 取走待寫入錯誤紀錄的失敗摘要。
+     *
+     * 失敗當下不直接寫紀錄：紀錄住在 WebView 的儲存中，而失敗發生時 WebView 多半
+     * 沒有在跑。取走後即清除待寫標記，故同一筆 MUST NOT 被寫入兩次。
+     */
+    @PluginMethod
+    public void consumeRadioAlarmJournal(PluginCall call) {
+        try {
+            RadioAlarmStore.Result pending = new RadioAlarmStore(getContext()).consumeJournal();
+            JSObject ret = new JSObject();
+            if (pending == null) {
+                ret.put("hasEntry", false);
+            } else {
+                ret.put("hasEntry", true);
+                ret.put("time", pending.time);
+                ret.put("message", pending.message);
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "consumeRadioAlarmJournal failed", e);
+            call.reject("讀取早報鬧鐘失敗紀錄失敗: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void requestRadioAlarmNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        if (getPermissionState("notifications") == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "radioAlarmNotificationCallback");
+    }
+
+    @PermissionCallback
+    private void radioAlarmNotificationCallback(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", getPermissionState("notifications") == PermissionState.GRANTED);
+        call.resolve(ret);
+    }
+
+    /** 開啟系統的「鬧鐘與提醒」設定頁（API 31-32 的精確鬧鐘權限可被使用者關閉）。 */
+    @PluginMethod
+    public void openExactAlarmSettings(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+            }
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "openExactAlarmSettings failed", e);
+            call.reject("無法開啟鬧鐘權限設定: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 開啟電池最佳化的**清單**頁。
+     *
+     * 刻意不用會直接跳出請求對話框的 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS ——
+     * 那個動作需要另外宣告 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 權限，為了一個提示
+     * 而多要一個敏感權限並不划算。
+     */
+    @PluginMethod
+    public void openBatteryOptimizationSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "openBatteryOptimizationSettings failed", e);
+            call.reject("無法開啟電池最佳化設定: " + e.getMessage());
+        }
+    }
+
+    private boolean hasNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
+        return getPermissionState("notifications") == PermissionState.GRANTED;
+    }
+
+    private JSObject configToJs(RadioAlarmConfig config) {
+        JSObject ret = new JSObject();
+        ret.put("masterEnabled", config.masterEnabled);
+        ret.put("customStreamUrl", config.customStreamUrl);
+
+        JSArray entries = new JSArray();
+        for (RadioAlarmConfig.Entry entry : config.entries) {
+            JSObject item = new JSObject();
+            item.put("id", entry.id);
+            item.put("time", entry.time);
+            item.put("enabled", entry.enabled);
+            item.put("durationMin", entry.durationMin);
+            entries.put(item);
+        }
+        ret.put("entries", entries);
+        return ret;
     }
 }

@@ -65,6 +65,9 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // Android 內建的 org.json 在 JVM 單元測試中只是 stub（呼叫即拋 Stub!），
+    // 故測試端需要一份真的實作。僅測試用，不進 APK。
+    testImplementation 'org.json:json:20231013'
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
@@ -79,6 +82,11 @@ dependencies {
     // Google Cronet for downloading
     implementation 'com.google.android.gms:play-services-cronet:18.0.1'
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
+
+    // 早報鬧鐘的播放器。不用 android.media.MediaPlayer 的理由見 design.md D3：
+    // 目標是無 Content-Length 的 icecast 型 AAC 串流，MediaPlayer 對這類串流的
+    // 起播延遲與斷線重連依廠牌而異，而早上六點沒有人在旁邊按重試。
+    implementation 'androidx.media3:media3-exoplayer:1.11.1'
 }
 
 apply from: 'capacitor.build.gradle'

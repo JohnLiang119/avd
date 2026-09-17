@@ -46,6 +46,33 @@
             android:name=".KeepAliveService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <!--
+            早報鬧鐘的播放服務。與 KeepAliveService 分開的理由：型別不同
+            （mediaPlayback vs dataSync），生命週期也不同（下載結束會 stopSelf）。
+        -->
+        <service
+            android:name=".RadioPlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+
+        <!--
+            鬧鐘觸發與「會讓既有登錄失效」的系統事件。
+
+            exported="false" 不影響接收系統廣播：系統以 SYSTEM_UID 發送，權限檢查
+            在 exported 之前就已放行；而鬧鐘的 PendingIntent 與本 App 同一個 UID。
+        -->
+        <receiver
+            android:name=".RadioAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
@@ -58,4 +85,16 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+        早報鬧鐘。本 App 為側載發行（GitHub Releases），不受 Play 對 USE_EXACT_ALARM
+        的政策限制；該權限自 API 33 起安裝即授予且不可撤銷，API 31-32 則沿用
+        SCHEDULE_EXACT_ALARM（預設授予但可被關閉，介面會偵測並引導重新開啟）。
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>
