@@ -275,10 +275,25 @@
 
 ## 6. 提交與版本進版
 
-- [ ] 6.1 建立功能 commit（程式、測試、`tasks.md` 進度），`git status --short` 確認未夾帶無關檔案
-- [ ] 6.2 同步七處版號：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`cargo update --workspace --offline`）、`android/app/build.gradle`（`versionName` 與 `versionCode` 皆遞增）
-- [ ] 6.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message`：描述早報鬧鐘功能、預設關閉需手動開啟、Android 限定，版號與 `package.json` 一致（該檔屬工作區 repo，獨立提交）
-- [ ] 6.4 重新執行 5.4 全數通過後建立獨立的進版 commit；**提交與進版期間 MUST NOT 併行執行發布腳本**；完成後告知使用者可手動發布
+- [x] 6.1 建立功能 commit（程式、測試、`tasks.md` 進度），`git status --short` 確認未夾帶無關檔案
+
+  `022354b feat: 早報鬧鐘 - 每日定時播放中廣新聞網直播`
+  24 檔、3763 行新增。`git status --short` 確認無夾帶無關檔案
+  （`components.d.ts` 的三行是 unplugin-vue-components 為新用到的
+  `van-popup`／`van-stepper`／`van-time-picker` 自動產生的）。
+- [x] 6.2 同步七處版號：`package.json`、`package-lock.json`（2 處）、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（`cargo update --workspace --offline`）、`android/app/build.gradle`（`versionName` 與 `versionCode` 皆遞增）
+
+  `fda7341 chore: 版本進版至 v1.0.99`。七處全數同步，
+  `versionCode` 135 → 136，`Cargo.lock` 以 `cargo update --workspace --offline` 更新。
+- [x] 6.3 更新 `avd_s/publish_all.ps1` 的預設 `$Message`：描述早報鬧鐘功能、預設關閉需手動開啟、Android 限定，版號與 `package.json` 一致（該檔屬工作區 repo，獨立提交）
+
+  工作區 repo 的 `1afa173 chore: publish_all.ps1 預設發布說明更新至 v1.0.99`。
+  內嵌版號與 `package.json` 一致，說明中明確寫出「Android 限定、預設關閉、
+  需自行到偏好設定開啟」—— 這是使用者升級後最需要先知道的一件事
+  （否則會以為功能沒生效）。PowerShell 解析檢查通過。
+- [x] 6.4 重新執行 5.4 全數通過後建立獨立的進版 commit；**提交與進版期間 MUST NOT 併行執行發布腳本**；完成後告知使用者可手動發布
+
+  進版前後各跑一次六項驗證，全數通過。發布腳本未執行 —— 依規範由使用者手動執行。
 
 ## 7. 歸檔
 
