@@ -9,6 +9,7 @@ import {
   DEFAULT_VOLUME_PERCENT,
   nextOccurrence,
   describeNextTrigger,
+  describePlaybackState,
   describeStationSummary,
   formatLastResult,
   permissionWarnings,
@@ -38,6 +39,7 @@ const config = (entries: RadioAlarmEntry[], masterEnabled = true): RadioAlarmCon
 const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
   nextTriggerAt: -1,
   playing: false,
+  alarmAudioActive: false,
   exactAlarmAllowed: true,
   notificationsGranted: true,
   manufacturer: 'Google',
@@ -208,6 +210,20 @@ describe('電台收合時的摘要', () => {
     expect(describeStationSummary(config([entry('06:00')], false))).toBe('已關閉');
     expect(describeStationSummary(config([]))).toBe('尚未設定時間');
     expect(describeStationSummary(config([entry('06:00', false)]))).toBe('尚未設定時間');
+  });
+});
+
+describe('播放中的狀態字', () => {
+  it('沒在播放時為空字串，讓摘要照常顯示', () => {
+    expect(describePlaybackState(null)).toBe('');
+    expect(describePlaybackState(status())).toBe('');
+  });
+
+  it('手動直播與鬧鐘分得出來 —— 兩者的音量來源不同', () => {
+    expect(describePlaybackState(status({ playing: true, alarmAudioActive: false })))
+      .toBe('直播中（媒體音量）');
+    expect(describePlaybackState(status({ playing: true, alarmAudioActive: true })))
+      .toBe('播放中（鬧鐘音量）');
   });
 });
 

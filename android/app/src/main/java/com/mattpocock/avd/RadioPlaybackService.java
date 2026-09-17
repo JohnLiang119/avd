@@ -32,13 +32,24 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * 早報鬧鐘的播放服務。
+ * 中廣新聞網的播放服務。
  *
- * **這是唯一的播放入口**：正式觸發與介面上的試播都走這裡，差別只有結束時間。
- * 分成兩條路徑是本功能最糟的失敗模式 —— 試播成功讓人放心，早上卻不會響。
+ * **這是唯一的播放入口**：鬧鐘觸發、試播、手動直播三者都走這裡，共用同一套來源
+ * 解析、重試與通知。分成多條路徑是本功能最糟的失敗模式 —— 試播成功讓人放心，
+ * 早上卻不會響。
  *
- * 音訊屬性採 USAGE_ALARM：走系統的鬧鐘音量，勿擾或靜音時仍會出聲。改用 USAGE_MEDIA
- * 會在靜音時沒有聲音，與「鬧鐘」的預期相悖（見 design.md D3）。
+ * 三種模式只在兩件事上不同（見 {@link #MODE_ALARM} 等的說明）：
+ *
+ * <pre>
+ *   模式    音訊語意        失敗的處理
+ *   alarm   鬧鐘音量        發通知 + 留給錯誤紀錄
+ *   test    鬧鐘音量        只留紀錄（使用者正看著畫面）
+ *   live    媒體音量        只留紀錄
+ * </pre>
+ *
+ * 鬧鐘與試播採 USAGE_ALARM：走系統鬧鐘音量，勿擾或靜音時仍會出聲（見 design.md D3）。
+ * 手動直播採 USAGE_MEDIA —— 鬧鐘能蓋過靜音是因為使用者要求被叫醒，手動按播放
+ * 並沒有這個要求（見 design.md D12）。
  */
 @OptIn(markerClass = UnstableApi.class)
 public class RadioPlaybackService extends Service {
@@ -53,14 +64,38 @@ public class RadioPlaybackService extends Service {
     /** 預定開始時刻：失敗窗自此起算，而非自服務實際啟動起算。 */
     public static final String EXTRA_SCHEDULED_AT = "scheduledAt";
     public static final String EXTRA_END_AT = "endAt";
-    /** 試播時為 true，僅影響結果的記錄方式。 */
-    public static final String EXTRA_IS_TEST = "isTest";
+    /** 本次播放屬於哪一種：{@link #MODE_ALARM}、{@link #MODE_TEST} 或 {@link #MODE_LIVE}。 */
+    public static final String EXTRA_MODE = "mode";
 
-    /** 供前端查詢目前是否正在播放（介面的試播按鈕據此切換為停止）。 */
+    /** 鬧鐘觸發。走鬧鐘音量，失敗要發通知並留給錯誤紀錄。 */
+    public static final String MODE_ALARM = "alarm";
+    /**
+     * 試播。**刻意與鬧鐘完全相同的音訊語意** —— 它的用途就是驗證早上會不會響，
+     * 換成媒體音量就驗不到真正要驗的東西。差別只有長度與「不發失敗通知」
+     * （使用者正看著畫面）。
+     */
+    public static final String MODE_TEST = "test";
+    /**
+     * 手動直播（「我現在就想聽」）。走**媒體音量**：鬧鐘之所以能蓋過靜音與勿擾，
+     * 是因為使用者要求被叫醒；手動按下播放並沒有這個要求，在會議中蓋過靜音
+     * 放出聲音是錯的。
+     */
+    public static final String MODE_LIVE = "live";
+
+    /** 供前端查詢目前是否正在播放（介面的播放鍵據此切換為停止）。 */
     private static volatile boolean playing = false;
+    private static volatile String activeMode = MODE_ALARM;
 
     public static boolean isPlaying() {
         return playing;
+    }
+
+    /**
+     * 目前播放中的是否為鬧鐘語意（鬧鐘或試播）。
+     * {@link MainActivity} 據此決定音量鍵要調哪一條串流。
+     */
+    public static boolean isAlarmAudioActive() {
+        return playing && !MODE_LIVE.equals(activeMode);
     }
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -75,14 +110,15 @@ public class RadioPlaybackService extends Service {
 
     private long scheduledAt = 0L;
     private long endAt = 0L;
-    private boolean isTest = false;
+    private String mode = MODE_ALARM;
     private boolean everReady = false;
 
     private final Runnable stopAtEnd = new Runnable() {
         @Override
         public void run() {
             Log.d(TAG, "planned end reached");
-            if (!isTest) {
+            // 只有鬧鐘的結果才記進「上次播放」—— 試播與手動直播不是鬧鐘的成敗
+            if (MODE_ALARM.equals(mode)) {
                 store.recordSuccess(System.currentTimeMillis(), "播放完成");
             }
             stopEverything();
@@ -112,7 +148,7 @@ public class RadioPlaybackService extends Service {
         String action = intent == null ? null : intent.getAction();
 
         if (ACTION_STOP.equals(action)) {
-            if (!isTest && everReady) {
+            if (MODE_ALARM.equals(mode) && everReady) {
                 store.recordSuccess(System.currentTimeMillis(), "使用者停止播放");
             }
             stopEverything();
@@ -133,7 +169,8 @@ public class RadioPlaybackService extends Service {
 
         long requestedEnd = intent.getLongExtra(EXTRA_END_AT, 0L);
         long requestedScheduled = intent.getLongExtra(EXTRA_SCHEDULED_AT, System.currentTimeMillis());
-        boolean requestedTest = intent.getBooleanExtra(EXTRA_IS_TEST, false);
+        String requestedMode = intent.getStringExtra(EXTRA_MODE);
+        if (requestedMode == null) requestedMode = MODE_ALARM;
 
         if (player != null) {
             // 已在播放：第二筆時間到達時 MUST NOT 中斷或重頭開始，只把結束時間延後到
@@ -150,7 +187,8 @@ public class RadioPlaybackService extends Service {
 
         scheduledAt = requestedScheduled;
         endAt = requestedEnd;
-        isTest = requestedTest;
+        mode = requestedMode;
+        activeMode = requestedMode;
         everReady = false;
 
         startForegroundWithNotification();
@@ -194,7 +232,7 @@ public class RadioPlaybackService extends Service {
             player = new ExoPlayer.Builder(this).build();
             player.setAudioAttributes(
                     new AudioAttributes.Builder()
-                            .setUsage(C.USAGE_ALARM)
+                            .setUsage(MODE_LIVE.equals(mode) ? C.USAGE_MEDIA : C.USAGE_ALARM)
                             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                             .build(),
                     false);
@@ -269,9 +307,13 @@ public class RadioPlaybackService extends Service {
 
     private void fail(String message) {
         Log.e(TAG, "playback failed: " + message);
-        if (isTest) {
+        if (MODE_TEST.equals(mode)) {
             store.recordFailure(System.currentTimeMillis(), "試播失敗：" + message);
+        } else if (MODE_LIVE.equals(mode)) {
+            store.recordFailure(System.currentTimeMillis(), "直播失敗：" + message);
         } else {
+            // 只有鬧鐘會發失敗通知：試播與手動直播時使用者正看著畫面，
+            // 狀態那一行就會顯示原因，再發一則通知只是重複打擾。
             store.recordFailure(System.currentTimeMillis(), message);
             showFailureNotification(message);
         }
@@ -328,7 +370,8 @@ public class RadioPlaybackService extends Service {
             }
         };
         try {
-            audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_ALARM,
+            audioManager.requestAudioFocus(focusListener,
+                    MODE_LIVE.equals(mode) ? AudioManager.STREAM_MUSIC : AudioManager.STREAM_ALARM,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
         } catch (Exception e) {
             Log.e(TAG, "failed to request audio focus", e);
@@ -424,12 +467,17 @@ public class RadioPlaybackService extends Service {
                 this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         String until = new SimpleDateFormat("HH:mm", Locale.US).format(new Date(endAt));
-        String text = everReady
-                ? "播放中，預計 " + until + " 停止"
-                : "正在連線，預計 " + until + " 停止";
+        String state = everReady
+                ? (MODE_LIVE.equals(mode) ? "直播中" : "播放中")
+                : "正在連線";
+        String text = state + "，預計 " + until + " 停止";
+
+        String suffix = "";
+        if (MODE_TEST.equals(mode)) suffix = "（試播）";
+        else if (MODE_LIVE.equals(mode)) suffix = "（直播）";
 
         return new NotificationCompat.Builder(this, RadioAlarmConstants.PLAYBACK_CHANNEL_ID)
-                .setContentTitle(RadioAlarmConstants.STATION_LABEL + (isTest ? "（試播）" : ""))
+                .setContentTitle(RadioAlarmConstants.STATION_LABEL + suffix)
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                 .setContentIntent(RadioAlarmScheduler.buildShowIntent(this))

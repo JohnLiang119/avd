@@ -30,6 +30,14 @@ export const ACTION_GLYPH = {
   deleteFile: '×',
   /** 送出表單 */
   submit: '↓',
+  /**
+   * 停止正在進行的播放。
+   *
+   * 方形即停止，與三角形向右即播放同一套準則（形狀對應動作，不需學習對照表）。
+   * 它與 `play` 出現在**同一個位置**、依狀態互換 —— 兩者是同一顆按鈕的兩個面，
+   * 故不會同時出現而需要互相區辨。
+   */
+  stop: '■',
 } as const;
 
 export type ActionName = keyof typeof ACTION_GLYPH;

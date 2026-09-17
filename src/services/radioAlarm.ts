@@ -43,6 +43,11 @@ export interface RadioAlarmStatus {
   /** 下一次觸發的 epoch 毫秒；沒有任何啟用項目時為 -1 */
   nextTriggerAt: number;
   playing: boolean;
+  /**
+   * 播放中的是否為鬧鐘語意（鬧鐘或試播）。
+   * 手動直播走媒體音量，故為 false —— 介面據此顯示「直播中」而非「播放中」。
+   */
+  alarmAudioActive: boolean;
   exactAlarmAllowed: boolean;
   notificationsGranted: boolean;
   manufacturer: string;
@@ -225,6 +230,18 @@ export function describeStationSummary(config: RadioAlarmConfig): string {
   return `每天 ${shown} · 音量 ${config.volumePercent}%`;
 }
 
+/**
+ * 播放中時取代摘要顯示的狀態字；沒在播放時回傳空字串。
+ *
+ * 手動直播與鬧鐘要分得出來，因為**兩者的音量來源不同** —— 使用者若看到「直播中」
+ * 卻去調鬧鐘音量，會發現怎麼調都沒反應。以文字而非顏色表達：這是狀態不是操作
+ * （見 visual-language 規格）。
+ */
+export function describePlaybackState(status: RadioAlarmStatus | null): string {
+  if (!status || !status.playing) return '';
+  return status.alarmAudioActive ? '播放中（鬧鐘音量）' : '直播中（媒體音量）';
+}
+
 /** 「上次播放結果」的顯示文字。三種狀態：從未觸發、成功、失敗。 */
 export function formatLastResult(status: RadioAlarmStatus | null): string {
   if (!status || !status.hasLastResult || !status.lastResultTime) return '尚未觸發過';
@@ -304,6 +321,7 @@ export const RadioAlarmService = {
     return {
       nextTriggerAt: Number(result?.nextTriggerAt ?? -1),
       playing: Boolean(result?.playing),
+      alarmAudioActive: Boolean(result?.alarmAudioActive),
       exactAlarmAllowed: Boolean(result?.exactAlarmAllowed),
       notificationsGranted: Boolean(result?.notificationsGranted),
       manufacturer: String(result?.manufacturer ?? ''),
@@ -316,6 +334,14 @@ export const RadioAlarmService = {
 
   async test(): Promise<void> {
     await YoutubeDlPlugin.testRadioAlarm();
+  },
+
+  /**
+   * 手動直播。刻意不需要先開啟鬧鐘總開關 ——
+   * 「現在想聽廣播」和「明天早上要被叫醒」是兩件事。
+   */
+  async playLive(): Promise<void> {
+    await YoutubeDlPlugin.playRadioLive();
   },
 
   async stop(): Promise<void> {

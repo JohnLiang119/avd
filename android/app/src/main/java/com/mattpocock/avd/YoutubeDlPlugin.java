@@ -1691,6 +1691,7 @@ public class YoutubeDlPlugin extends Plugin {
             ret.put("nextTriggerAt", RadioAlarmSchedule.earliestNextTrigger(
                     config, System.currentTimeMillis(), java.util.TimeZone.getDefault()));
             ret.put("playing", RadioPlaybackService.isPlaying());
+            ret.put("alarmAudioActive", RadioPlaybackService.isAlarmAudioActive());
             ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
             ret.put("notificationsGranted", hasNotificationPermission());
             ret.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
@@ -1721,9 +1722,9 @@ public class YoutubeDlPlugin extends Plugin {
             long now = System.currentTimeMillis();
             Intent intent = new Intent(getContext(), RadioPlaybackService.class);
             intent.setAction(RadioPlaybackService.ACTION_START);
+            intent.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_TEST);
             intent.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, now);
             intent.putExtra(RadioPlaybackService.EXTRA_END_AT, now + RadioAlarmConstants.TEST_PLAY_MS);
-            intent.putExtra(RadioPlaybackService.EXTRA_IS_TEST, true);
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getContext().startForegroundService(intent);
@@ -1738,6 +1739,42 @@ public class YoutubeDlPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "testRadioAlarm failed", e);
             call.reject("試播失敗: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 手動直播（「我現在就想聽」）。
+     *
+     * 與鬧鐘共用同一個服務與同一套來源解析，差別只有兩件事：走**媒體音量**
+     * （鬧鐘能蓋過靜音是因為使用者要求被叫醒，手動按播放並沒有這個要求），
+     * 以及長度為 LIVE_MAX_MS 的上限而非某一筆鬧鐘的時長。
+     *
+     * 這個功能刻意**不需要**先開啟鬧鐘總開關 —— 「現在想聽廣播」和「明天早上
+     * 要被叫醒」是兩件事。
+     */
+    @PluginMethod
+    public void playRadioLive(PluginCall call) {
+        try {
+            long now = System.currentTimeMillis();
+            Intent intent = new Intent(getContext(), RadioPlaybackService.class);
+            intent.setAction(RadioPlaybackService.ACTION_START);
+            intent.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_LIVE);
+            intent.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, now);
+            intent.putExtra(RadioPlaybackService.EXTRA_END_AT, now + RadioAlarmConstants.LIVE_MAX_MS);
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(intent);
+            } else {
+                getContext().startService(intent);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("started", true);
+            ret.put("endAt", now + RadioAlarmConstants.LIVE_MAX_MS);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "playRadioLive failed", e);
+            call.reject("開始直播失敗: " + e.getMessage());
         }
     }
 

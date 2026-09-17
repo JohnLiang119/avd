@@ -420,6 +420,30 @@
   `npx vue-tsc --noEmit` ✓、`cargo check` ✓、
   `gradlew :app:compileDebugJavaWithJavac` ✓、`gradlew :app:testDebugUnitTest` ✓ 39 passed。
 
-## 9. 歸檔
+## 9. 手動直播（使用者要求後追加）
 
-- [ ] 9.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+使用者要求「加個直播鈕」，位置「放中廣新聞網邊」。已擴充規格（新增「手動收聽直播」
+需求與五個情境）與 design.md 的 D12。
+
+- [x] 9.1 播放服務由「一種行為＋ isTest 旗標」改為三種模式（alarm／test／live），共用同一個服務與同一套來源解析；`test` 刻意維持鬧鐘音量（它要驗的就是早上會不會響），`live` 改走媒體音量；完成方式：`gradlew :app:compileDebugJavaWithJavac` 通過，`grep` 確認 `ACTION_START` 的送出點與 `new ExoPlayer.Builder` 的數量未增加
+
+  `grep` 結果：`ACTION_START` 送出點三處（接收器、試播、直播）皆指向同一個
+  `RadioPlaybackService`；`new ExoPlayer.Builder` 全專案仍只有一處。
+  模式是**參數**不是分岔的實作 —— 分岔才會出現「試播成功、早上不響」。
+
+- [x] 9.2 新增插件方法 `playRadioLive`（3 小時上限、媒體音量），`getRadioAlarmStatus` 多回傳 `alarmAudioActive`；`MainActivity` 的音量鍵改為只在鬧鐘語意的播放時才搶走；完成方式：編譯通過，實機驗證列於 9.5
+
+- [x] 9.3 視覺語言新增 `stop: '■'`（方形即停止，與三角形向右即播放同一套準則），並同步 `visualLanguage.spec.ts` 的兩條斷言；完成方式：`npm test` 綠燈
+
+- [x] 9.4 介面：直播鍵放在電台那一排、**不受總開關約束**，播放中同一位置換成停止；播放中以文字標示是直播（媒體音量）或鬧鐘播放（鬧鐘音量）；設定開著時每 3 秒輪詢狀態，關閉即停；完成方式：`npx vue-tsc --noEmit` 與 `npm run build` 通過，`describePlaybackState` 有測試
+
+  播放狀態字抽為純函式 `describePlaybackState` 並附 2 個測試。要分得出來的理由不是
+  好看：**兩者的音量來源不同**，使用者若看到「直播中」卻去調鬧鐘音量會發現沒反應。
+
+- [ ] 9.5 實機驗證【直播】：鬧鐘總開關關閉時按直播仍可播；靜音／勿擾下按直播**不會**強行出聲；播放中按鈕變停止、按下即停；播放中的狀態文字分得出直播與鬧鐘；通知載明預計停止時間；播放結束後按鈕自行變回播放（輪詢）
+
+- [x] 9.6 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+## 10. 歸檔
+
+- [ ] 10.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）

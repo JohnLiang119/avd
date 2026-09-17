@@ -73,6 +73,7 @@ public class RadioAlarmReceiver extends BroadcastReceiver {
     private void startPlayback(Context context, long scheduledAt, long endAt) {
         Intent service = new Intent(context, RadioPlaybackService.class);
         service.setAction(RadioPlaybackService.ACTION_START);
+        service.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_ALARM);
         service.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, scheduledAt);
         service.putExtra(RadioPlaybackService.EXTRA_END_AT, endAt);
 

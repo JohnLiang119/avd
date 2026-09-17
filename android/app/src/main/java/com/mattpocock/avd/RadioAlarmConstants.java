@@ -53,6 +53,15 @@ public final class RadioAlarmConstants {
     /** 試播長度（毫秒）。試播走與正式觸發完全相同的路徑，只有結束時間不同。 */
     public static final long TEST_PLAY_MS = 30 * 1000L;
 
+    /**
+     * 手動直播的長度上限（毫秒）。
+     *
+     * 「聽到我按停止為止」的正確實作**不是**無限：忘了關的前景服務會一直持有
+     * WakeLock 與 WifiLock 放整天。設一個足夠長但有限的上限，通知上寫明預計
+     * 停止時間，使用者要續聽再按一次即可。
+     */
+    public static final long LIVE_MAX_MS = 3 * 60 * 60 * 1000L;
+
     /** 播放時長的預設值與允許範圍（分鐘）。 */
     public static final int DEFAULT_DURATION_MIN = 30;
     public static final int MIN_DURATION_MIN = 1;

@@ -603,10 +603,21 @@
                 <div style="min-width: 0;">
                   <div style="font-size: 14px; font-weight: 600; color: #0f172a;">中廣新聞網</div>
                   <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-                    {{ radioStationSummary }}
+                    {{ radioPlayingLabel || radioStationSummary }}
                   </div>
                 </div>
                 <div class="radio-station-actions">
+                  <!--
+                    直播鍵。刻意**不受總開關約束** —— 「現在想聽廣播」和「明天早上要被
+                    叫醒」是兩件事，為了聽廣播而去開鬧鐘並不合理。
+                    播放中時同一個位置換成停止（見 visualLanguage 的 stop）。
+                  -->
+                  <van-button
+                    size="mini"
+                    :title="radioStatus?.playing ? '停止播放' : '立即收聽直播'"
+                    :style="GLYPH_BUTTON_STYLE"
+                    @click="onRadioLiveToggle"
+                  >{{ radioStatus?.playing ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
                   <van-button
                     v-if="radioAlarm.masterEnabled"
                     size="mini"
@@ -699,9 +710,10 @@
                   @change="onRadioVolumeChange"
                 />
                 <p style="font-size: 11px; color: #94a3b8; margin: 10px 0 0; line-height: 1.6;">
-                  播放走的是系統的<b>鬧鐘音量</b>，所以手機轉靜音或開勿擾時仍然會響。
-                  這裡的百分比是在鬧鐘音量<b>之下</b>再縮放，不會更動你手機本身的鬧鐘音量設定；
-                  100% 即完全照系統的鬧鐘音量。整體太小聲請到系統設定調整鬧鐘音量。
+                  鬧鐘與試播走系統的<b>鬧鐘音量</b>，所以手機轉靜音或開勿擾時仍然會響；
+                  手動按直播鍵則走<b>媒體音量</b>（手動播放不該蓋過你的靜音設定）。
+                  這裡的百分比是在上述音量<b>之下</b>再縮放，不會更動你手機本身的音量設定；
+                  100% 即完全照系統音量。整體太小聲請到系統設定調整對應的音量。
                 </p>
               </div>
             </van-cell-group>
@@ -1354,6 +1366,7 @@ import { matchPermanentError } from './services/downloadErrors';
 import {
   RadioAlarmService,
   describeNextTrigger,
+  describePlaybackState,
   describeStationSummary,
   formatLastResult,
   permissionWarnings,
@@ -3206,6 +3219,7 @@ const radioStreamUrlError = ref('');
 const radioNow = ref(new Date());
 
 const radioStationSummary = computed(() => describeStationSummary(radioAlarm.value));
+const radioPlayingLabel = computed(() => describePlaybackState(radioStatus.value));
 const radioNextTriggerText = computed(() => describeNextTrigger(radioAlarm.value, radioNow.value));
 const radioLastResultText = computed(() => formatLastResult(radioStatus.value));
 const radioWarnings = computed(() => permissionWarnings(radioStatus.value));
@@ -3221,6 +3235,36 @@ const loadRadioAlarm = async () => {
   } catch (e) {
     reportError('早報鬧鐘', e);
   }
+};
+
+const refreshRadioStatus = async () => {
+  if (isTauri()) return;
+  try {
+    radioStatus.value = await RadioAlarmService.getStatus();
+    radioNow.value = new Date();
+  } catch (e) {
+    console.error('[radioAlarm] 讀取狀態失敗', e);
+  }
+};
+
+/**
+ * 設定開著時輪詢狀態。
+ *
+ * 播放是在服務裡進行的，前端不會被通知；少了這個輪詢，播放結束後直播鍵會一直
+ * 停在「停止」，而試播失敗的原因也不會出現在狀態那一行（規格要求試播即時顯示結果）。
+ * 只在對話框開著時跑，關掉即停 —— 這不是背景工作。
+ */
+let radioStatusTimer: ReturnType<typeof setInterval> | null = null;
+
+const startRadioStatusPolling = () => {
+  if (isTauri() || radioStatusTimer !== null) return;
+  radioStatusTimer = setInterval(() => { void refreshRadioStatus(); }, 3000);
+};
+
+const stopRadioStatusPolling = () => {
+  if (radioStatusTimer === null) return;
+  clearInterval(radioStatusTimer);
+  radioStatusTimer = null;
 };
 
 /** 整包寫回並以回傳值覆蓋本地狀態 —— 原生端會過濾不合法內容，介面要看到過濾後的結果 */
@@ -3333,6 +3377,26 @@ const onRadioStreamUrlBlur = () => {
   void persistRadioAlarm({ ...radioAlarm.value, customStreamUrl });
 };
 
+/**
+ * 直播鍵：沒在播就開始，正在播就停止。
+ *
+ * 不先檢查總開關是刻意的 —— 手動收聽與鬧鐘是兩件獨立的事。
+ */
+const onRadioLiveToggle = async () => {
+  if (isTauri()) return;
+  try {
+    if (radioStatus.value?.playing) {
+      await RadioAlarmService.stop();
+    } else {
+      await RadioAlarmService.playLive();
+      showToast('開始收聽中廣新聞網直播');
+    }
+  } catch (e) {
+    reportError('中廣直播', e);
+  }
+  await refreshRadioStatus();
+};
+
 const onRadioTest = async () => {
   radioAlarmBusy.value = true;
   try {
@@ -3390,10 +3454,18 @@ const drainRadioAlarmJournal = async () => {
 };
 
 watch(showSettingsModal, (open) => {
-  if (!open) return;
+  if (!open) {
+    stopRadioStatusPolling();
+    return;
+  }
   // 每次開啟都自收合開始 —— 這個對話框放不下一個畫面，摘要那一行已交代設定了什麼
   radioStationExpanded.value = false;
   void loadRadioAlarm();
+  startRadioStatusPolling();
+});
+
+onUnmounted(() => {
+  stopRadioStatusPolling();
 });
 
 // 設定項的變更由 useStorage 自動持久化，此處僅提供使用者回饋

@@ -60,7 +60,9 @@ public class MainActivity extends BridgeActivity {
      * 播放結束即還原，否則 App 平常的音量鍵行為會一直被改著。
      */
     private void applyVolumeControlStream() {
-        setVolumeControlStream(RadioPlaybackService.isPlaying()
+        // 只有鬧鐘語意的播放（鬧鐘、試播）才把音量鍵切到鬧鐘音量。
+        // 手動直播走的是媒體音量，那正是音量鍵的預設對象，不需要也不該改。
+        setVolumeControlStream(RadioPlaybackService.isAlarmAudioActive()
                 ? AudioManager.STREAM_ALARM
                 : AudioManager.USE_DEFAULT_STREAM_TYPE);
     }
