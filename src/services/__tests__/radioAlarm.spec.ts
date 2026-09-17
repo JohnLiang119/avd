@@ -9,6 +9,7 @@ import {
   DEFAULT_VOLUME_PERCENT,
   nextOccurrence,
   describeNextTrigger,
+  describeStationSummary,
   formatLastResult,
   permissionWarnings,
   isAggressiveVendor,
@@ -179,6 +180,34 @@ describe('下一次觸發的顯示文字', () => {
     const now = new Date(2026, 8, 17, 5, 0, 0);
     expect(describeNextTrigger(config([entry('06:00', false)]), now)).toBe('沒有啟用中的時間');
     expect(describeNextTrigger(config([]), now)).toBe('沒有啟用中的時間');
+  });
+});
+
+describe('電台收合時的摘要', () => {
+  it('收合著也看得出設定了什麼', () => {
+    const c = config([entry('07:00'), entry('06:00')]);
+    expect(describeStationSummary(c)).toBe('每天 06:00、07:00 · 音量 100%');
+  });
+
+  it('只列啟用中的時間，並依時間排序', () => {
+    const c = config([entry('07:00'), entry('05:30', false), entry('06:00')]);
+    expect(describeStationSummary(c)).toBe('每天 06:00、07:00 · 音量 100%');
+  });
+
+  it('帶出目前的音量比例', () => {
+    const c = { ...config([entry('06:00')]), volumePercent: 60 };
+    expect(describeStationSummary(c)).toBe('每天 06:00 · 音量 60%');
+  });
+
+  it('時段超過三個時改為總數，不把整行撐爆', () => {
+    const c = config([entry('05:00'), entry('06:00'), entry('07:00'), entry('08:00')]);
+    expect(describeStationSummary(c)).toBe('每天 05:00、06:00、07:00 等 4 個時段 · 音量 100%');
+  });
+
+  it('總開關關閉與沒有時間各有各的說法', () => {
+    expect(describeStationSummary(config([entry('06:00')], false))).toBe('已關閉');
+    expect(describeStationSummary(config([]))).toBe('尚未設定時間');
+    expect(describeStationSummary(config([entry('06:00', false)]))).toBe('尚未設定時間');
   });
 });
 

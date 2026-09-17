@@ -201,6 +201,30 @@ function dayDifference(from: Date, to: Date): number {
   return Math.round((b - a) / 86400000);
 }
 
+/**
+ * 電台那一層收合時顯示的摘要。
+ *
+ * 兩層選單的重點在這一行：**收合著也看得出設定了什麼**，不必展開。
+ * 少了它，收合就只是把資訊藏起來，那比原本的長清單更糟。
+ */
+export function describeStationSummary(config: RadioAlarmConfig): string {
+  if (!config.masterEnabled) return '已關閉';
+
+  const times = config.entries
+    .filter((entry) => entry.enabled)
+    .map((entry) => entry.time)
+    .sort();
+
+  if (times.length === 0) return '尚未設定時間';
+
+  // 時段多起來會把這一行撐爆，超過三個就改為總數
+  const shown = times.length > 3
+    ? `${times.slice(0, 3).join('、')} 等 ${times.length} 個時段`
+    : times.join('、');
+
+  return `每天 ${shown} · 音量 ${config.volumePercent}%`;
+}
+
 /** 「上次播放結果」的顯示文字。三種狀態：從未觸發、成功、失敗。 */
 export function formatLastResult(status: RadioAlarmStatus | null): string {
   if (!status || !status.hasLastResult || !status.lastResultTime) return '尚未觸發過';

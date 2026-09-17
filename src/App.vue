@@ -592,20 +592,45 @@
           <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
             早報鬧鐘
           </p>
+          <!--
+            兩層結構，與主佇列的「頻道 > 播放清單」同一套：
+            第一層是電台，收合時以摘要那一行交代設定了什麼；第二層才是時間與細項。
+            預設收合 —— 這個對話框本來就已經放不下一個畫面了。
+          -->
           <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
-            <van-cell title="定時播放中廣新聞網" center label="時間到自動播放，時長到自動停止">
-              <template #right-icon>
-                <van-switch
-                  :model-value="radioAlarm.masterEnabled"
-                  size="18px"
-                  :disabled="radioAlarmBusy"
-                  @update:model-value="onRadioMasterToggle"
-                />
-              </template>
-            </van-cell>
+            <div style="padding: 10px 14px;">
+              <div class="radio-station-header">
+                <div style="min-width: 0;">
+                  <div style="font-size: 14px; font-weight: 600; color: #0f172a;">中廣新聞網</div>
+                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                    {{ radioStationSummary }}
+                  </div>
+                </div>
+                <div class="radio-station-actions">
+                  <van-button
+                    v-if="radioAlarm.masterEnabled"
+                    size="mini"
+                    plain
+                    round
+                    type="primary"
+                    style="color: #64748b; border-color: #e2e8f0; padding: 0 8px;"
+                    @click="radioStationExpanded = !radioStationExpanded"
+                  >{{ radioStationExpanded ? '▲' : '▼' }}</van-button>
+                  <van-switch
+                    :model-value="radioAlarm.masterEnabled"
+                    size="18px"
+                    :disabled="radioAlarmBusy"
+                    @update:model-value="onRadioMasterToggle"
+                  />
+                </div>
+              </div>
+            </div>
           </van-cell-group>
 
-          <div v-if="radioAlarm.masterEnabled" style="margin-top: 8px;">
+          <div
+            v-if="radioAlarm.masterEnabled && radioStationExpanded"
+            class="radio-alarm-detail"
+          >
             <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
               <div style="padding: 4px 12px 8px;">
                 <div
@@ -1329,6 +1354,7 @@ import { matchPermanentError } from './services/downloadErrors';
 import {
   RadioAlarmService,
   describeNextTrigger,
+  describeStationSummary,
   formatLastResult,
   permissionWarnings,
   validateNewTime,
@@ -3171,12 +3197,15 @@ const radioAlarm = ref<RadioAlarmConfig>({
 const radioStatus = ref<RadioAlarmStatus | null>(null);
 const radioAlarmBusy = ref(false);
 const showRadioTimePicker = ref(false);
+/** 電台那一層是否展開。純介面狀態，不需要持久化，預設收合。 */
+const radioStationExpanded = ref(false);
 const radioTimeDraft = ref<string[]>(['06', '00']);
 const radioStreamUrlDraft = ref('');
 const radioStreamUrlError = ref('');
 /** 讓「下一次觸發」的相對敘述（今天／明天）在對話框開著時不會過期 */
 const radioNow = ref(new Date());
 
+const radioStationSummary = computed(() => describeStationSummary(radioAlarm.value));
 const radioNextTriggerText = computed(() => describeNextTrigger(radioAlarm.value, radioNow.value));
 const radioLastResultText = computed(() => formatLastResult(radioStatus.value));
 const radioWarnings = computed(() => permissionWarnings(radioStatus.value));
@@ -3216,6 +3245,10 @@ const onRadioMasterToggle = async (value: boolean) => {
     : radioAlarm.value.entries;
 
   await persistRadioAlarm({ ...radioAlarm.value, masterEnabled: value, entries });
+
+  // 剛開啟時直接展開：使用者要看到自己被預填了哪兩個時間。
+  // 之後重新開啟設定則維持收合（見 showSettingsModal 的 watch）。
+  radioStationExpanded.value = value;
 
   if (!value) return;
 
@@ -3357,7 +3390,10 @@ const drainRadioAlarmJournal = async () => {
 };
 
 watch(showSettingsModal, (open) => {
-  if (open) void loadRadioAlarm();
+  if (!open) return;
+  // 每次開啟都自收合開始 —— 這個對話框放不下一個畫面，摘要那一行已交代設定了什麼
+  radioStationExpanded.value = false;
+  void loadRadioAlarm();
 });
 
 // 設定項的變更由 useStorage 自動持久化，此處僅提供使用者回饋
@@ -4819,6 +4855,32 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   flex-wrap: wrap;
 }
 /*
+  早報鬧鐘的第一層：電台。名稱與摘要可收縮，右側的控制項不壓縮。
+*/
+.radio-station-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.radio-station-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+/*
+  第二層：時間與細項。左側的虛線與主佇列的「頻道 > 播放清單」同一套視覺，
+  傳達的是層級而非裝飾。
+*/
+.radio-alarm-detail {
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px dashed #e2e8f0;
+}
+/*
   早報鬧鐘的時間列。與 .success-action 同樣的道理：時間、時長、啟用開關與移除鍵
   在窄畫面上放不進一行，寧可整列換行也不要把最後一個控制項擠出邊界。
 */
@@ -4928,5 +4990,26 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   color: #0f172a !important;
   background-color: #f8fafc !important;
   font-weight: 500 !important;
+}
+</style>
+
+<!--
+  非 scoped：對話框是 teleport 到 body 的第三方元件，且這條規則本來就該對
+  全部對話框生效。
+-->
+<style>
+/*
+  Vant 的對話框只有在使用 message 屬性時才會捲動（.van-dialog__message 自帶
+  max-height 與 overflow-y）。改用預設插槽放自訂內容時兩者都沒有，而
+  .van-dialog 本身是 overflow: hidden —— 內容一超過畫面就**直接被切掉**，
+  使用者完全拉不動。偏好設定加了早報鬧鐘之後正是這個情況。
+
+  補上與 Vant 自己的 message 版本同一套行為：給高度上限並允許捲動。
+  標題與底部按鈕維持固定，只有中間的內容捲。
+*/
+.van-dialog__content {
+  max-height: 65vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 </style>

@@ -366,6 +366,60 @@
   `gradlew :app:compileDebugJavaWithJavac` ✓、`gradlew :app:testDebugUnitTest` ✓ 39 passed。
   功能與進版分兩個 commit，`publish_all.ps1` 的預設說明同步更新。
 
-## 8. 歸檔
+## 8. 兩層選單與內容可捲動（使用者回報後追加）
 
-- [ ] 8.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+使用者回報「沒法向下拉」並要求「改為 2 層 MENU，如中廣 -> 時間」。兩者其實是同一件事的
+兩面：偏好設定加了早報鬧鐘之後高過一個畫面，而 Vant 的對話框用**預設插槽**時既沒有
+高度上限也沒有捲動（`.van-dialog` 本身是 `overflow: hidden`），超出的部分**直接被切掉**
+—— 不是拉不動，是根本沒有可捲動的區域。已擴充規格（新增「設定介面的內容必須可觸及」
+需求與三個情境）。
+
+- [x] 8.1 對話框內容可捲動：補上 Vant 只在 `message` 屬性時才有的行為（高度上限與 `overflow-y: auto`），以非 scoped 樣式對全部對話框生效；完成方式：`npm run build` 後 `grep` 確認 `.van-dialog__content` 規則進入產物，實機驗證列於 8.4
+
+  以非 scoped 的 `<style>` 區塊補上 `.van-dialog__content { max-height: 65vh;
+  overflow-y: auto; }`。`grep` 確認已進入 `dist/assets/index-*.css`。
+
+  非 scoped 是刻意的：對話框 teleport 到 body，而這條規則本來就該對**全部**對話框
+  生效 —— 頻道管理、關鍵字編輯等在小螢幕上會踩到同一個坑。標題與底部按鈕維持固定，
+  只有中間的內容捲。
+
+  根因值得記下來：Vant 的對話框只有在使用 `message` 屬性時才有捲動
+  （`.van-dialog__message` 自帶 max-height 與 overflow-y）。改用預設插槽放自訂內容時
+  兩者都沒有，而 `.van-dialog` 本身是 `overflow: hidden` —— 超出的部分不是「拉不動」，
+  是**根本沒有可捲動的區域，直接被切掉**。
+- [x] 8.2 設定內容改為兩層：第一層為電台（名稱、摘要、展開鍵、總開關），第二層為時間清單與音量、串流網址、試播與狀態；第二層以虛線左邊界表示層級，與主佇列的「頻道 > 播放清單」同一套；完成方式：`npx vue-tsc --noEmit` 與 `npm run build` 通過，`grep` 確認未引入新色碼
+
+  `npx vue-tsc --noEmit` 與 `npm run build` 通過。`grep` 確認新增區段只用到
+  `#0f172a`／`#64748b`／`#94a3b8`／`#e2e8f0`，未引入新色碼。
+
+  第一層（`.radio-station-header`）：電台名稱、摘要、展開鍵、總開關。
+  第二層（`.radio-alarm-detail`）：時間清單、音量、串流網址、試播與狀態，
+  以 `border-left: 2px dashed` 表示層級 —— 與主佇列的「頻道 > 播放清單 > 子項」
+  同一套視覺，傳達的是結構而非裝飾。
+
+  展開狀態為純介面狀態（`radioStationExpanded`），不持久化。首次開啟總開關時
+  自動展開（使用者要看到自己被預填了哪兩個時間），關閉再開啟設定時回到收合。
+- [x] 8.3 收合時的摘要 `describeStationSummary`：列出啟用中的時間與音量，超過三個時段改為總數以免撐爆整行；總開關關閉與沒有時間各有各的說法；完成方式：`radioAlarm.spec.ts` 涵蓋五種情況，`npm test` 綠燈
+
+  `describeStationSummary` 與 5 個 vitest（`npm test` 416 passed）。
+
+  摘要這一行是兩層選單成不成立的關鍵：**收合著也要看得出設定了什麼**，
+  否則收合只是把資訊藏起來，那比原本的長清單更糟。時段超過三個時改為
+  「05:00、06:00、07:00 等 4 個時段」，避免撐爆整行。
+- [ ] 8.4 實機驗證【版面】：偏好設定可一路捲到底且每個控制項都點得到；收合時摘要看得出設定了什麼；首次開啟總開關會自動展開並看到預填的兩個時間；關閉再開啟設定時回到收合
+
+  **尚未執行 —— 我無法操作實機。** 四項：
+
+  1. 偏好設定可一路捲到底，最下方的「測試版更新」開關點得到
+  2. 收合時摘要顯示「每天 06:00、07:00 · 音量 100%」之類
+  3. 首次開啟總開關 → 自動展開並看到預填的兩個時間
+  4. 關閉設定再開啟 → 回到收合
+- [x] 8.5 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+  六項建置驗證全數通過：`npm run build` ✓、`npm test` ✓ 416 passed、
+  `npx vue-tsc --noEmit` ✓、`cargo check` ✓、
+  `gradlew :app:compileDebugJavaWithJavac` ✓、`gradlew :app:testDebugUnitTest` ✓ 39 passed。
+
+## 9. 歸檔
+
+- [ ] 9.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
