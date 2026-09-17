@@ -444,6 +444,31 @@
 
 - [x] 9.6 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
 
-## 10. 歸檔
+## 10. 可驗證性（使用者提出疑慮後追加）
 
-- [ ] 10.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+使用者問「AVD 關掉就沒用了吧？」。設計上不會，但**當時沒有任何辦法讓他驗證** ——
+試播繞過整段鬧鐘機制，而「下一次觸發」是本程式自己算的，系統中一個鬧鐘都沒有時
+它照樣顯示得很正常。已擴充規格（新增「鬧鐘機制必須可被使用者自行驗證」需求與
+五個情境）與 design.md 的 D13。
+
+- [x] 10.1 向系統回讀登錄狀態：以 `PendingIntent.FLAG_NO_CREATE` 逐一探測已登錄的 id，另以 `getNextAlarmClock()` 與 `getCreatorPackage()` 判斷裝置的下一個鬧鐘是否為本程式的；完成方式：編譯通過，實機驗證列於 10.5
+
+  `getNextAlarmClock()` 回傳的是**整台裝置**的下一個鬧鐘，可能是使用者時鐘 App 的。
+  「不是我們的」不代表我們沒登錄 —— 措辭照這個語意，有一條測試專門釘住它不得謊稱。
+
+- [x] 10.2 一次性自我測試鬧鐘（兩分鐘後）：走 `setAlarmClock` → 接收器 → 前景服務，與早上完全相同；另存於 `self_test_at` 不進 `scheduled_ids`（否則等待期間改設定會被 `rescheduleAll` 連帶取消），不看總開關，可取消；完成方式：編譯通過，實機驗證列於 10.5
+
+- [x] 10.3 響起的事實持久化於 `self_test_fired_at`，由接收器寫入；完成方式：編譯通過
+
+  這是整個設計最關鍵的一點：該記錄只有在**系統把不在前景的程序叫起來**時才會被寫入。
+  使用者關掉 App、回來看到那一行，就得到了他要的答案 —— 而不是我說「設計上不會」。
+
+- [x] 10.4 介面：測試鬧鐘按鈕（登錄／取消），狀態區新增「系統登錄」與「測試鬧鐘」兩行；純函式 `describeSystemRegistration` 與 `describeSelfTest` 附測試；完成方式：`npm test` 綠燈（426 passed，新增 8 個）、`npx vue-tsc --noEmit` 與 `npm run build` 通過
+
+- [ ] 10.5 實機驗證【可驗證性】：按下測試鬧鐘 → **把 AVD 完全關掉（從最近工作列滑掉）** → 兩分鐘後應響起 → 重新開啟 App，「測試鬧鐘」那一行顯示響起時刻；另確認「系統登錄」那一行在正常狀態下顯示已收下的數量，且在系統設定中「強制停止」本程式後會變成「不會響」的警示
+
+- [x] 10.6 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+## 11. 歸檔
+
+- [ ] 11.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）

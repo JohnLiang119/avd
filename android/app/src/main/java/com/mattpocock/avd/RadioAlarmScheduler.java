@@ -100,6 +100,91 @@ public final class RadioAlarmScheduler {
         }
     }
 
+    // ---- 自我測試 ----
+
+    /**
+     * 登錄一次性的自我測試鬧鐘，走與早上**完全相同**的路徑。
+     *
+     * 與一般項目分開存（{@link RadioAlarmStore#setSelfTestAt}），不進 scheduled_ids ——
+     * 否則使用者在等待期間改任何設定，`rescheduleAll` 就會把它一併取消。
+     */
+    public static boolean scheduleSelfTest(Context context, long triggerAt) {
+        AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (manager == null) return false;
+
+        Intent intent = buildFireIntent(context, RadioAlarmConstants.SELF_TEST_ID);
+        intent.putExtra(EXTRA_SCHEDULED_AT, triggerAt);
+        PendingIntent operation = PendingIntent.getBroadcast(
+                context, requestCodeFor(RadioAlarmConstants.SELF_TEST_ID), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        try {
+            manager.setAlarmClock(
+                    new AlarmManager.AlarmClockInfo(triggerAt, buildShowIntent(context)), operation);
+            new RadioAlarmStore(context).setSelfTestAt(triggerAt);
+            return true;
+        } catch (SecurityException e) {
+            Log.e(TAG, "self test setAlarmClock denied", e);
+            return false;
+        }
+    }
+
+    public static void cancelSelfTest(Context context) {
+        cancel(context, RadioAlarmConstants.SELF_TEST_ID);
+        new RadioAlarmStore(context).clearSelfTest();
+    }
+
+    // ---- 回讀系統，供介面呈現證據 ----
+
+    /**
+     * 目前實際存在於系統中的本程式鬧鐘數量。
+     *
+     * 以 {@link PendingIntent#FLAG_NO_CREATE} 探測：回傳 null 即代表那個 PendingIntent
+     * 已不存在（被取消，或整個 App 被強制停止過）。這比「我們自己記得登錄過幾筆」
+     * 有意義得多 —— 使用者擔心的正是「以為有、其實沒有」。
+     */
+    public static int registeredAlarmCount(Context context) {
+        RadioAlarmStore store = new RadioAlarmStore(context);
+        int count = 0;
+        for (String id : store.getScheduledIds()) {
+            if (existingOperation(context, id) != null) count++;
+        }
+        return count;
+    }
+
+    /** 自我測試的鬧鐘是否仍登錄在系統中。 */
+    public static boolean isSelfTestRegistered(Context context) {
+        return existingOperation(context, RadioAlarmConstants.SELF_TEST_ID) != null;
+    }
+
+    /**
+     * 系統的「下一個鬧鐘」（狀態列那個圖示的來源）是否為本程式的。
+     *
+     * 注意這支 API 回傳的是**整台裝置**的下一個鬧鐘，可能是使用者的時鐘 App 的；
+     * 故「不是我們的」不代表我們沒登錄，介面必須照這個語意措辭。
+     */
+    public static boolean systemNextAlarmIsOurs(Context context) {
+        AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (manager == null) return false;
+        AlarmManager.AlarmClockInfo info = manager.getNextAlarmClock();
+        if (info == null || info.getShowIntent() == null) return false;
+        return context.getPackageName().equals(info.getShowIntent().getCreatorPackage());
+    }
+
+    /** 系統的「下一個鬧鐘」時刻；沒有任何鬧鐘時回傳 -1。 */
+    public static long systemNextAlarmAt(Context context) {
+        AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (manager == null) return -1L;
+        AlarmManager.AlarmClockInfo info = manager.getNextAlarmClock();
+        return info == null ? -1L : info.getTriggerTime();
+    }
+
+    private static PendingIntent existingOperation(Context context, String entryId) {
+        return PendingIntent.getBroadcast(
+                context, requestCodeFor(entryId), buildFireIntent(context, entryId),
+                PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     /** 系統是否允許本 App 登錄精確鬧鐘。API 31 以下一律為 true。 */
     public static boolean canScheduleExactAlarms(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;

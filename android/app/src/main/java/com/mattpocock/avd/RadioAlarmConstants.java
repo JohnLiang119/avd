@@ -93,4 +93,21 @@ public final class RadioAlarmConstants {
 
     /** 寫入錯誤紀錄時使用的情境名稱（error-journal 的 context 欄位）。 */
     public static final String JOURNAL_CONTEXT = "早報鬧鐘";
+
+    /**
+     * 自我測試用的識別。
+     *
+     * 存在的理由：**試播證明不了早上會響** —— 它直接啟動播放服務，完全繞過
+     * AlarmManager、接收器與「程序已被回收後被系統叫醒」這一整段。而那一段正是
+     * 使用者唯一真正擔心的部分（「App 關掉是不是就沒用了」），卻沒有任何辦法驗證。
+     *
+     * 自我測試登錄一次性的真鬧鐘，走與早上完全相同的路徑，使用者可以關掉 App 再等它響。
+     */
+    public static final String SELF_TEST_ID = "__selftest__";
+
+    /** 自我測試的等待時間：夠久到可以關掉 App，又不必等太久。 */
+    public static final long SELF_TEST_DELAY_MS = 2 * 60 * 1000L;
+
+    /** 自我測試響起後的播放長度。聽到聲音即達成目的，不需要播滿一首。 */
+    public static final long SELF_TEST_PLAY_MS = 60 * 1000L;
 }

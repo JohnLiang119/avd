@@ -10,7 +10,9 @@ import {
   nextOccurrence,
   describeNextTrigger,
   describePlaybackState,
+  describeSelfTest,
   describeStationSummary,
+  describeSystemRegistration,
   formatLastResult,
   permissionWarnings,
   isAggressiveVendor,
@@ -42,6 +44,12 @@ const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
   alarmAudioActive: false,
   exactAlarmAllowed: true,
   notificationsGranted: true,
+  registeredCount: 0,
+  systemNextAlarmAt: -1,
+  systemNextAlarmIsOurs: false,
+  selfTestAt: -1,
+  selfTestRegistered: false,
+  selfTestFiredAt: -1,
   manufacturer: 'Google',
   hasLastResult: false,
   ...over,
@@ -224,6 +232,73 @@ describe('播放中的狀態字', () => {
       .toBe('直播中（媒體音量）');
     expect(describePlaybackState(status({ playing: true, alarmAudioActive: true })))
       .toBe('播放中（鬧鐘音量）');
+  });
+});
+
+describe('系統登錄狀態', () => {
+  it('沒有狀態時不顯示，關閉時明說', () => {
+    expect(describeSystemRegistration(config([entry('06:00')]), null)).toBe('');
+    expect(describeSystemRegistration(config([entry('06:00')], false), status())).toBe('鬧鐘已關閉');
+  });
+
+  it('系統中沒有本程式的鬧鐘時說清楚不會響，並指向可能的原因', () => {
+    const text = describeSystemRegistration(
+      config([entry('06:00')]),
+      status({ registeredCount: 0 }),
+    );
+    expect(text).toContain('不會響');
+    expect(text).toContain('強制停止');
+  });
+
+  it('系統收下了就報出數量', () => {
+    expect(describeSystemRegistration(
+      config([entry('06:00'), entry('07:00')]),
+      status({ registeredCount: 2, systemNextAlarmIsOurs: true }),
+    )).toBe('系統已收下 2 個鬧鐘，裝置的下一個鬧鐘就是本程式的');
+  });
+
+  it('裝置的下一個鬧鐘屬於別的程式時不謊稱是自己的', () => {
+    // getNextAlarmClock 回傳的是整台裝置的下一個鬧鐘，可能是使用者的時鐘 App 的。
+    // 「不是我們的」不代表我們沒登錄 —— 措辭必須照這個語意。
+    const text = describeSystemRegistration(
+      config([entry('06:00')]),
+      status({ registeredCount: 1, systemNextAlarmIsOurs: false }),
+    );
+    expect(text).toContain('系統已收下 1 個鬧鐘');
+    expect(text).toContain('其他程式');
+  });
+});
+
+describe('自我測試的狀態', () => {
+  const now = new Date(2026, 8, 17, 10, 0, 0);
+
+  it('尚未測試過', () => {
+    expect(describeSelfTest(null, now)).toBe('');
+    expect(describeSelfTest(status(), now)).toBe('尚未測試過');
+  });
+
+  it('已登錄時報出會響的時刻，並告訴使用者現在可以關掉程式', () => {
+    const at = new Date(2026, 8, 17, 10, 2, 30).getTime();
+    const text = describeSelfTest(status({ selfTestRegistered: true, selfTestAt: at }), now);
+    expect(text).toContain('10:02:30');
+    expect(text).toContain('關掉');
+  });
+
+  it('已響起時報出時刻，並點明是系統喚起的', () => {
+    const firedAt = new Date(2026, 8, 17, 9, 58, 3).getTime();
+    const text = describeSelfTest(status({ selfTestFiredAt: firedAt }), now);
+    expect(text).toContain('9/17 09:58:03');
+    expect(text).toContain('系統喚起');
+  });
+
+  it('登錄的時刻已經過去時，改為顯示上次的結果', () => {
+    const past = new Date(2026, 8, 17, 9, 0, 0).getTime();
+    const firedAt = new Date(2026, 8, 17, 9, 0, 1).getTime();
+    const text = describeSelfTest(
+      status({ selfTestRegistered: true, selfTestAt: past, selfTestFiredAt: firedAt }),
+      now,
+    );
+    expect(text).toContain('由系統喚起並響起');
   });
 });
 

@@ -50,6 +50,17 @@ export interface RadioAlarmStatus {
   alarmAudioActive: boolean;
   exactAlarmAllowed: boolean;
   notificationsGranted: boolean;
+  /** 目前**實際存在於系統中**的本程式鬧鐘數量（向系統回讀，不是我們自己記得的） */
+  registeredCount: number;
+  /** 系統的「下一個鬧鐘」時刻，整台裝置共用；-1 代表沒有任何鬧鐘 */
+  systemNextAlarmAt: number;
+  /** 系統的「下一個鬧鐘」是否為本程式的（可能是使用者的時鐘 App 的） */
+  systemNextAlarmIsOurs: boolean;
+  /** 已登錄的自我測試觸發時刻；-1 代表沒有 */
+  selfTestAt: number;
+  selfTestRegistered: boolean;
+  /** 自我測試實際響起的時刻；-1 代表從未響過 */
+  selfTestFiredAt: number;
   manufacturer: string;
   hasLastResult: boolean;
   lastResultTime?: number;
@@ -257,6 +268,62 @@ export function formatLastResult(status: RadioAlarmStatus | null): string {
   return message ? `${stamp} 失敗：${message}` : `${stamp} 失敗`;
 }
 
+/** 共用的時刻格式（M/D HH:mm）。 */
+function stampOf(at: number, withSeconds = false): string {
+  const d = new Date(at);
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const tail = withSeconds ? `:${String(d.getSeconds()).padStart(2, '0')}` : '';
+  return `${d.getMonth() + 1}/${d.getDate()} ${hhmm}${tail}`;
+}
+
+/**
+ * 「系統到底有沒有收下這些鬧鐘」。
+ *
+ * 這一行與 `describeNextTrigger` 的差別是整個功能可信度的關鍵：後者是**本程式自己
+ * 算的**，設定裡寫了 06:00 它就說 06:00，即使系統中根本沒有任何鬧鐘 —— 也就是
+ * 使用者最擔心的那個情況，它什麼都不會說。這一行則來自向系統回讀的結果。
+ */
+export function describeSystemRegistration(
+  config: RadioAlarmConfig,
+  status: RadioAlarmStatus | null,
+): string {
+  if (!status) return '';
+  if (!config.masterEnabled) return '鬧鐘已關閉';
+
+  if (status.registeredCount === 0) {
+    return '系統中沒有本程式的鬧鐘，時間到不會響。請確認未被「強制停止」，並允許自啟動。';
+  }
+  if (status.systemNextAlarmIsOurs) {
+    return `系統已收下 ${status.registeredCount} 個鬧鐘，裝置的下一個鬧鐘就是本程式的`;
+  }
+  return `系統已收下 ${status.registeredCount} 個鬧鐘（裝置的下一個鬧鐘屬於其他程式）`;
+}
+
+/**
+ * 自我測試的狀態。
+ *
+ * 「已響起」這一筆是本功能最有說服力的證據：它由接收器寫入，而接收器只有在
+ * **系統把本程式的程序叫起來**時才會執行 —— 使用者可以按下測試後把應用程式關掉，
+ * 回來看到這一行，就知道關掉之後鬧鐘依然有效。
+ */
+export function describeSelfTest(status: RadioAlarmStatus | null, now: Date): string {
+  if (!status) return '';
+
+  if (status.selfTestRegistered && status.selfTestAt > now.getTime()) {
+    const at = new Date(status.selfTestAt);
+    const hhmmss = `${String(at.getHours()).padStart(2, '0')}:`
+      + `${String(at.getMinutes()).padStart(2, '0')}:`
+      + `${String(at.getSeconds()).padStart(2, '0')}`;
+    return `測試鬧鐘已登錄，${hhmmss} 會響。現在可以把本程式完全關掉再等它。`;
+  }
+
+  if (status.selfTestFiredAt > 0) {
+    return `上次測試：${stampOf(status.selfTestFiredAt, true)} 由系統喚起並響起`;
+  }
+
+  return '尚未測試過';
+}
+
 /**
  * 需要提醒使用者去放行的系統限制。
  *
@@ -324,6 +391,12 @@ export const RadioAlarmService = {
       alarmAudioActive: Boolean(result?.alarmAudioActive),
       exactAlarmAllowed: Boolean(result?.exactAlarmAllowed),
       notificationsGranted: Boolean(result?.notificationsGranted),
+      registeredCount: Number(result?.registeredCount ?? 0),
+      systemNextAlarmAt: Number(result?.systemNextAlarmAt ?? -1),
+      systemNextAlarmIsOurs: Boolean(result?.systemNextAlarmIsOurs),
+      selfTestAt: Number(result?.selfTestAt ?? -1),
+      selfTestRegistered: Boolean(result?.selfTestRegistered),
+      selfTestFiredAt: Number(result?.selfTestFiredAt ?? -1),
       manufacturer: String(result?.manufacturer ?? ''),
       hasLastResult: Boolean(result?.hasLastResult),
       lastResultTime: result?.lastResultTime ? Number(result.lastResultTime) : undefined,
@@ -360,6 +433,16 @@ export const RadioAlarmService = {
   async requestNotificationPermission(): Promise<boolean> {
     const result = await YoutubeDlPlugin.requestRadioAlarmNotificationPermission();
     return Boolean(result?.granted);
+  },
+
+  /** 登錄兩分鐘後的一次性真鬧鐘，走與早上完全相同的路徑。 */
+  async scheduleSelfTest(): Promise<number> {
+    const result = await YoutubeDlPlugin.scheduleRadioAlarmSelfTest();
+    return Number(result?.triggerAt ?? -1);
+  },
+
+  async cancelSelfTest(): Promise<void> {
+    await YoutubeDlPlugin.cancelRadioAlarmSelfTest();
   },
 
   async openExactAlarmSettings(): Promise<void> {

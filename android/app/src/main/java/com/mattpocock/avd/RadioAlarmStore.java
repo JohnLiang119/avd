@@ -29,6 +29,10 @@ public final class RadioAlarmStore {
     /** 已登錄鬧鐘的項目 id 清單，供 rescheduleAll 精準取消已不存在的項目。 */
     private static final String KEY_SCHEDULED_IDS = "scheduled_ids";
 
+    /** 自我測試：已登錄的觸發時刻，以及實際響起的時刻。 */
+    private static final String KEY_SELF_TEST_AT = "self_test_at";
+    private static final String KEY_SELF_TEST_FIRED_AT = "self_test_fired_at";
+
     private static final String KEY_RESULT_TIME = "last_result_time";
     private static final String KEY_RESULT_SUCCESS = "last_result_success";
     private static final String KEY_RESULT_MESSAGE = "last_result_message";
@@ -104,6 +108,41 @@ public final class RadioAlarmStore {
             arr.put(id);
         }
         prefs.edit().putString(KEY_SCHEDULED_IDS, arr.toString()).apply();
+    }
+
+    // ---- 自我測試 ----
+    //
+    // 與設定分開存：自我測試是一次性的驗證，不該出現在使用者的時間清單裡，
+    // 也不該被 rescheduleAll 連帶取消。
+
+    /** @return 已登錄的自我測試觸發時刻；沒有登錄時回傳 -1 */
+    public long getSelfTestAt() {
+        return prefs.getLong(KEY_SELF_TEST_AT, -1L);
+    }
+
+    public void setSelfTestAt(long at) {
+        prefs.edit().putLong(KEY_SELF_TEST_AT, at).apply();
+    }
+
+    /**
+     * 自我測試實際響起的時刻；從未響過回傳 -1。
+     *
+     * **這一筆是本功能最有說服力的證據**：它是在使用者把 App 關掉之後才被寫入的，
+     * 代表系統確實把程序叫了起來。
+     */
+    public long getSelfTestFiredAt() {
+        return prefs.getLong(KEY_SELF_TEST_FIRED_AT, -1L);
+    }
+
+    public void recordSelfTestFired(long at) {
+        prefs.edit()
+                .putLong(KEY_SELF_TEST_FIRED_AT, at)
+                .putLong(KEY_SELF_TEST_AT, -1L)
+                .apply();
+    }
+
+    public void clearSelfTest() {
+        prefs.edit().putLong(KEY_SELF_TEST_AT, -1L).apply();
     }
 
     // ---- 上次播放結果 ----

@@ -1693,6 +1693,14 @@ public class YoutubeDlPlugin extends Plugin {
             ret.put("playing", RadioPlaybackService.isPlaying());
             ret.put("alarmAudioActive", RadioPlaybackService.isAlarmAudioActive());
             ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
+
+            // 向系統回讀，而非回報我們自己記得的 —— 使用者擔心的正是「以為有、其實沒有」
+            ret.put("registeredCount", RadioAlarmScheduler.registeredAlarmCount(getContext()));
+            ret.put("systemNextAlarmAt", RadioAlarmScheduler.systemNextAlarmAt(getContext()));
+            ret.put("systemNextAlarmIsOurs", RadioAlarmScheduler.systemNextAlarmIsOurs(getContext()));
+            ret.put("selfTestAt", store.getSelfTestAt());
+            ret.put("selfTestRegistered", RadioAlarmScheduler.isSelfTestRegistered(getContext()));
+            ret.put("selfTestFiredAt", store.getSelfTestFiredAt());
             ret.put("notificationsGranted", hasNotificationPermission());
             ret.put("manufacturer", Build.MANUFACTURER == null ? "" : Build.MANUFACTURER);
 
@@ -1775,6 +1783,41 @@ public class YoutubeDlPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "playRadioLive failed", e);
             call.reject("開始直播失敗: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 自我測試：登錄一個兩分鐘後的一次性真鬧鐘。
+     *
+     * 存在的理由是**試播證明不了早上會響** —— 試播直接啟動播放服務，繞過
+     * AlarmManager、接收器，以及「程序已被系統回收後再被叫醒」這一整段，
+     * 而那正是使用者唯一真正擔心的部分。自我測試走與早上完全相同的路徑，
+     * 使用者可以按完就把應用程式關掉，等它自己響。
+     */
+    @PluginMethod
+    public void scheduleRadioAlarmSelfTest(PluginCall call) {
+        try {
+            long triggerAt = System.currentTimeMillis() + RadioAlarmConstants.SELF_TEST_DELAY_MS;
+            boolean ok = RadioAlarmScheduler.scheduleSelfTest(getContext(), triggerAt);
+
+            JSObject ret = new JSObject();
+            ret.put("scheduled", ok);
+            ret.put("triggerAt", ok ? triggerAt : -1L);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "scheduleRadioAlarmSelfTest failed", e);
+            call.reject("登錄測試鬧鐘失敗: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void cancelRadioAlarmSelfTest(PluginCall call) {
+        try {
+            RadioAlarmScheduler.cancelSelfTest(getContext());
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "cancelRadioAlarmSelfTest failed", e);
+            call.reject("取消測試鬧鐘失敗: " + e.getMessage());
         }
     }
 

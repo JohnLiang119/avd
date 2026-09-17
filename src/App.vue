@@ -748,7 +748,23 @@
               >停止</van-button>
             </div>
 
+            <!--
+              自我測試。存在的理由是「試播」證明不了早上會響 —— 它直接啟動播放服務，
+              繞過 AlarmManager、接收器，以及「程序被回收後由系統叫醒」這一整段，
+              而那正是使用者唯一真正擔心的部分。
+            -->
+            <van-button
+              size="small"
+              block
+              plain
+              style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
+              :disabled="radioAlarmBusy"
+              @click="onRadioSelfTest"
+            >{{ radioStatus?.selfTestRegistered ? '取消測試鬧鐘' : '兩分鐘後試響一次（可關掉本程式）' }}</van-button>
+
             <div style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.6;">
+              <div>系統登錄：{{ radioSystemRegistrationText }}</div>
+              <div>測試鬧鐘：{{ radioSelfTestText }}</div>
               <div>下一次觸發：{{ radioNextTriggerText }}</div>
               <div>上次播放：{{ radioLastResultText }}</div>
               <div
@@ -1367,7 +1383,9 @@ import {
   RadioAlarmService,
   describeNextTrigger,
   describePlaybackState,
+  describeSelfTest,
   describeStationSummary,
+  describeSystemRegistration,
   formatLastResult,
   permissionWarnings,
   validateNewTime,
@@ -3221,6 +3239,10 @@ const radioNow = ref(new Date());
 const radioStationSummary = computed(() => describeStationSummary(radioAlarm.value));
 const radioPlayingLabel = computed(() => describePlaybackState(radioStatus.value));
 const radioNextTriggerText = computed(() => describeNextTrigger(radioAlarm.value, radioNow.value));
+const radioSystemRegistrationText = computed(
+  () => describeSystemRegistration(radioAlarm.value, radioStatus.value),
+);
+const radioSelfTestText = computed(() => describeSelfTest(radioStatus.value, radioNow.value));
 const radioLastResultText = computed(() => formatLastResult(radioStatus.value));
 const radioWarnings = computed(() => permissionWarnings(radioStatus.value));
 
@@ -3395,6 +3417,33 @@ const onRadioLiveToggle = async () => {
     reportError('中廣直播', e);
   }
   await refreshRadioStatus();
+};
+
+/**
+ * 自我測試：登錄一個兩分鐘後的**真鬧鐘**，走與早上完全相同的路徑。
+ *
+ * 按完就可以把應用程式關掉 —— 這正是要驗的事。
+ */
+const onRadioSelfTest = async () => {
+  radioAlarmBusy.value = true;
+  try {
+    if (radioStatus.value?.selfTestRegistered) {
+      await RadioAlarmService.cancelSelfTest();
+      showToast('已取消測試鬧鐘');
+    } else {
+      const at = await RadioAlarmService.scheduleSelfTest();
+      if (at > 0) {
+        showToast('兩分鐘後會響。現在可以把本程式完全關掉，等它自己響。');
+      } else {
+        showToast('登錄測試鬧鐘失敗，請確認系統是否允許精確鬧鐘');
+      }
+    }
+  } catch (e) {
+    reportError('早報鬧鐘測試', e);
+  } finally {
+    radioAlarmBusy.value = false;
+    await refreshRadioStatus();
+  }
 };
 
 const onRadioTest = async () => {

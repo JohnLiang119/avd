@@ -51,6 +51,19 @@ public class RadioAlarmReceiver extends BroadcastReceiver {
         RadioAlarmScheduler.rescheduleAll(context);
 
         RadioAlarmStore store = new RadioAlarmStore(context);
+
+        if (RadioAlarmConstants.SELF_TEST_ID.equals(entryId)) {
+            // 自我測試：不查設定，總開關關著也要響 —— 它驗的是機制，不是使用者的排程。
+            //
+            // 這一筆記錄是本功能最有說服力的證據：它在使用者把 App 關掉之後才被寫入，
+            // 代表系統確實把已經不在前景的程序叫了起來。
+            long firedAt = System.currentTimeMillis();
+            store.recordSelfTestFired(firedAt);
+            Log.d(TAG, "self test alarm fired at " + firedAt);
+            startPlayback(context, scheduledAt, firedAt + RadioAlarmConstants.SELF_TEST_PLAY_MS);
+            return;
+        }
+
         RadioAlarmConfig config = store.getConfig();
 
         RadioAlarmConfig.Entry entry = null;
