@@ -1644,6 +1644,8 @@ public class YoutubeDlPlugin extends Plugin {
             JSONObject root = new JSONObject();
             root.put("masterEnabled", Boolean.TRUE.equals(call.getBoolean("masterEnabled", false)));
             root.put("customStreamUrl", call.getString("customStreamUrl", ""));
+            root.put("volumePercent", call.getInt("volumePercent",
+                    RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
 
             JSONArray out = new JSONArray();
             JSArray incoming = call.getArray("entries");
@@ -1664,6 +1666,13 @@ public class YoutubeDlPlugin extends Plugin {
 
             // 設定變更 MUST 立即生效，不需重新啟動應用程式。
             RadioAlarmScheduler.rescheduleAll(getContext());
+
+            // 播放進行中時音量比例也 MUST 立即生效，不重新開始播放
+            if (RadioPlaybackService.isPlaying()) {
+                Intent volume = new Intent(getContext(), RadioPlaybackService.class);
+                volume.setAction(RadioPlaybackService.ACTION_SET_VOLUME);
+                getContext().startService(volume);
+            }
 
             call.resolve(configToJs(config));
         } catch (Exception e) {
@@ -1840,6 +1849,7 @@ public class YoutubeDlPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("masterEnabled", config.masterEnabled);
         ret.put("customStreamUrl", config.customStreamUrl);
+        ret.put("volumePercent", config.volumePercent);
 
         JSArray entries = new JSArray();
         for (RadioAlarmConfig.Entry entry : config.entries) {

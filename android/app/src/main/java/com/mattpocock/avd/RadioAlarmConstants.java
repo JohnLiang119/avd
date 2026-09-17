@@ -59,6 +59,16 @@ public final class RadioAlarmConstants {
     public static final int MAX_DURATION_MIN = 180;
 
     /**
+     * 應用程式內音量比例的預設值與允許範圍（%）。
+     *
+     * 這是**在系統鬧鐘音量之下**的縮放，預設 100% 即「完全照系統鬧鐘音量」——
+     * 不加這個設定時的行為，故升級的使用者聽到的音量不會改變。
+     */
+    public static final int DEFAULT_VOLUME_PERCENT = 100;
+    public static final int MIN_VOLUME_PERCENT = 0;
+    public static final int MAX_VOLUME_PERCENT = 100;
+
+    /**
      * 首次開啟總開關且清單為空時預填的時間。
      * 06:00 為《早安新聞》、07:00 為《中廣早報新聞》。
      */

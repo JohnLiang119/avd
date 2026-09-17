@@ -5,6 +5,8 @@ import {
   validateNewTime,
   validateStreamUrl,
   clampDuration,
+  clampVolume,
+  DEFAULT_VOLUME_PERCENT,
   nextOccurrence,
   describeNextTrigger,
   formatLastResult,
@@ -29,6 +31,7 @@ const config = (entries: RadioAlarmEntry[], masterEnabled = true): RadioAlarmCon
   masterEnabled,
   entries,
   customStreamUrl: '',
+  volumePercent: 100,
 });
 
 const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
@@ -92,6 +95,15 @@ describe('時長與串流網址', () => {
     expect(clampDuration(30)).toBe(30);
     expect(clampDuration(29.6)).toBe(30);
     expect(clampDuration(Number.NaN)).toBe(DEFAULT_DURATION_MIN);
+  });
+
+  it('音量比例夾在 0 到 100', () => {
+    expect(clampVolume(-1)).toBe(0);
+    expect(clampVolume(101)).toBe(100);
+    expect(clampVolume(0)).toBe(0);
+    expect(clampVolume(50)).toBe(50);
+    expect(clampVolume(49.6)).toBe(50);
+    expect(clampVolume(Number.NaN)).toBe(DEFAULT_VOLUME_PERCENT);
   });
 
   it('空網址代表使用官方來源', () => {
@@ -243,6 +255,16 @@ describe('插件回傳的收斂', () => {
     expect(result.masterEnabled).toBe(false);
     expect(result.entries).toEqual([]);
     expect(result.customStreamUrl).toBe('');
+  });
+
+  it('音量缺欄位時讀成 100，而不是 0', () => {
+    // 舊版寫入的設定沒有這個欄位。讀成 0 會讓使用者以為鬧鐘壞了。
+    expect(normalizeConfig({ masterEnabled: true, entries: [] }).volumePercent).toBe(100);
+    expect(normalizeConfig({ volumePercent: null }).volumePercent).toBe(100);
+    expect(normalizeConfig({ volumePercent: 40 }).volumePercent).toBe(40);
+    expect(normalizeConfig({ volumePercent: 0 }).volumePercent).toBe(0);
+    expect(normalizeConfig({ volumePercent: 999 }).volumePercent).toBe(100);
+    expect(normalizeConfig({ volumePercent: -5 }).volumePercent).toBe(0);
   });
 
   it('剔除時間不合法的項目並正規化其餘', () => {

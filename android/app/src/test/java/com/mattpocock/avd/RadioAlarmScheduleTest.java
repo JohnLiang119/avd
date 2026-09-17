@@ -115,7 +115,7 @@ public class RadioAlarmScheduleTest {
         List<RadioAlarmConfig.Entry> entries = new ArrayList<RadioAlarmConfig.Entry>();
         entries.add(new RadioAlarmConfig.Entry("a", "06:00", true, 30));
         entries.add(new RadioAlarmConfig.Entry("b", "07:00", true, 30));
-        RadioAlarmConfig config = new RadioAlarmConfig(true, entries, "");
+        RadioAlarmConfig config = new RadioAlarmConfig(true, entries, "", 100);
 
         long now = at(TAIPEI, 2026, 9, 17, 6, 30, 0);
 
@@ -133,9 +133,9 @@ public class RadioAlarmScheduleTest {
         long now = at(TAIPEI, 2026, 9, 17, 5, 0, 0);
 
         assertEquals(at(TAIPEI, 2026, 9, 17, 7, 0, 0),
-                RadioAlarmSchedule.earliestNextTrigger(new RadioAlarmConfig(true, entries, ""), now, TAIPEI));
+                RadioAlarmSchedule.earliestNextTrigger(new RadioAlarmConfig(true, entries, "", 100), now, TAIPEI));
         assertEquals(-1L,
-                RadioAlarmSchedule.earliestNextTrigger(new RadioAlarmConfig(false, entries, ""), now, TAIPEI));
+                RadioAlarmSchedule.earliestNextTrigger(new RadioAlarmConfig(false, entries, "", 100), now, TAIPEI));
     }
 
     @Test

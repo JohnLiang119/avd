@@ -656,6 +656,32 @@
             </van-cell-group>
 
             <van-cell-group inset style="margin: 8px 0 0; border: 1px solid #e2e8f0;">
+              <div style="padding: 10px 14px 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <span style="font-size: 14px; color: #0f172a;">音量</span>
+                  <span style="font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums;">
+                    {{ radioAlarm.volumePercent }}%
+                  </span>
+                </div>
+                <van-slider
+                  :model-value="radioAlarm.volumePercent"
+                  :min="0"
+                  :max="100"
+                  :step="5"
+                  bar-height="3px"
+                  active-color="#64748b"
+                  inactive-color="#e2e8f0"
+                  @change="onRadioVolumeChange"
+                />
+                <p style="font-size: 11px; color: #94a3b8; margin: 10px 0 0; line-height: 1.6;">
+                  播放走的是系統的<b>鬧鐘音量</b>，所以手機轉靜音或開勿擾時仍然會響。
+                  這裡的百分比是在鬧鐘音量<b>之下</b>再縮放，不會更動你手機本身的鬧鐘音量設定；
+                  100% 即完全照系統的鬧鐘音量。整體太小聲請到系統設定調整鬧鐘音量。
+                </p>
+              </div>
+            </van-cell-group>
+
+            <van-cell-group inset style="margin: 8px 0 0; border: 1px solid #e2e8f0;">
               <van-field
                 v-model="radioStreamUrlDraft"
                 label="串流網址"
@@ -1308,6 +1334,7 @@ import {
   validateNewTime,
   validateStreamUrl,
   clampDuration,
+  clampVolume,
   defaultEntries,
   DEFAULT_DURATION_MIN,
   type RadioAlarmConfig,
@@ -3135,7 +3162,12 @@ const testModeEnabled = storage.defineSetting('avd_test_mode_enabled', false);
 // 未執行時響，而前端的儲存埠此時讀不到，故前端不保有可獨立寫入的副本 ——
 // 開啟設定時自插件讀，變更時整包寫回。
 
-const radioAlarm = ref<RadioAlarmConfig>({ masterEnabled: false, entries: [], customStreamUrl: '' });
+const radioAlarm = ref<RadioAlarmConfig>({
+  masterEnabled: false,
+  entries: [],
+  customStreamUrl: '',
+  volumePercent: 100,
+});
 const radioStatus = ref<RadioAlarmStatus | null>(null);
 const radioAlarmBusy = ref(false);
 const showRadioTimePicker = ref(false);
@@ -3244,6 +3276,18 @@ const onRadioTimeConfirm = () => {
 const removeRadioEntry = (id: string) => {
   const entries = radioAlarm.value.entries.filter((entry) => entry.id !== id);
   void persistRadioAlarm({ ...radioAlarm.value, entries });
+};
+
+/**
+ * 音量比例的變更。
+ *
+ * 用 `@change`（放開才觸發）而非 `@update:model-value`（拖曳中連續觸發）：
+ * 後者會在一次拖曳中送出數十次寫入與重新排程。播放進行中時原生端會即時套用。
+ */
+const onRadioVolumeChange = (value: number) => {
+  const volumePercent = clampVolume(Number(value));
+  if (volumePercent === radioAlarm.value.volumePercent) return;
+  void persistRadioAlarm({ ...radioAlarm.value, volumePercent });
 };
 
 const onRadioStreamUrlBlur = () => {

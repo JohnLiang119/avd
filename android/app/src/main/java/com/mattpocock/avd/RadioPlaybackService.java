@@ -47,6 +47,8 @@ public class RadioPlaybackService extends Service {
 
     public static final String ACTION_START = "com.mattpocock.avd.RADIO_PLAY_START";
     public static final String ACTION_STOP = "com.mattpocock.avd.RADIO_PLAY_STOP";
+    /** 設定中的音量比例已變更：播放中即時套用，不重建播放器。 */
+    public static final String ACTION_SET_VOLUME = "com.mattpocock.avd.RADIO_SET_VOLUME";
 
     /** 預定開始時刻：失敗窗自此起算，而非自服務實際啟動起算。 */
     public static final String EXTRA_SCHEDULED_AT = "scheduledAt";
@@ -117,6 +119,13 @@ public class RadioPlaybackService extends Service {
             return START_NOT_STICKY;
         }
 
+        if (ACTION_SET_VOLUME.equals(action)) {
+            // 播放中變更音量比例 MUST 立即生效且不中斷播放。沒在播就什麼都不必做 ——
+            // 下次播放時 preparePlayer 自然會讀到新值。
+            applyVolume();
+            return START_NOT_STICKY;
+        }
+
         if (!ACTION_START.equals(action)) {
             stopEverything();
             return START_NOT_STICKY;
@@ -154,6 +163,8 @@ public class RadioPlaybackService extends Service {
 
     private void beginPlayback() {
         playing = true;
+        // 讓開著的畫面把音量鍵切到鬧鐘音量上（見 design.md D11）
+        MainActivity.notifyPlaybackStateChanged();
 
         long deadline = scheduledAt + RadioAlarmConstants.FAILURE_WINDOW_MS;
         handler.postDelayed(giveUp, Math.max(1000L, deadline - System.currentTimeMillis()));
@@ -213,12 +224,31 @@ public class RadioPlaybackService extends Service {
                 }
             });
 
+            applyVolume();
+
             player.setMediaItem(MediaItem.fromUri(Uri.parse(url)));
             player.prepare();
             player.setPlayWhenReady(true);
             Log.d(TAG, "preparing " + url);
         } catch (Exception e) {
             fail("建立播放器失敗：" + e);
+        }
+    }
+
+    /**
+     * 套用設定中的音量比例。
+     *
+     * 這是**在系統鬧鐘音量之下**的縮放（`Player.setVolume`），不動裝置的鬧鐘音量設定 ——
+     * 改後者會連使用者真正的鬧鐘一起改掉（見 design.md D11）。
+     */
+    private void applyVolume() {
+        if (player == null) return;
+        try {
+            float gain = store.getConfig().volumeGain();
+            player.setVolume(gain);
+            Log.d(TAG, "volume gain applied: " + gain);
+        } catch (Exception e) {
+            Log.e(TAG, "failed to apply volume", e);
         }
     }
 
@@ -250,6 +280,8 @@ public class RadioPlaybackService extends Service {
 
     private void stopEverything() {
         playing = false;
+        // 還原音量鍵原本的行為，否則 App 平常的音量鍵會一直停在鬧鐘音量上
+        MainActivity.notifyPlaybackStateChanged();
         handler.removeCallbacks(stopAtEnd);
         handler.removeCallbacks(giveUp);
 

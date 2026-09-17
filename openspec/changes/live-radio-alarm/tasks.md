@@ -295,6 +295,77 @@
 
   進版前後各跑一次六項驗證，全數通過。發布腳本未執行 —— 依規範由使用者手動執行。
 
-## 7. 歸檔
+## 7. 音量控制（第 1～6 組完成後追加）
 
-- [ ] 7.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+使用者在驗收前提出「聲音沒法控制？」，點出原設計的兩個缺口：想調小聲只能去改整台
+手機的鬧鐘音量（連帶影響真正的鬧鐘），而早上被吵醒後打開 App 按音量鍵調到的是
+媒體音量。已擴充 `live-radio-alarm` 規格（新增「音量的控制與說明」需求與四個情境）
+與 design.md 的 D11。**漸強未納入本次範圍。**
+
+- [x] 7.1 `RadioAlarmConfig` 新增 `volumePercent`（0–100，預設 100）與其夾值、序列化；完成方式：JUnit 涵蓋 -1／101／缺欄位／損毀值，`gradlew :app:testDebugUnitTest` 綠燈
+
+  `RadioAlarmConfig` 新增 `volumePercent`（0–100，預設 100）、`clampVolume` 與
+  `volumeGain()`（回傳 0.0–1.0 給播放器）。新增 3 個 JUnit（共 39 個、0 失敗）。
+
+  其中一條專門釘住**舊版設定沒有這個欄位時要讀成 100 而不是 0** ——
+  讀成 0 會讓升級的使用者以為鬧鐘壞了，而且那種「沒有聲音」最難查。
+- [x] 7.2 `RadioPlaybackService` 於備妥播放器時套用 `player.setVolume(volumePercent / 100f)`，並新增 `ACTION_SET_VOLUME`：播放中收到即重讀設定並套用，不重建播放器；`setRadioAlarmConfig` 在服務播放中時送出該動作；完成方式：編譯通過，實機驗證列於 8.6
+
+  **程式已完成並通過編譯與 39 個 JUnit；完成方式所列的實機驗證列於 7.6。**
+
+  `preparePlayer` 備妥播放器後即 `applyVolume()`；新增 `ACTION_SET_VOLUME`，
+  播放中收到就重讀設定並套用，**不重建播放器**（沒在播放時什麼都不做 ——
+  下次播放時 `preparePlayer` 自然會讀到新值）。`setRadioAlarmConfig` 在
+  `RadioPlaybackService.isPlaying()` 為真時送出該動作。
+
+  用 `Player.setVolume` 而非 `AudioManager.setStreamVolume`：後者會改掉裝置的
+  鬧鐘音量設定，使用者真正的鬧鐘會跟著變。`grep` 確認全專案沒有 `setStreamVolume`。
+- [x] 7.3 `MainActivity` 於播放期間 `setVolumeControlStream(STREAM_ALARM)`、停止後還原為 `USE_DEFAULT_STREAM_TYPE`；Activity 於 `onResume` 依目前狀態決定，服務於開始與停止時主動通知（以 WeakReference 持有，Activity 不存在時不做事）；完成方式：編譯通過，實機驗證列於 8.6
+
+  **程式已完成並通過編譯；完成方式所列的實機驗證列於 7.6。**
+
+  `MainActivity` 於 `onResume` 依 `RadioPlaybackService.isPlaying()` 決定
+  `setVolumeControlStream`，播放中為 `STREAM_ALARM`、否則還原為
+  `USE_DEFAULT_STREAM_TYPE`；服務在播放開始與停止時呼叫
+  `MainActivity.notifyPlaybackStateChanged()`。
+
+  Activity 以 `WeakReference` 持有（靜態強參考會讓 Activity 無法被回收），
+  畫面不存在時什麼都不做 —— 那表示沒有人在按音量鍵。
+
+  編譯時踩到一個小陷阱：Capacitor 的 `BridgeActivity` 把 `onResume`／`onPause`
+  宣告為 `public`，以 `protected` 覆寫會因降低可見性而編譯失敗。已改為 `public`。
+- [x] 7.4 前端 `radioAlarm.ts` 的型別與 `normalizeConfig` 納入 `volumePercent`，新增 `clampVolume`；完成方式：`radioAlarm.spec.ts` 涵蓋越界與缺欄位，`npm test` 綠燈
+
+  `radioAlarm.ts` 的型別、`normalizeConfig`、`setConfig` 納入 `volumePercent`，
+  新增 `clampVolume` 與上下限常數。新增 2 個 vitest（`npm test` 411 passed）。
+  同樣有一條釘住「缺欄位讀成 100 而非 0」。
+- [x] 7.5 設定介面新增音量滑桿（`van-slider`，顯示百分比）與**說明文字**：音量跟隨系統鬧鐘音量、此比例在其之下縮放、勿擾模式仍會出聲；完成方式：`npx vue-tsc --noEmit` 與 `npm run build` 通過，`grep` 確認未引入新色碼
+
+  `npx vue-tsc --noEmit` 與 `npm run build` 通過。滑桿用 `van-slider`
+  （0–100、step 5），以 `@change`（放開才觸發）而非 `@update:model-value`
+  綁定 —— 後者會在一次拖曳中送出數十次寫入與重新排程。
+
+  說明文字補上了 design.md 風險欄要求、但第一版**漏做**的那段：
+  講明播放走系統鬧鐘音量（所以靜音／勿擾仍會響）、這個百分比是在其之下縮放、
+  不會更動手機本身的鬧鐘音量設定，以及整體太小聲時該去哪裡調。
+
+  `grep` 確認新增區段只用到 `#0f172a`／`#64748b`／`#94a3b8`／`#e2e8f0`，
+  未引入新色碼。
+- [ ] 7.6 實機驗證【音量】：比例調 50% 後觸發音量明顯變小且系統鬧鐘音量設定未變；播放中調整立即生效且不中斷；播放中開著 App 按音量鍵調到的是鬧鐘音量、媒體音量不變；停止後 App 的音量鍵行為回復正常
+
+  **尚未執行 —— 我無法操作實機。** 四項：
+
+  1. 比例調 50% → 觸發後音量明顯變小；到系統設定確認**鬧鐘音量的設定值沒有被改掉**
+  2. 播放中拖動滑桿 → 音量立即改變、播放不中斷、不重頭開始
+  3. 播放中開著 App 按音量鍵 → 調到的是鬧鐘音量（音量面板顯示鬧鐘），媒體音量不變
+  4. 停止播放後再按音量鍵 → 回到 App 平常的行為（媒體音量）
+- [x] 7.7 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+  六項建置驗證全數通過：`npm run build` ✓、`npm test` ✓ 411 passed、
+  `npx vue-tsc --noEmit` ✓、`cargo check` ✓、
+  `gradlew :app:compileDebugJavaWithJavac` ✓、`gradlew :app:testDebugUnitTest` ✓ 39 passed。
+  功能與進版分兩個 commit，`publish_all.ps1` 的預設說明同步更新。
+
+## 8. 歸檔
+
+- [ ] 8.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）

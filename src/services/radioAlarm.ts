@@ -30,6 +30,13 @@ export interface RadioAlarmConfig {
   entries: RadioAlarmEntry[];
   /** 空字串代表使用官方來源 */
   customStreamUrl: string;
+  /**
+   * 應用程式內的音量比例（0–100）。
+   *
+   * 這是**在系統鬧鐘音量之下**的縮放，不是系統音量本身 —— 去改系統鬧鐘音量
+   * 會連使用者真正的鬧鐘一起改掉。100% 即「完全照系統鬧鐘音量」。
+   */
+  volumePercent: number;
 }
 
 export interface RadioAlarmStatus {
@@ -114,6 +121,19 @@ export function clampDuration(value: number): number {
   const rounded = Math.round(value);
   if (rounded < MIN_DURATION_MIN) return MIN_DURATION_MIN;
   if (rounded > MAX_DURATION_MIN) return MAX_DURATION_MIN;
+  return rounded;
+}
+
+/** 音量比例的允許範圍與預設值，與原生端的常數一致。 */
+export const MIN_VOLUME_PERCENT = 0;
+export const MAX_VOLUME_PERCENT = 100;
+export const DEFAULT_VOLUME_PERCENT = 100;
+
+export function clampVolume(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_VOLUME_PERCENT;
+  const rounded = Math.round(value);
+  if (rounded < MIN_VOLUME_PERCENT) return MIN_VOLUME_PERCENT;
+  if (rounded > MAX_VOLUME_PERCENT) return MAX_VOLUME_PERCENT;
   return rounded;
 }
 
@@ -244,6 +264,7 @@ export const RadioAlarmService = {
     const result = await YoutubeDlPlugin.setRadioAlarmConfig({
       masterEnabled: config.masterEnabled,
       customStreamUrl: config.customStreamUrl ?? '',
+      volumePercent: clampVolume(Number(config.volumePercent)),
       entries: config.entries.map((entry) => ({
         id: entry.id,
         time: entry.time,
@@ -317,6 +338,10 @@ export function normalizeConfig(raw: any): RadioAlarmConfig {
     masterEnabled: Boolean(raw?.masterEnabled),
     entries,
     customStreamUrl: String(raw?.customStreamUrl ?? ''),
+    // 舊版寫入的設定沒有這個欄位，必須讀成 100 —— 讀成 0 會讓人以為鬧鐘壞了
+    volumePercent: raw?.volumePercent === undefined || raw?.volumePercent === null
+      ? DEFAULT_VOLUME_PERCENT
+      : clampVolume(Number(raw.volumePercent)),
   };
 }
 

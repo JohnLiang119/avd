@@ -66,6 +66,23 @@ public class RadioAlarmConfigTest {
     }
 
     @Test
+    public void clampsVolumeIntoRange() {
+        assertEquals(RadioAlarmConstants.MIN_VOLUME_PERCENT, RadioAlarmConfig.clampVolume(-1));
+        assertEquals(RadioAlarmConstants.MAX_VOLUME_PERCENT, RadioAlarmConfig.clampVolume(101));
+        assertEquals(0, RadioAlarmConfig.clampVolume(0));
+        assertEquals(50, RadioAlarmConfig.clampVolume(50));
+        assertEquals(100, RadioAlarmConfig.clampVolume(100));
+    }
+
+    @Test
+    public void volumeGainIsTheFractionAppliedToThePlayer() {
+        List<RadioAlarmConfig.Entry> none = new ArrayList<RadioAlarmConfig.Entry>();
+        assertEquals(1.0f, new RadioAlarmConfig(true, none, "", 100).volumeGain(), 0.0001f);
+        assertEquals(0.5f, new RadioAlarmConfig(true, none, "", 50).volumeGain(), 0.0001f);
+        assertEquals(0.0f, new RadioAlarmConfig(true, none, "", 0).volumeGain(), 0.0001f);
+    }
+
+    @Test
     public void acceptsOnlyHttpStreamUrls() {
         assertTrue(RadioAlarmConfig.isValidStreamUrl(""));
         assertTrue(RadioAlarmConfig.isValidStreamUrl(null));
@@ -85,6 +102,28 @@ public class RadioAlarmConfigTest {
         assertTrue(config.entries.isEmpty());
         assertEquals("", config.customStreamUrl);
         assertTrue(config.enabledEntries().isEmpty());
+        assertEquals("預設 100% 即「完全照系統鬧鐘音量」，升級的使用者聽到的音量不變",
+                RadioAlarmConstants.DEFAULT_VOLUME_PERCENT, config.volumePercent);
+    }
+
+    @Test
+    public void volumeSurvivesAndIsClampedWhenParsed() {
+        String json = "{'masterEnabled':true,'volumePercent':40,'entries':[]}";
+        assertEquals(40, RadioAlarmConfig.fromJson(json.replace('\'', '"')).volumePercent);
+
+        String tooHigh = "{'masterEnabled':true,'volumePercent':999,'entries':[]}";
+        assertEquals(100, RadioAlarmConfig.fromJson(tooHigh.replace('\'', '"')).volumePercent);
+
+        String negative = "{'masterEnabled':true,'volumePercent':-5,'entries':[]}";
+        assertEquals(0, RadioAlarmConfig.fromJson(negative.replace('\'', '"')).volumePercent);
+
+        String garbage = "{'masterEnabled':true,'volumePercent':'loud','entries':[]}";
+        assertEquals("非數字時回到預設，而非讓整份設定失效",
+                100, RadioAlarmConfig.fromJson(garbage.replace('\'', '"')).volumePercent);
+
+        String missing = "{'masterEnabled':true,'entries':[]}";
+        assertEquals("舊版寫入的設定沒有這個欄位，必須讀成預設的 100",
+                100, RadioAlarmConfig.fromJson(missing.replace('\'', '"')).volumePercent);
     }
 
     @Test
@@ -107,8 +146,8 @@ public class RadioAlarmConfigTest {
         entries.add(new RadioAlarmConfig.Entry("a", "06:00", true, 30));
         entries.add(new RadioAlarmConfig.Entry("b", "07:00", false, 30));
 
-        assertEquals(1, new RadioAlarmConfig(true, entries, "").enabledEntries().size());
-        assertEquals(0, new RadioAlarmConfig(false, entries, "").enabledEntries().size());
+        assertEquals(1, new RadioAlarmConfig(true, entries, "", 100).enabledEntries().size());
+        assertEquals(0, new RadioAlarmConfig(false, entries, "", 100).enabledEntries().size());
     }
 
     // ---- 反序列化的防守 ----
@@ -205,12 +244,13 @@ public class RadioAlarmConfigTest {
         List<RadioAlarmConfig.Entry> entries = new ArrayList<RadioAlarmConfig.Entry>();
         entries.add(new RadioAlarmConfig.Entry("a", "06:00", true, 10));
         entries.add(new RadioAlarmConfig.Entry("b", "07:00", false, 25));
-        RadioAlarmConfig original = new RadioAlarmConfig(true, entries, "https://example.com/live.aac");
+        RadioAlarmConfig original = new RadioAlarmConfig(true, entries, "https://example.com/live.aac", 70);
 
         RadioAlarmConfig restored = RadioAlarmConfig.fromJson(original.toJson());
 
         assertEquals(original.masterEnabled, restored.masterEnabled);
         assertEquals(original.customStreamUrl, restored.customStreamUrl);
+        assertEquals(original.volumePercent, restored.volumePercent);
         assertEquals(original.entries.size(), restored.entries.size());
         for (int i = 0; i < original.entries.size(); i++) {
             assertEquals(original.entries.get(i).id, restored.entries.get(i).id);

@@ -49,16 +49,31 @@ public final class RadioAlarmConfig {
     public final List<Entry> entries;
     /** 空字串代表「使用官方來源」，非空則直接使用且不查官方。 */
     public final String customStreamUrl;
+    /**
+     * 應用程式內的音量比例（0–100）。
+     *
+     * 這是**在系統鬧鐘音量之下**的縮放，不是系統音量本身：改系統音量會連使用者
+     * 真正的鬧鐘一起改掉，那是替他做了沒要求的決定（見 design.md D11）。
+     */
+    public final int volumePercent;
 
-    public RadioAlarmConfig(boolean masterEnabled, List<Entry> entries, String customStreamUrl) {
+    public RadioAlarmConfig(boolean masterEnabled, List<Entry> entries, String customStreamUrl,
+                            int volumePercent) {
         this.masterEnabled = masterEnabled;
         this.entries = Collections.unmodifiableList(new ArrayList<Entry>(entries));
         this.customStreamUrl = customStreamUrl == null ? "" : customStreamUrl;
+        this.volumePercent = clampVolume(volumePercent);
     }
 
-    /** 全新安裝的預設值：**總開關關閉**、清單為空。升級的使用者不會被無預警叫醒。 */
+    /** 全新安裝的預設值：**總開關關閉**、清單為空、音量比例 100%。 */
     public static RadioAlarmConfig defaults() {
-        return new RadioAlarmConfig(false, new ArrayList<Entry>(), "");
+        return new RadioAlarmConfig(false, new ArrayList<Entry>(), "",
+                RadioAlarmConstants.DEFAULT_VOLUME_PERCENT);
+    }
+
+    /** 播放器要套用的增益（0.0–1.0）。 */
+    public float volumeGain() {
+        return volumePercent / 100f;
     }
 
     /** 首次開啟總開關且清單為空時預填的清單（06:00 與 07:00）。 */
@@ -115,6 +130,13 @@ public final class RadioAlarmConfig {
     public static int clampDuration(int value) {
         if (value < RadioAlarmConstants.MIN_DURATION_MIN) return RadioAlarmConstants.MIN_DURATION_MIN;
         if (value > RadioAlarmConstants.MAX_DURATION_MIN) return RadioAlarmConstants.MAX_DURATION_MIN;
+        return value;
+    }
+
+    /** 音量比例夾在 0–100；與時長同樣是夾值而非丟棄，怪值不該讓整份設定失效。 */
+    public static int clampVolume(int value) {
+        if (value < RadioAlarmConstants.MIN_VOLUME_PERCENT) return RadioAlarmConstants.MIN_VOLUME_PERCENT;
+        if (value > RadioAlarmConstants.MAX_VOLUME_PERCENT) return RadioAlarmConstants.MAX_VOLUME_PERCENT;
         return value;
     }
 
@@ -176,7 +198,10 @@ public final class RadioAlarmConfig {
             }
         }
 
-        return new RadioAlarmConfig(master, parsed, custom);
+        int volume = clampVolume(
+                root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
+
+        return new RadioAlarmConfig(master, parsed, custom, volume);
     }
 
     public String toJson() {
@@ -184,6 +209,7 @@ public final class RadioAlarmConfig {
         try {
             root.put("masterEnabled", masterEnabled);
             root.put("customStreamUrl", customStreamUrl);
+            root.put("volumePercent", volumePercent);
             JSONArray arr = new JSONArray();
             for (Entry e : entries) {
                 JSONObject item = new JSONObject();
