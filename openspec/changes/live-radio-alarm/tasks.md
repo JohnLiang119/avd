@@ -9,7 +9,8 @@
 兩條紅線：
 
 ```
-  1. 總開關預設關閉。升級的使用者隔天早上 MUST NOT 被無預警叫醒。
+  1. 清單預設為空（原為「總開關預設關閉」，第 12 組拿掉總開關後改由此達成）。
+     升級的使用者隔天早上 MUST NOT 被無預警叫醒。
   2. 試播與正式觸發走同一條路徑。試播成功而早上失敗是本功能最糟的結果。
 ```
 
@@ -469,6 +470,27 @@
 
 - [x] 10.6 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
 
-## 11. 歸檔
+## 12. 三層結構：時間 > 星期 > 頻道（使用者要求後重構）
 
-- [ ] 11.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+使用者要求「第一層時間、第二層星期、第三層頻道，並清掉過多的解釋」。這是資料模型的
+翻轉（電台為容器 → 鬧鐘為主體，頻道是屬性），規格已重寫（14 條需求、45 個情境），
+design.md 新增 D14、改寫 D4／D9。
+
+**本組取代先前實機驗證清單中的這些項目**：5.1 的「首次開總開關預填」「新增重複時間被拒」
+「自訂網址欄位」、8.4 的「收合時電台摘要」「首次開啟總開關自動展開」、9.5 的「鬧鐘總開關
+關閉時按直播」—— 這些概念已不存在，改由 12.9 的清單取代。
+
+- [ ] 12.1 原生資料模型：`Alarm`（id、time、weekdays 7 位元遮罩、channelId、durationMin、enabled）與 `Channel`（id、name、source 為 bcc.apiName 或 url），`Config` 含 `schemaVersion`；`fromJson` 校正空遮罩為全選、無效 channelId 為第一個內建頻道；完成方式：JUnit 涵蓋遮罩邊界、缺欄位、無效頻道，`gradlew :app:testDebugUnitTest` 綠燈
+- [ ] 12.2 舊格式遷移（一次性，以 `schemaVersion` 判斷）：`entries` → 每筆一個 Alarm（全選、bcc-news、時長與啟用沿用）；`customStreamUrl` 非空 → 建自訂頻道並讓所有遷移的鬧鐘指向它；`masterEnabled=false` → 全部停用；完成方式：JUnit 以 v1.0.98～1.0.103 的實際 JSON 樣本驗證三種情境，且重複呼叫不再改變內容
+- [ ] 12.3 `RadioAlarmSchedule.nextTrigger` 支援星期：自今天起往後最多 7 天取第一個「時刻未過且星期符合」者，空遮罩回傳 -1；完成方式：JUnit 涵蓋「今天符合未過」「今天符合已過→下一個符合日」「今天不符合」「僅週一、今天週二→下週一」「跨月」「時區」
+- [ ] 12.4 `RadioStreamResolver` 依頻道：`pickStreamUrl(json, apiName)`、`last_good_url` 按頻道存、內建常數表（新聞、流行）；自訂頻道直接回傳 url；完成方式：JUnit 以實測回應樣本分別挑出新聞與流行，缺頻道時退回正確的內建常數
+- [ ] 12.5 排程器／接收器／服務：觸發帶 alarmId → 查該筆的頻道 → 播放；`ACTION_START` 帶 channelId；通知顯示頻道名；重疊時維持第一筆的頻道；試播播第一個內建頻道、自我測試不看頻道；完成方式：編譯通過，`grep` 確認 `ACTION_START` 送出點與 `new ExoPlayer.Builder` 數量未增加
+- [ ] 12.6 插件：config 結構改版（alarms、channels、volumePercent），移除 masterEnabled／customStreamUrl 欄位；`playRadioLive(channelId)`；狀態多回傳播放中的 channelId；完成方式：編譯通過
+- [ ] 12.7 前端 `radioAlarm.ts`：型別與 `normalizeConfig` 改版；新增純函式 `describeWeekdays`（每天／平日／週末／一二三…）、`describeAlarmSummary`、含星期的 `nextOccurrence`、「系統登錄只在異常時顯示」的判斷；移除 `describeStationSummary` 與總開關相關函式及其測試；完成方式：`npm test` 綠燈
+- [ ] 12.8 介面重構：鬧鐘卡片（收合：時刻、開關、摘要；展開：星期七鍵、頻道單選、時長、移除）、新增鈕（預設 06:00／每天／第一個內建頻道／30 分）、頻道列（每個頻道一顆 `ACTION_GLYPH.play`／`stop`）、音量滑桿加**一行**說明、「進階」摺疊（試播、測試鬧鐘、測試結果）、安靜原則（登錄狀態／上次播放／權限提示只在異常時出現）；完成方式：`npx vue-tsc --noEmit` 與 `npm run build` 通過，`grep` 確認未引入新色碼、無多行解釋段落殘留
+- [ ] 12.9 實機驗證【三層結構】：升級自 v1.0.103 後兩筆舊時間變成每天＋中廣新聞網、行為不變；新增鬧鐘預設值正確；同一時刻兩筆不同頻道各自觸發（設 2 分鐘後、今天的星期一筆選一筆不選）；取消最後一天被拒；改頻道為流行網後觸發播的是流行網；頻道列直播鈕各自獨立；一切正常時介面只有清單、頻道、音量；強制停止後出現「不會響」警示
+- [ ] 12.10 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`（說明結構改變與舊設定自動遷移）
+
+## 13. 歸檔
+
+- [ ] 13.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
