@@ -620,6 +620,16 @@
                       :disabled="radioAlarmBusy"
                       @update:model-value="(v: boolean) => onRadioAlarmToggle(alarm.id, v)"
                     />
+                    <!--
+                      展開的提示。手機上沒有 hover，少了這顆使用者完全看不出卡片能點 ——
+                      實測就是找不到移除鍵。
+                    -->
+                    <button
+                      type="button"
+                      class="radio-alarm-chevron"
+                      :title="radioExpandedId === alarm.id ? '收合' : '展開設定'"
+                      @click="toggleRadioExpanded(alarm.id)"
+                    >{{ radioExpandedId === alarm.id ? '▲' : '▼' }}</button>
                   </div>
                 </div>
 
@@ -669,14 +679,20 @@
                       @update:model-value="(v: number | string) => onRadioDurationChange(alarm.id, v)"
                     />
                     <span style="font-size: 11px; color: #94a3b8;">分</span>
-                    <van-button
-                      size="mini"
-                      title="移除這筆鬧鐘"
-                      :style="GLYPH_BUTTON_STYLE"
-                      style="margin-left: auto;"
-                      @click="removeRadioAlarm(alarm.id)"
-                    >{{ ACTION_GLYPH.remove }}</van-button>
                   </div>
+
+                  <!--
+                    移除放成一顆看得到的按鈕，不是角落的一個字元。刪一筆鬧鐘只是設定調整
+                    （可以再新增回來），故維持中性色、不加二次確認（design.md D9）。
+                  -->
+                  <van-button
+                    size="small"
+                    block
+                    plain
+                    style="border-color: #e2e8f0; color: #64748b;"
+                    :disabled="radioAlarmBusy"
+                    @click="removeRadioAlarm(alarm.id)"
+                  >移除這筆鬧鐘</van-button>
                 </div>
               </div>
 
@@ -5000,6 +5016,17 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   font-size: 12px;
   color: #64748b;
   font-variant-numeric: tabular-nums;
+}
+.radio-alarm-chevron {
+  /* 視覺上只是一個小箭頭，可觸控範圍維持 32px（MIN_TOUCH_TARGET_PX） */
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
 }
 .radio-alarm-body {
   margin-top: 8px;
