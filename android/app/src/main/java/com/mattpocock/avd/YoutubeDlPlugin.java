@@ -1642,20 +1642,11 @@ public class YoutubeDlPlugin extends Plugin {
     public void setRadioAlarmConfig(PluginCall call) {
         try {
             JSONObject root = new JSONObject();
-            root.put("masterEnabled", Boolean.TRUE.equals(call.getBoolean("masterEnabled", false)));
-            root.put("customStreamUrl", call.getString("customStreamUrl", ""));
+            root.put("schemaVersion", RadioAlarmConfig.SCHEMA_VERSION);
             root.put("volumePercent", call.getInt("volumePercent",
                     RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
-
-            JSONArray out = new JSONArray();
-            JSArray incoming = call.getArray("entries");
-            if (incoming != null) {
-                for (int i = 0; i < incoming.length(); i++) {
-                    JSONObject item = incoming.optJSONObject(i);
-                    if (item != null) out.put(item);
-                }
-            }
-            root.put("entries", out);
+            root.put("alarms", copyArray(call.getArray("alarms")));
+            root.put("channels", copyArray(call.getArray("channels")));
 
             // 一律經 fromJson 過濾：前端負責顯示拒絕的原因，這裡是最後一道防守，
             // 確保寫進持久化的內容必定可用（不合法的時間剔除、重複去除、時長夾回範圍）。
@@ -1692,6 +1683,7 @@ public class YoutubeDlPlugin extends Plugin {
                     config, System.currentTimeMillis(), java.util.TimeZone.getDefault()));
             ret.put("playing", RadioPlaybackService.isPlaying());
             ret.put("alarmAudioActive", RadioPlaybackService.isAlarmAudioActive());
+            ret.put("playingChannelId", RadioPlaybackService.activeChannelId());
             ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
 
             // 向系統回讀，而非回報我們自己記得的 —— 使用者擔心的正是「以為有、其實沒有」
@@ -1731,6 +1723,8 @@ public class YoutubeDlPlugin extends Plugin {
             Intent intent = new Intent(getContext(), RadioPlaybackService.class);
             intent.setAction(RadioPlaybackService.ACTION_START);
             intent.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_TEST);
+            intent.putExtra(RadioPlaybackService.EXTRA_CHANNEL_ID,
+                    new RadioAlarmStore(getContext()).getConfig().defaultChannel().id);
             intent.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, now);
             intent.putExtra(RadioPlaybackService.EXTRA_END_AT, now + RadioAlarmConstants.TEST_PLAY_MS);
 
@@ -1767,6 +1761,8 @@ public class YoutubeDlPlugin extends Plugin {
             Intent intent = new Intent(getContext(), RadioPlaybackService.class);
             intent.setAction(RadioPlaybackService.ACTION_START);
             intent.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_LIVE);
+            // 找不到的頻道 id 由 channelById 落到預設頻道，這裡只負責把使用者的選擇傳過去
+            intent.putExtra(RadioPlaybackService.EXTRA_CHANNEL_ID, call.getString("channelId", ""));
             intent.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, now);
             intent.putExtra(RadioPlaybackService.EXTRA_END_AT, now + RadioAlarmConstants.LIVE_MAX_MS);
 
@@ -1925,22 +1921,45 @@ public class YoutubeDlPlugin extends Plugin {
         return getPermissionState("notifications") == PermissionState.GRANTED;
     }
 
+    /** 把橋接過來的陣列逐項複製成 org.json 陣列（略過非物件項目）。 */
+    private static JSONArray copyArray(JSArray incoming) {
+        JSONArray out = new JSONArray();
+        if (incoming == null) return out;
+        for (int i = 0; i < incoming.length(); i++) {
+            JSONObject item = incoming.optJSONObject(i);
+            if (item != null) out.put(item);
+        }
+        return out;
+    }
+
     private JSObject configToJs(RadioAlarmConfig config) {
         JSObject ret = new JSObject();
-        ret.put("masterEnabled", config.masterEnabled);
-        ret.put("customStreamUrl", config.customStreamUrl);
+        ret.put("schemaVersion", RadioAlarmConfig.SCHEMA_VERSION);
         ret.put("volumePercent", config.volumePercent);
 
-        JSArray entries = new JSArray();
-        for (RadioAlarmConfig.Entry entry : config.entries) {
+        JSArray channels = new JSArray();
+        for (RadioAlarmConfig.Channel c : config.channels) {
             JSObject item = new JSObject();
-            item.put("id", entry.id);
-            item.put("time", entry.time);
-            item.put("enabled", entry.enabled);
-            item.put("durationMin", entry.durationMin);
-            entries.put(item);
+            item.put("id", c.id);
+            item.put("name", c.name);
+            item.put("kind", c.kind);
+            item.put("source", c.source);
+            channels.put(item);
         }
-        ret.put("entries", entries);
+        ret.put("channels", channels);
+
+        JSArray alarms = new JSArray();
+        for (RadioAlarmConfig.Alarm a : config.alarms) {
+            JSObject item = new JSObject();
+            item.put("id", a.id);
+            item.put("time", a.time);
+            item.put("weekdays", a.weekdays);
+            item.put("channelId", a.channelId);
+            item.put("durationMin", a.durationMin);
+            item.put("enabled", a.enabled);
+            alarms.put(item);
+        }
+        ret.put("alarms", alarms);
         return ret;
     }
 }

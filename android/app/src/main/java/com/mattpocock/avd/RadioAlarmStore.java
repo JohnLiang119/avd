@@ -73,15 +73,22 @@ public final class RadioAlarmStore {
         prefs.edit().putString(KEY_CONFIG, config.toJson()).apply();
     }
 
-    // ---- 上次成功的串流網址（退回鏈的中間層）----
+    // ---- 上次成功的串流網址（退回鏈的中間層），按頻道存 ----
+    //
+    // 新聞網的後備不能拿去放流行網，故鍵帶頻道 id。舊格式只有一個鍵（那時只有新聞網），
+    // 讀新聞網且新鍵不存在時退回舊鍵，讓升級後第一次退回仍有東西可用。
 
-    public String getLastGoodUrl() {
-        return prefs.getString(KEY_LAST_GOOD_URL, "");
+    public String getLastGoodUrl(String channelId) {
+        String value = prefs.getString(KEY_LAST_GOOD_URL + "." + channelId, "");
+        if ((value == null || value.isEmpty()) && RadioAlarmConstants.CHANNEL_NEWS_ID.equals(channelId)) {
+            value = prefs.getString(KEY_LAST_GOOD_URL, "");
+        }
+        return value == null ? "" : value;
     }
 
-    public void setLastGoodUrl(String url) {
-        if (url == null || url.trim().isEmpty()) return;
-        prefs.edit().putString(KEY_LAST_GOOD_URL, url.trim()).apply();
+    public void setLastGoodUrl(String channelId, String url) {
+        if (url == null || url.trim().isEmpty() || channelId == null) return;
+        prefs.edit().putString(KEY_LAST_GOOD_URL + "." + channelId, url.trim()).apply();
     }
 
     // ---- 已登錄的鬧鐘 id ----

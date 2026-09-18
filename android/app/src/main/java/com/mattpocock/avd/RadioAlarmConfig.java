@@ -6,69 +6,151 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
- * 早報鬧鐘的設定：總開關、每日觸發時間清單、自訂串流網址。
+ * 廣播鬧鐘的設定：鬧鐘清單、頻道清單、音量比例。
+ *
+ * 模型以**鬧鐘為主體**（design.md D14）：一筆鬧鐘 = 時刻 + 星期 + 頻道 + 時長 + 啟用，
+ * 頻道是鬧鐘的屬性而非容器。沒有總開關 —— 每筆自有開關，清單預設為空即達成
+ * 「升級後不會無預警響」。
  *
  * 這個類別刻意**不匯入任何 Android API**（只用 org.json 與 java.util），使其可在
- * JVM 單元測試中直接驗證。鬧鐘對不對，很大一部分取決於這裡的解析與驗證守不守得住，
- * 而那一層不該只能等到早上六點才在實機上驗出來。
+ * JVM 單元測試中直接驗證。fromJson 一律**不拋例外**：它面對的是可能被外力改壞的
+ * 持久化內容，壞掉的項目會被剔除或校正，其餘維持可用。
  *
- * 權威來源在原生端（見 config-persistence 規格的「原生端為權威來源的設定」）：
- * WebView 未執行時鬧鐘仍須響，故設定不能只存在前端的 localStorage。
- *
- * fromJson 一律**不拋例外**：它面對的是可能被外力改壞的持久化內容，而「設定壞掉」
- * 不該讓鬧鐘整組無聲無息地消失 —— 壞掉的項目會被剔除或校正，其餘維持可用。
- * 使用者輸入的把關由前端負責（會顯示拒絕的原因），這裡是防守。
+ * 權威來源在原生端（見 config-persistence 規格的「原生端為權威來源的設定」）。
  */
 public final class RadioAlarmConfig {
 
-    /** 一筆每日觸發時間。 */
-    public static final class Entry {
-        /** 穩定識別，用於排程與取消（時間改了也不必重配 requestCode）。 */
-        public final String id;
-        /** 觸發時刻，已正規化為 HH:mm。 */
-        public final String time;
-        public final boolean enabled;
-        /** 播放時長（分鐘），必在允許範圍內。 */
-        public final int durationMin;
+    /** 目前的格式版本。低於此版本的內容走 {@link #migrateLegacy} 一次性遷移。 */
+    public static final int SCHEMA_VERSION = 2;
 
-        public Entry(String id, String time, boolean enabled, int durationMin) {
+    /** 星期遮罩：bit 0 = 週日 … bit 6 = 週六，與 Calendar.DAY_OF_WEEK - 1 及 JS Date.getDay() 一致。 */
+    public static final int ALL_WEEKDAYS = 0x7F;
+
+    // ---- 頻道 ----
+
+    /** 頻道的來源種類。 */
+    public static final String CHANNEL_KIND_BCC = "bcc";
+    public static final String CHANNEL_KIND_URL = "url";
+
+    /**
+     * 一個可播放的頻道。
+     *
+     * 內建頻道（kind = bcc）的 source 是官方 API 回應中的頻道名稱，串流網址於每次
+     * 觸發時解析；自訂頻道（kind = url）的 source 就是串流網址本身。
+     */
+    public static final class Channel {
+        public final String id;
+        public final String name;
+        public final String kind;
+        public final String source;
+
+        public Channel(String id, String name, String kind, String source) {
             this.id = id;
-            this.time = time;
-            this.enabled = enabled;
-            this.durationMin = durationMin;
+            this.name = name;
+            this.kind = kind;
+            this.source = source;
+        }
+
+        public boolean isBuiltIn() {
+            return CHANNEL_KIND_BCC.equals(kind);
         }
     }
 
-    public final boolean masterEnabled;
-    public final List<Entry> entries;
-    /** 空字串代表「使用官方來源」，非空則直接使用且不查官方。 */
-    public final String customStreamUrl;
+    /** 內建頻道。順序即介面順序；第一個是新增鬧鐘與試播的預設頻道。 */
+    public static List<Channel> builtInChannels() {
+        List<Channel> list = new ArrayList<Channel>();
+        list.add(new Channel(RadioAlarmConstants.CHANNEL_NEWS_ID, RadioAlarmConstants.CHANNEL_NEWS_API_NAME,
+                CHANNEL_KIND_BCC, RadioAlarmConstants.CHANNEL_NEWS_API_NAME));
+        list.add(new Channel(RadioAlarmConstants.CHANNEL_POP_ID, RadioAlarmConstants.CHANNEL_POP_API_NAME,
+                CHANNEL_KIND_BCC, RadioAlarmConstants.CHANNEL_POP_API_NAME));
+        return list;
+    }
+
+    // ---- 鬧鐘 ----
+
+    /** 一筆鬧鐘。 */
+    public static final class Alarm {
+        /** 穩定識別，用於排程與取消 —— 兩筆同時刻的鬧鐘正是靠它區分。 */
+        public final String id;
+        /** 觸發時刻，已正規化為 HH:mm。 */
+        public final String time;
+        /** 星期遮罩，見 {@link #ALL_WEEKDAYS}；必非零。 */
+        public final int weekdays;
+        public final String channelId;
+        public final int durationMin;
+        public final boolean enabled;
+
+        public Alarm(String id, String time, int weekdays, String channelId, int durationMin, boolean enabled) {
+            this.id = id;
+            this.time = time;
+            this.weekdays = normalizeWeekdays(weekdays);
+            this.channelId = channelId;
+            this.durationMin = clampDuration(durationMin);
+            this.enabled = enabled;
+        }
+    }
+
+    public final List<Alarm> alarms;
+    public final List<Channel> channels;
     /**
      * 應用程式內的音量比例（0–100）。
      *
-     * 這是**在系統鬧鐘音量之下**的縮放，不是系統音量本身：改系統音量會連使用者
-     * 真正的鬧鐘一起改掉，那是替他做了沒要求的決定（見 design.md D11）。
+     * 這是**在系統音量之下**的縮放，不是系統音量本身：改系統音量會連使用者真正的
+     * 鬧鐘一起改掉，那是替他做了沒要求的決定（見 design.md D11）。
      */
     public final int volumePercent;
 
-    public RadioAlarmConfig(boolean masterEnabled, List<Entry> entries, String customStreamUrl,
-                            int volumePercent) {
-        this.masterEnabled = masterEnabled;
-        this.entries = Collections.unmodifiableList(new ArrayList<Entry>(entries));
-        this.customStreamUrl = customStreamUrl == null ? "" : customStreamUrl;
+    public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent) {
+        this.alarms = Collections.unmodifiableList(new ArrayList<Alarm>(alarms));
+        this.channels = Collections.unmodifiableList(ensureBuiltIns(channels));
         this.volumePercent = clampVolume(volumePercent);
     }
 
-    /** 全新安裝的預設值：**總開關關閉**、清單為空、音量比例 100%。 */
+    /** 全新安裝的預設值：**沒有任何鬧鐘**、兩個內建頻道、音量 100%。 */
     public static RadioAlarmConfig defaults() {
-        return new RadioAlarmConfig(false, new ArrayList<Entry>(), "",
+        return new RadioAlarmConfig(new ArrayList<Alarm>(), builtInChannels(),
                 RadioAlarmConstants.DEFAULT_VOLUME_PERCENT);
+    }
+
+    /** 實際會被排程的鬧鐘。 */
+    public List<Alarm> enabledAlarms() {
+        List<Alarm> list = new ArrayList<Alarm>();
+        for (Alarm a : alarms) {
+            if (a.enabled) list.add(a);
+        }
+        return list;
+    }
+
+    /** 第一個內建頻道：新增鬧鐘與試播的預設，也是無效頻道參照的落點。 */
+    public Channel defaultChannel() {
+        for (Channel c : channels) {
+            if (c.isBuiltIn()) return c;
+        }
+        return channels.get(0);
+    }
+
+    /**
+     * 依 id 取頻道；找不到時回傳預設頻道 —— 鬧鐘 MUST NOT 因頻道消失而失效。
+     */
+    public Channel channelById(String id) {
+        if (id != null) {
+            for (Channel c : channels) {
+                if (c.id.equals(id)) return c;
+            }
+        }
+        return defaultChannel();
+    }
+
+    public boolean hasChannel(String id) {
+        if (id == null) return false;
+        for (Channel c : channels) {
+            if (c.id.equals(id)) return true;
+        }
+        return false;
     }
 
     /** 播放器要套用的增益（0.0–1.0）。 */
@@ -76,26 +158,7 @@ public final class RadioAlarmConfig {
         return volumePercent / 100f;
     }
 
-    /** 首次開啟總開關且清單為空時預填的清單（06:00 與 07:00）。 */
-    public static List<Entry> defaultEntries() {
-        List<Entry> list = new ArrayList<Entry>();
-        for (String time : RadioAlarmConstants.DEFAULT_TIMES) {
-            list.add(new Entry(newId(time), time, true, RadioAlarmConstants.DEFAULT_DURATION_MIN));
-        }
-        return list;
-    }
-
-    /** 實際會被排程的項目：總開關開啟時的已啟用項目。 */
-    public List<Entry> enabledEntries() {
-        List<Entry> list = new ArrayList<Entry>();
-        if (!masterEnabled) return list;
-        for (Entry e : entries) {
-            if (e.enabled) list.add(e);
-        }
-        return list;
-    }
-
-    // ---- 時間的解析與正規化 ----
+    // ---- 時間、星期、時長、音量的把關 ----
 
     /**
      * 將時間字串解析為「當日第幾分鐘」。
@@ -126,6 +189,23 @@ public final class RadioAlarmConfig {
         return String.format(Locale.US, "%02d:%02d", minutes / 60, minutes % 60);
     }
 
+    /**
+     * 星期遮罩的校正：空遮罩或越界位元一律回到全選。
+     *
+     * 空遮罩在鬧鐘 App 通常代表「只響一次」，對廣播用處不大且容易被誤認為壞了；
+     * 介面不允許取消最後一天，這裡是最後一道防守。
+     */
+    public static int normalizeWeekdays(int mask) {
+        int cleaned = mask & ALL_WEEKDAYS;
+        return cleaned == 0 ? ALL_WEEKDAYS : cleaned;
+    }
+
+    /** @param dayIndex 0 = 週日 … 6 = 週六 */
+    public static boolean hasWeekday(int mask, int dayIndex) {
+        if (dayIndex < 0 || dayIndex > 6) return false;
+        return (mask & (1 << dayIndex)) != 0;
+    }
+
     /** 播放時長夾在允許範圍內，而非丟棄整筆 —— 時長怪不該讓一筆鬧鐘消失。 */
     public static int clampDuration(int value) {
         if (value < RadioAlarmConstants.MIN_DURATION_MIN) return RadioAlarmConstants.MIN_DURATION_MIN;
@@ -133,22 +213,21 @@ public final class RadioAlarmConfig {
         return value;
     }
 
-    /** 音量比例夾在 0–100；與時長同樣是夾值而非丟棄，怪值不該讓整份設定失效。 */
+    /** 音量比例夾在 0–100；與時長同樣是夾值而非丟棄。 */
     public static int clampVolume(int value) {
         if (value < RadioAlarmConstants.MIN_VOLUME_PERCENT) return RadioAlarmConstants.MIN_VOLUME_PERCENT;
         if (value > RadioAlarmConstants.MAX_VOLUME_PERCENT) return RadioAlarmConstants.MAX_VOLUME_PERCENT;
         return value;
     }
 
-    /** 自訂串流網址是否可用：空字串（代表用官方）或 http(s) 網址。 */
+    /** 自訂頻道的串流網址是否可用：必須是 http(s)。 */
     public static boolean isValidStreamUrl(String raw) {
-        if (raw == null) return true;
+        if (raw == null) return false;
         String text = raw.trim();
-        if (text.isEmpty()) return true;
         return text.startsWith("http://") || text.startsWith("https://");
     }
 
-    /** 產生一筆新項目的識別。 */
+    /** 產生一筆新鬧鐘的識別。 */
     public static String newId(String time) {
         String suffix = time == null ? "x" : time.replace(":", "");
         return "t" + System.currentTimeMillis() + "_" + suffix;
@@ -158,7 +237,8 @@ public final class RadioAlarmConfig {
 
     /**
      * 自持久化內容還原。**永不拋例外**：內容為 null、空、非 JSON 或結構不符時回傳預設值；
-     * 個別項目不合法時剔除該項並保留其餘。
+     * 個別項目不合法時剔除該項並保留其餘。舊格式（無 schemaVersion 或低於目前）
+     * 走 {@link #migrateLegacy} 一次性遷移。
      */
     public static RadioAlarmConfig fromJson(String json) {
         if (json == null || json.trim().isEmpty()) return defaults();
@@ -170,13 +250,73 @@ public final class RadioAlarmConfig {
             return defaults();
         }
 
+        int version = root.optInt("schemaVersion", 1);
+        if (version < SCHEMA_VERSION) {
+            return migrateLegacy(root);
+        }
+
+        int volume = clampVolume(root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
+
+        List<Channel> channels = parseChannels(root.optJSONArray("channels"));
+        RadioAlarmConfig scaffold = new RadioAlarmConfig(new ArrayList<Alarm>(), channels, volume);
+
+        List<Alarm> alarms = new ArrayList<Alarm>();
+        JSONArray arr = root.optJSONArray("alarms");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+
+                String time = normalizeTime(item.optString("time", ""));
+                if (time == null) continue;
+
+                String id = item.optString("id", "").trim();
+                if (id.isEmpty()) id = newId(time);
+
+                // 指向不存在的頻道時落到預設頻道 —— 鬧鐘不該因頻道消失而不見
+                String channelId = item.optString("channelId", "");
+                if (!scaffold.hasChannel(channelId)) channelId = scaffold.defaultChannel().id;
+
+                alarms.add(new Alarm(
+                        id, time,
+                        item.optInt("weekdays", ALL_WEEKDAYS),
+                        channelId,
+                        item.optInt("durationMin", RadioAlarmConstants.DEFAULT_DURATION_MIN),
+                        item.optBoolean("enabled", true)));
+            }
+        }
+
+        return new RadioAlarmConfig(alarms, channels, volume);
+    }
+
+    /**
+     * 舊格式（v1.0.98～1.0.103 的「每日時間清單」）的一次性遷移。
+     *
+     * <pre>
+     *   entries[]           -> 每筆一個 Alarm：星期全選、時長與啟用沿用
+     *   customStreamUrl     -> 非空即建一個自訂頻道，所有鬧鐘指向它（舊網址對所有時間生效，行為不變）
+     *   masterEnabled=false -> 全部停用（舊總開關關著就是不響）
+     *   volumePercent       -> 沿用
+     * </pre>
+     *
+     * 回傳的設定已是新格式；呼叫端寫回後 schemaVersion 即為目前版本，不會再次遷移。
+     */
+    static RadioAlarmConfig migrateLegacy(JSONObject root) {
         boolean master = root.optBoolean("masterEnabled", false);
+        int volume = clampVolume(root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
+
+        List<Channel> channels = builtInChannels();
+        String targetChannelId = channels.get(0).id;
 
         String custom = root.optString("customStreamUrl", "").trim();
-        if (!isValidStreamUrl(custom)) custom = "";
+        if (isValidStreamUrl(custom)) {
+            Channel customChannel = new Channel(
+                    RadioAlarmConstants.LEGACY_CUSTOM_CHANNEL_ID, "自訂串流", CHANNEL_KIND_URL, custom);
+            channels.add(customChannel);
+            targetChannelId = customChannel.id;
+        }
 
-        List<Entry> parsed = new ArrayList<Entry>();
-        Set<String> seenTimes = new HashSet<String>();
+        List<Alarm> alarms = new ArrayList<Alarm>();
         JSONArray arr = root.optJSONArray("entries");
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
@@ -185,46 +325,111 @@ public final class RadioAlarmConfig {
 
                 String time = normalizeTime(item.optString("time", ""));
                 if (time == null) continue;
-                if (!seenTimes.add(time)) continue;
 
                 String id = item.optString("id", "").trim();
                 if (id.isEmpty()) id = newId(time);
 
-                boolean enabled = item.optBoolean("enabled", true);
-                int duration = clampDuration(
-                        item.optInt("durationMin", RadioAlarmConstants.DEFAULT_DURATION_MIN));
-
-                parsed.add(new Entry(id, time, enabled, duration));
+                alarms.add(new Alarm(
+                        id, time, ALL_WEEKDAYS, targetChannelId,
+                        item.optInt("durationMin", RadioAlarmConstants.DEFAULT_DURATION_MIN),
+                        master && item.optBoolean("enabled", true)));
             }
         }
 
-        int volume = clampVolume(
-                root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
-
-        return new RadioAlarmConfig(master, parsed, custom, volume);
+        return new RadioAlarmConfig(alarms, channels, volume);
     }
 
     public String toJson() {
         JSONObject root = new JSONObject();
         try {
-            root.put("masterEnabled", masterEnabled);
-            root.put("customStreamUrl", customStreamUrl);
+            root.put("schemaVersion", SCHEMA_VERSION);
             root.put("volumePercent", volumePercent);
-            JSONArray arr = new JSONArray();
-            for (Entry e : entries) {
+
+            JSONArray channelArr = new JSONArray();
+            for (Channel c : channels) {
                 JSONObject item = new JSONObject();
-                item.put("id", e.id);
-                item.put("time", e.time);
-                item.put("enabled", e.enabled);
-                item.put("durationMin", e.durationMin);
-                arr.put(item);
+                item.put("id", c.id);
+                item.put("name", c.name);
+                item.put("kind", c.kind);
+                item.put("source", c.source);
+                channelArr.put(item);
             }
-            root.put("entries", arr);
+            root.put("channels", channelArr);
+
+            JSONArray alarmArr = new JSONArray();
+            for (Alarm a : alarms) {
+                JSONObject item = new JSONObject();
+                item.put("id", a.id);
+                item.put("time", a.time);
+                item.put("weekdays", a.weekdays);
+                item.put("channelId", a.channelId);
+                item.put("durationMin", a.durationMin);
+                item.put("enabled", a.enabled);
+                alarmArr.put(item);
+            }
+            root.put("alarms", alarmArr);
         } catch (JSONException e) {
             // put 只在 key 為 null 或值為 NaN 時拋出，兩者於此皆不可能
             return "{}";
         }
         return root.toString();
+    }
+
+    // ---- 內部 ----
+
+    /** 解析頻道清單；不合法的自訂頻道剔除。內建頻道由建構子保證存在。 */
+    private static List<Channel> parseChannels(JSONArray arr) {
+        List<Channel> list = new ArrayList<Channel>();
+        if (arr == null) return list;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+
+            String id = item.optString("id", "").trim();
+            String kind = item.optString("kind", "").trim();
+            String source = item.optString("source", "").trim();
+            String name = item.optString("name", "").trim();
+            if (id.isEmpty()) continue;
+
+            if (CHANNEL_KIND_URL.equals(kind)) {
+                if (!isValidStreamUrl(source)) continue;
+                list.add(new Channel(id, name.isEmpty() ? "自訂串流" : name, kind, source));
+            } else if (CHANNEL_KIND_BCC.equals(kind)) {
+                if (source.isEmpty()) continue;
+                list.add(new Channel(id, name.isEmpty() ? source : name, kind, source));
+            }
+        }
+        return list;
+    }
+
+    /**
+     * 內建頻道 MUST 一直存在：少了它們，指向它們的鬧鐘就沒有落點。
+     * 已存在同 id 的項目維持原樣（允許改名），缺的補回。
+     */
+    private static List<Channel> ensureBuiltIns(List<Channel> given) {
+        List<Channel> result = new ArrayList<Channel>();
+        List<Channel> builtIns = builtInChannels();
+        for (Channel b : builtIns) {
+            Channel existing = null;
+            for (Channel c : given) {
+                if (c.id.equals(b.id)) {
+                    existing = c;
+                    break;
+                }
+            }
+            result.add(existing == null ? b : existing);
+        }
+        for (Channel c : given) {
+            boolean isBuiltInId = false;
+            for (Channel b : builtIns) {
+                if (b.id.equals(c.id)) {
+                    isBuiltInId = true;
+                    break;
+                }
+            }
+            if (!isBuiltInId) result.add(c);
+        }
+        return result;
     }
 
     private static boolean isAsciiDigits(String text) {

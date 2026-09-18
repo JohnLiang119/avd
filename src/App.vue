@@ -585,215 +585,219 @@
         </van-cell-group>
 
         <!--
-          早報鬧鐘：僅 Android 提供。此處的 !isTauri() 是「這個平台有沒有這個功能」的
+          廣播鬧鐘：僅 Android 提供。此處的 !isTauri() 是「這個平台有沒有這個功能」的
           判斷，不是為了持久化而判斷平台 —— 設定的讀寫一律經插件（見 radioAlarm.ts）。
+
+          結構（design.md D9／D14）：鬧鐘卡片以時間為第一層，展開後是星期與頻道；
+          頻道另成一列並附直播鍵；音量一行說明；其餘遵守「正常時安靜、異常才說話」。
         -->
         <template v-if="!isTauri()">
           <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
-            早報鬧鐘
+            鬧鐘
           </p>
-          <!--
-            兩層結構，與主佇列的「頻道 > 播放清單」同一套：
-            第一層是電台，收合時以摘要那一行交代設定了什麼；第二層才是時間與細項。
-            預設收合 —— 這個對話框本來就已經放不下一個畫面了。
-          -->
           <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
-            <div style="padding: 10px 14px;">
-              <div class="radio-station-header">
-                <div style="min-width: 0;">
-                  <div style="font-size: 14px; font-weight: 600; color: #0f172a;">中廣新聞網</div>
-                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
-                    {{ radioPlayingLabel || radioStationSummary }}
+            <div style="padding: 4px 12px 10px;">
+              <div
+                v-for="alarm in radioAlarm.alarms"
+                :key="alarm.id"
+                class="radio-alarm-card"
+              >
+                <div class="radio-alarm-head" @click="toggleRadioExpanded(alarm.id)">
+                  <div style="min-width: 0;">
+                    <button
+                      type="button"
+                      class="radio-alarm-time"
+                      title="修改時刻"
+                      @click.stop="openRadioTimePicker(alarm)"
+                    >{{ alarm.time }}</button>
+                    <div class="radio-alarm-summary">{{ describeAlarmSummary(alarm, radioAlarm.channels) }}</div>
+                  </div>
+                  <div class="radio-alarm-head-actions" @click.stop>
+                    <span class="radio-alarm-duration">{{ alarm.durationMin }} 分</span>
+                    <van-switch
+                      :model-value="alarm.enabled"
+                      size="18px"
+                      :disabled="radioAlarmBusy"
+                      @update:model-value="(v: boolean) => onRadioAlarmToggle(alarm.id, v)"
+                    />
                   </div>
                 </div>
-                <div class="radio-station-actions">
-                  <!--
-                    直播鍵。刻意**不受總開關約束** —— 「現在想聽廣播」和「明天早上要被
-                    叫醒」是兩件事，為了聽廣播而去開鬧鐘並不合理。
-                    播放中時同一個位置換成停止（見 visualLanguage 的 stop）。
-                  -->
-                  <van-button
-                    size="mini"
-                    :title="radioStatus?.playing ? '停止播放' : '立即收聽直播'"
-                    :style="GLYPH_BUTTON_STYLE"
-                    @click="onRadioLiveToggle"
-                  >{{ radioStatus?.playing ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
-                  <van-button
-                    v-if="radioAlarm.masterEnabled"
-                    size="mini"
-                    plain
-                    round
-                    type="primary"
-                    style="color: #64748b; border-color: #e2e8f0; padding: 0 8px;"
-                    @click="radioStationExpanded = !radioStationExpanded"
-                  >{{ radioStationExpanded ? '▲' : '▼' }}</van-button>
-                  <van-switch
-                    :model-value="radioAlarm.masterEnabled"
-                    size="18px"
-                    :disabled="radioAlarmBusy"
-                    @update:model-value="onRadioMasterToggle"
-                  />
-                </div>
-              </div>
-            </div>
-          </van-cell-group>
 
-          <div
-            v-if="radioAlarm.masterEnabled && radioStationExpanded"
-            class="radio-alarm-detail"
-          >
-            <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
-              <div style="padding: 4px 12px 8px;">
-                <div
-                  v-for="entry in radioAlarm.entries"
-                  :key="entry.id"
-                  class="radio-alarm-row"
-                >
-                  <span class="radio-alarm-time">{{ entry.time }}</span>
-                  <div class="radio-alarm-actions">
+                <div v-if="radioExpandedId === alarm.id" class="radio-alarm-body">
+                  <div class="radio-alarm-field">
+                    <span class="radio-alarm-label">星期</span>
+                    <div class="radio-weekdays">
+                      <button
+                        v-for="day in RADIO_WEEKDAY_ORDER"
+                        :key="day"
+                        type="button"
+                        class="radio-weekday"
+                        :class="{ 'radio-weekday--on': hasWeekday(alarm.weekdays, day) }"
+                        @click="onRadioWeekdayToggle(alarm.id, day)"
+                      >{{ RADIO_WEEKDAY_LABEL[day] }}</button>
+                    </div>
+                  </div>
+
+                  <div class="radio-alarm-field">
+                    <span class="radio-alarm-label">頻道</span>
+                    <van-radio-group
+                      :model-value="alarm.channelId"
+                      direction="horizontal"
+                      icon-size="16px"
+                      @update:model-value="(v: string) => onRadioAlarmChannel(alarm.id, v)"
+                    >
+                      <van-radio
+                        v-for="channel in radioAlarm.channels"
+                        :key="channel.id"
+                        :name="channel.id"
+                        checked-color="#0f172a"
+                        style="font-size: 13px;"
+                      >{{ channel.name }}</van-radio>
+                    </van-radio-group>
+                  </div>
+
+                  <div class="radio-alarm-field">
+                    <span class="radio-alarm-label">時長</span>
                     <van-stepper
-                      :model-value="entry.durationMin"
+                      :model-value="alarm.durationMin"
                       :min="1"
                       :max="180"
                       :step="5"
                       integer
                       input-width="32px"
                       button-size="22px"
-                      @update:model-value="(v: number | string) => onRadioDurationChange(entry.id, v)"
+                      @update:model-value="(v: number | string) => onRadioDurationChange(alarm.id, v)"
                     />
                     <span style="font-size: 11px; color: #94a3b8;">分</span>
-                    <van-switch
-                      :model-value="entry.enabled"
-                      size="18px"
-                      :disabled="radioAlarmBusy"
-                      @update:model-value="(v: boolean) => onRadioEntryToggle(entry.id, v)"
-                    />
                     <van-button
                       size="mini"
-                      title="移除這個時間"
+                      title="移除這筆鬧鐘"
                       :style="GLYPH_BUTTON_STYLE"
-                      @click="removeRadioEntry(entry.id)"
+                      style="margin-left: auto;"
+                      @click="removeRadioAlarm(alarm.id)"
                     >{{ ACTION_GLYPH.remove }}</van-button>
                   </div>
                 </div>
-
-                <div v-if="!radioAlarm.entries.length" style="font-size: 12px; color: #94a3b8; padding: 8px 0;">
-                  尚未設定任何時間
-                </div>
-
-                <van-button
-                  size="small"
-                  block
-                  plain
-                  style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
-                  @click="showRadioTimePicker = true"
-                >新增時間</van-button>
               </div>
-            </van-cell-group>
 
-            <van-cell-group inset style="margin: 8px 0 0; border: 1px solid #e2e8f0;">
-              <div style="padding: 10px 14px 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                  <span style="font-size: 14px; color: #0f172a;">音量</span>
-                  <span style="font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums;">
-                    {{ radioAlarm.volumePercent }}%
-                  </span>
-                </div>
-                <van-slider
-                  :model-value="radioAlarm.volumePercent"
-                  :min="0"
-                  :max="100"
-                  :step="5"
-                  bar-height="3px"
-                  active-color="#64748b"
-                  inactive-color="#e2e8f0"
-                  @change="onRadioVolumeChange"
-                />
-                <p style="font-size: 11px; color: #94a3b8; margin: 10px 0 0; line-height: 1.6;">
-                  鬧鐘與試播走系統的<b>鬧鐘音量</b>，所以手機轉靜音或開勿擾時仍然會響；
-                  手動按直播鍵則走<b>媒體音量</b>（手動播放不該蓋過你的靜音設定）。
-                  這裡的百分比是在上述音量<b>之下</b>再縮放，不會更動你手機本身的音量設定；
-                  100% 即完全照系統音量。整體太小聲請到系統設定調整對應的音量。
-                </p>
+              <div v-if="!radioAlarm.alarms.length" style="font-size: 12px; color: #94a3b8; padding: 8px 0;">
+                尚未設定鬧鐘
               </div>
-            </van-cell-group>
 
-            <van-cell-group inset style="margin: 8px 0 0; border: 1px solid #e2e8f0;">
-              <van-field
-                v-model="radioStreamUrlDraft"
-                label="串流網址"
-                placeholder="留空則使用中廣官方來源"
-                :error-message="radioStreamUrlError"
-                label-width="62px"
-                @blur="onRadioStreamUrlBlur"
-              />
-            </van-cell-group>
-
-            <div style="display: flex; gap: 8px; margin-top: 8px;">
               <van-button
                 size="small"
                 block
                 plain
-                style="border-color: #e2e8f0; color: #64748b;"
+                style="margin-top: 6px; border-color: #e2e8f0; color: #64748b;"
+                :disabled="radioAlarmBusy"
+                @click="addRadioAlarm"
+              >新增鬧鐘</van-button>
+            </div>
+          </van-cell-group>
+
+          <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+            頻道
+          </p>
+          <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
+            <div style="padding: 2px 12px;">
+              <!--
+                直播鍵跟著頻道走，不依賴任何鬧鐘 —— 「現在想聽」與「明天要被叫醒」是兩件事。
+                播放中同一個位置換成停止（visualLanguage 的 stop），其他頻道維持播放。
+              -->
+              <div v-for="channel in radioAlarm.channels" :key="channel.id" class="radio-channel-row">
+                <span style="font-size: 14px; color: #0f172a;">{{ channel.name }}</span>
+                <van-button
+                  size="mini"
+                  :title="radioStatus?.playingChannelId === channel.id ? '停止' : '立即收聽'"
+                  :style="GLYPH_BUTTON_STYLE"
+                  @click="onRadioLiveToggle(channel.id)"
+                >{{ radioStatus?.playingChannelId === channel.id ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
+              </div>
+              <div v-if="radioPlayingLabel" style="font-size: 11px; color: #64748b; padding: 4px 0 8px;">
+                {{ radioPlayingLabel }}
+              </div>
+            </div>
+          </van-cell-group>
+
+          <van-cell-group inset style="margin: 8px 0 0; border: 1px solid #e2e8f0;">
+            <div style="padding: 10px 14px 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 14px; color: #0f172a;">音量</span>
+                <span style="font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums;">
+                  {{ radioAlarm.volumePercent }}%
+                </span>
+              </div>
+              <van-slider
+                :model-value="radioAlarm.volumePercent"
+                :min="0"
+                :max="100"
+                :step="5"
+                bar-height="3px"
+                active-color="#64748b"
+                inactive-color="#e2e8f0"
+                @change="onRadioVolumeChange"
+              />
+              <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
+                鬧鐘走鬧鐘音量（靜音、勿擾仍會響），直播走媒體音量。
+              </p>
+            </div>
+          </van-cell-group>
+
+          <!-- 異常才說話：以下三塊在一切正常時什麼都不會出現 -->
+          <div
+            v-if="radioRegistrationWarning || radioLastFailure || radioWarnings.length"
+            style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.6;"
+          >
+            <div v-if="radioRegistrationWarning">{{ radioRegistrationWarning }}</div>
+            <div v-if="radioLastFailure">{{ radioLastFailure }}</div>
+            <div v-for="(warning, idx) in radioWarnings" :key="idx">{{ warning }}</div>
+            <div style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <van-button
+                v-if="radioStatus && !radioStatus.exactAlarmAllowed"
+                size="mini" plain style="border-color: #e2e8f0; color: #64748b;"
+                @click="onRadioOpenExactAlarmSettings"
+              >鬧鐘權限設定</van-button>
+              <van-button
+                v-if="radioStatus && !radioStatus.notificationsGranted"
+                size="mini" plain style="border-color: #e2e8f0; color: #64748b;"
+                @click="onRadioRequestNotification"
+              >重新要求通知權限</van-button>
+              <van-button
+                v-if="radioRegistrationWarning || radioWarnings.length"
+                size="mini" plain style="border-color: #e2e8f0; color: #64748b;"
+                @click="onRadioOpenBatterySettings"
+              >電池最佳化設定</van-button>
+            </div>
+          </div>
+
+          <button type="button" class="radio-advanced-toggle" @click="radioAdvanced = !radioAdvanced">
+            進階 {{ radioAdvanced ? '▲' : '▼' }}
+          </button>
+          <div v-if="radioAdvanced" class="radio-advanced">
+            <div style="display: flex; gap: 8px;">
+              <van-button
+                size="small" block plain style="border-color: #e2e8f0; color: #64748b;"
                 :disabled="radioAlarmBusy"
                 @click="onRadioTest"
-              >{{ radioStatus?.playing ? '播放中' : '試播 30 秒' }}</van-button>
+              >試播 30 秒</van-button>
               <van-button
-                size="small"
-                block
-                plain
-                style="border-color: #e2e8f0; color: #64748b;"
+                size="small" block plain style="border-color: #e2e8f0; color: #64748b;"
                 :disabled="radioAlarmBusy"
                 @click="onRadioStop"
               >停止</van-button>
             </div>
-
             <!--
-              自我測試。存在的理由是「試播」證明不了早上會響 —— 它直接啟動播放服務，
-              繞過 AlarmManager、接收器，以及「程序被回收後由系統叫醒」這一整段，
-              而那正是使用者唯一真正擔心的部分。
+              自我測試走與早上完全相同的路徑（系統鬧鐘 → 接收器 → 服務）。
+              試播證明不了早上會響 —— 它直接啟動播放服務。
             -->
             <van-button
-              size="small"
-              block
-              plain
+              size="small" block plain
               style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
               :disabled="radioAlarmBusy"
               @click="onRadioSelfTest"
             >{{ radioStatus?.selfTestRegistered ? '取消測試鬧鐘' : '兩分鐘後試響一次（可關掉本程式）' }}</van-button>
-
             <div style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.6;">
-              <div>系統登錄：{{ radioSystemRegistrationText }}</div>
-              <div>測試鬧鐘：{{ radioSelfTestText }}</div>
-              <div>下一次觸發：{{ radioNextTriggerText }}</div>
-              <div>上次播放：{{ radioLastResultText }}</div>
-              <div
-                v-for="(warning, idx) in radioWarnings"
-                :key="idx"
-                style="margin-top: 4px;"
-              >{{ warning }}</div>
-              <div v-if="radioWarnings.length" style="margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap;">
-                <van-button
-                  v-if="radioStatus && !radioStatus.exactAlarmAllowed"
-                  size="mini"
-                  plain
-                  style="border-color: #e2e8f0; color: #64748b;"
-                  @click="onRadioOpenExactAlarmSettings"
-                >鬧鐘權限設定</van-button>
-                <van-button
-                  v-if="radioStatus && !radioStatus.notificationsGranted"
-                  size="mini"
-                  plain
-                  style="border-color: #e2e8f0; color: #64748b;"
-                  @click="onRadioRequestNotification"
-                >重新要求通知權限</van-button>
-                <van-button
-                  size="mini"
-                  plain
-                  style="border-color: #e2e8f0; color: #64748b;"
-                  @click="onRadioOpenBatterySettings"
-                >電池最佳化設定</van-button>
-              </div>
+              {{ radioSelfTestText }}
             </div>
           </div>
         </template>
@@ -828,7 +832,7 @@
     <van-popup v-model:show="showRadioTimePicker" position="bottom" round>
       <van-time-picker
         v-model="radioTimeDraft"
-        title="新增觸發時間"
+        title="修改時刻"
         :columns-type="['hour', 'minute']"
         @confirm="onRadioTimeConfirm"
         @cancel="showRadioTimePicker = false"
@@ -1381,19 +1385,19 @@ import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
 import {
   RadioAlarmService,
-  describeNextTrigger,
+  describeAlarmSummary,
   describePlaybackState,
   describeSelfTest,
-  describeStationSummary,
-  describeSystemRegistration,
-  formatLastResult,
+  hasWeekday,
+  lastFailureText,
+  newAlarm,
   permissionWarnings,
-  validateNewTime,
-  validateStreamUrl,
+  registrationWarning,
+  toggleWeekday,
+  validateTime,
   clampDuration,
   clampVolume,
-  defaultEntries,
-  DEFAULT_DURATION_MIN,
+  type RadioAlarm,
   type RadioAlarmConfig,
   type RadioAlarmStatus,
 } from './services/radioAlarm';
@@ -3212,50 +3216,44 @@ const confirmClearAll = storage.defineSetting('avd_confirm_clear_all', true);
 const confirmClearSingle = storage.defineSetting('avd_confirm_clear_single', true);
 const testModeEnabled = storage.defineSetting('avd_test_mode_enabled', false);
 
-// ---- 早報鬧鐘 ----
+// ---- 廣播鬧鐘 ----
 //
 // 注意這裡**沒有** defineSetting：鬧鐘設定的權威來源在 Android 原生端
 // （config-persistence 規格的「原生端為權威來源的設定」）。鬧鐘必須在 WebView
 // 未執行時響，而前端的儲存埠此時讀不到，故前端不保有可獨立寫入的副本 ——
 // 開啟設定時自插件讀，變更時整包寫回。
 
-const radioAlarm = ref<RadioAlarmConfig>({
-  masterEnabled: false,
-  entries: [],
-  customStreamUrl: '',
-  volumePercent: 100,
-});
+const RADIO_WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
+/** 介面上的星期順序：週一起算、週日放最後，符合台灣的閱讀習慣 */
+const RADIO_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100 });
 const radioStatus = ref<RadioAlarmStatus | null>(null);
 const radioAlarmBusy = ref(false);
+/** 目前展開的鬧鐘卡片；純介面狀態，不持久化，預設全部收合 */
+const radioExpandedId = ref<string | null>(null);
+const radioAdvanced = ref(false);
 const showRadioTimePicker = ref(false);
-/** 電台那一層是否展開。純介面狀態，不需要持久化，預設收合。 */
-const radioStationExpanded = ref(false);
+/** 正在修改時刻的鬧鐘 id */
+const radioTimePickerFor = ref<string | null>(null);
 const radioTimeDraft = ref<string[]>(['06', '00']);
-const radioStreamUrlDraft = ref('');
-const radioStreamUrlError = ref('');
-/** 讓「下一次觸發」的相對敘述（今天／明天）在對話框開著時不會過期 */
+/** 讓「測試鬧鐘」的相對敘述在對話框開著時不會過期 */
 const radioNow = ref(new Date());
 
-const radioStationSummary = computed(() => describeStationSummary(radioAlarm.value));
-const radioPlayingLabel = computed(() => describePlaybackState(radioStatus.value));
-const radioNextTriggerText = computed(() => describeNextTrigger(radioAlarm.value, radioNow.value));
-const radioSystemRegistrationText = computed(
-  () => describeSystemRegistration(radioAlarm.value, radioStatus.value),
-);
+const radioPlayingLabel = computed(() => describePlaybackState(radioStatus.value, radioAlarm.value.channels));
+const radioRegistrationWarning = computed(() => registrationWarning(radioAlarm.value, radioStatus.value));
 const radioSelfTestText = computed(() => describeSelfTest(radioStatus.value, radioNow.value));
-const radioLastResultText = computed(() => formatLastResult(radioStatus.value));
+const radioLastFailure = computed(() => lastFailureText(radioStatus.value));
 const radioWarnings = computed(() => permissionWarnings(radioStatus.value));
 
 const loadRadioAlarm = async () => {
   if (isTauri()) return;
   try {
     radioAlarm.value = await RadioAlarmService.getConfig();
-    radioStreamUrlDraft.value = radioAlarm.value.customStreamUrl;
-    radioStreamUrlError.value = '';
     radioStatus.value = await RadioAlarmService.getStatus();
     radioNow.value = new Date();
   } catch (e) {
-    reportError('早報鬧鐘', e);
+    reportError('廣播鬧鐘', e);
   }
 };
 
@@ -3270,11 +3268,8 @@ const refreshRadioStatus = async () => {
 };
 
 /**
- * 設定開著時輪詢狀態。
- *
- * 播放是在服務裡進行的，前端不會被通知；少了這個輪詢，播放結束後直播鍵會一直
- * 停在「停止」，而試播失敗的原因也不會出現在狀態那一行（規格要求試播即時顯示結果）。
- * 只在對話框開著時跑，關掉即停 —— 這不是背景工作。
+ * 設定開著時輪詢狀態。播放在服務裡進行，前端不會被通知；少了輪詢，播完後直播鍵
+ * 會一直停在「停止」。只在對話框開著時跑，關掉即停 —— 這不是背景工作。
  */
 let radioStatusTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -3297,34 +3292,38 @@ const persistRadioAlarm = async (next: RadioAlarmConfig) => {
     radioStatus.value = await RadioAlarmService.getStatus();
     radioNow.value = new Date();
   } catch (e) {
-    reportError('早報鬧鐘', e);
+    reportError('廣播鬧鐘', e);
     await loadRadioAlarm();
   } finally {
     radioAlarmBusy.value = false;
   }
 };
 
-const onRadioMasterToggle = async (value: boolean) => {
-  // 首次開啟且清單為空時預填 06:00 與 07:00，使用者不必自己想從哪裡開始
-  const entries = value && radioAlarm.value.entries.length === 0
-    ? defaultEntries()
-    : radioAlarm.value.entries;
+const updateRadioAlarm = (id: string, patch: Partial<RadioAlarm>) => {
+  const alarms = radioAlarm.value.alarms.map((a) => (a.id === id ? { ...a, ...patch } : a));
+  void persistRadioAlarm({ ...radioAlarm.value, alarms });
+};
 
-  await persistRadioAlarm({ ...radioAlarm.value, masterEnabled: value, entries });
+const toggleRadioExpanded = (id: string) => {
+  radioExpandedId.value = radioExpandedId.value === id ? null : id;
+};
 
-  // 剛開啟時直接展開：使用者要看到自己被預填了哪兩個時間。
-  // 之後重新開啟設定則維持收合（見 showSettingsModal 的 watch）。
-  radioStationExpanded.value = value;
+/** 新增鬧鐘：預設值 06:00／每天／第一個內建頻道／30 分，直接展開讓使用者改 */
+const addRadioAlarm = async () => {
+  const isFirst = radioAlarm.value.alarms.length === 0;
+  const created = newAlarm(radioAlarm.value.channels);
+  await persistRadioAlarm({ ...radioAlarm.value, alarms: [...radioAlarm.value.alarms, created] });
+  radioExpandedId.value = created.id;
 
-  if (!value) return;
+  if (!isFirst) return;
 
-  // 通知權限缺了不會讓播放失敗，失去的是「停止」按鈕與失敗通知，故不阻擋流程
+  // 首次新增才請求權限。通知權限缺了不會讓播放失敗（失去的是停止按鈕），不阻擋流程
   try {
     await RadioAlarmService.requestNotificationPermission();
   } catch (e) {
-    reportError('早報鬧鐘', e);
+    reportError('廣播鬧鐘', e);
   }
-  radioStatus.value = await RadioAlarmService.getStatus().catch(() => radioStatus.value);
+  await refreshRadioStatus();
 
   if (radioStatus.value && !radioStatus.value.exactAlarmAllowed) {
     showDialog({
@@ -3335,52 +3334,55 @@ const onRadioMasterToggle = async (value: boolean) => {
   }
 };
 
-const onRadioEntryToggle = (id: string, value: boolean) => {
-  const entries = radioAlarm.value.entries.map(
-    (entry) => (entry.id === id ? { ...entry, enabled: value } : entry),
-  );
-  void persistRadioAlarm({ ...radioAlarm.value, entries });
+const onRadioAlarmToggle = (id: string, enabled: boolean) => updateRadioAlarm(id, { enabled });
+
+/** 取消最後一天會被 toggleWeekday 拒絕（回傳原遮罩）；此時以提示說明，不靜默 */
+const onRadioWeekdayToggle = (id: string, day: number) => {
+  const target = radioAlarm.value.alarms.find((a) => a.id === id);
+  if (!target) return;
+  const next = toggleWeekday(target.weekdays, day);
+  if (next === target.weekdays) {
+    if (hasWeekday(target.weekdays, day)) showToast('至少要保留一天');
+    return;
+  }
+  updateRadioAlarm(id, { weekdays: next });
 };
+
+const onRadioAlarmChannel = (id: string, channelId: string) => updateRadioAlarm(id, { channelId });
 
 const onRadioDurationChange = (id: string, value: number | string) => {
   const durationMin = clampDuration(Number(value));
-  const target = radioAlarm.value.entries.find((entry) => entry.id === id);
+  const target = radioAlarm.value.alarms.find((a) => a.id === id);
   if (!target || target.durationMin === durationMin) return;
-  const entries = radioAlarm.value.entries.map(
-    (entry) => (entry.id === id ? { ...entry, durationMin } : entry),
-  );
-  void persistRadioAlarm({ ...radioAlarm.value, entries });
+  updateRadioAlarm(id, { durationMin });
+};
+
+const openRadioTimePicker = (alarm: RadioAlarm) => {
+  radioTimePickerFor.value = alarm.id;
+  radioTimeDraft.value = alarm.time.split(':');
+  showRadioTimePicker.value = true;
 };
 
 const onRadioTimeConfirm = () => {
-  const picked = `${radioTimeDraft.value[0]}:${radioTimeDraft.value[1]}`;
-  const result = validateNewTime(radioAlarm.value.entries, picked);
+  const id = radioTimePickerFor.value;
+  const result = validateTime(`${radioTimeDraft.value[0]}:${radioTimeDraft.value[1]}`);
+  showRadioTimePicker.value = false;
+  if (!id) return;
   if (!result.ok) {
-    // 規格明訂不得靜默忽略：拒絕時一律說明原因
     showToast(result.reason);
     return;
   }
-  showRadioTimePicker.value = false;
-
-  const entries = [...radioAlarm.value.entries, {
-    id: `t${Date.now()}_${result.time.replace(':', '')}`,
-    time: result.time,
-    enabled: true,
-    durationMin: DEFAULT_DURATION_MIN,
-  }].sort((a, b) => a.time.localeCompare(b.time));
-
-  void persistRadioAlarm({ ...radioAlarm.value, entries });
+  updateRadioAlarm(id, { time: result.time });
 };
 
-const removeRadioEntry = (id: string) => {
-  const entries = radioAlarm.value.entries.filter((entry) => entry.id !== id);
-  void persistRadioAlarm({ ...radioAlarm.value, entries });
+const removeRadioAlarm = (id: string) => {
+  if (radioExpandedId.value === id) radioExpandedId.value = null;
+  const alarms = radioAlarm.value.alarms.filter((a) => a.id !== id);
+  void persistRadioAlarm({ ...radioAlarm.value, alarms });
 };
 
 /**
- * 音量比例的變更。
- *
- * 用 `@change`（放開才觸發）而非 `@update:model-value`（拖曳中連續觸發）：
+ * 音量比例的變更。用 `@change`（放開才觸發）而非 `@update:model-value`：
  * 後者會在一次拖曳中送出數十次寫入與重新排程。播放進行中時原生端會即時套用。
  */
 const onRadioVolumeChange = (value: number) => {
@@ -3389,29 +3391,14 @@ const onRadioVolumeChange = (value: number) => {
   void persistRadioAlarm({ ...radioAlarm.value, volumePercent });
 };
 
-const onRadioStreamUrlBlur = () => {
-  const result = validateStreamUrl(radioStreamUrlDraft.value);
-  radioStreamUrlError.value = result.ok ? '' : result.reason;
-  if (!result.ok) return;
-
-  const customStreamUrl = radioStreamUrlDraft.value.trim();
-  if (customStreamUrl === radioAlarm.value.customStreamUrl) return;
-  void persistRadioAlarm({ ...radioAlarm.value, customStreamUrl });
-};
-
-/**
- * 直播鍵：沒在播就開始，正在播就停止。
- *
- * 不先檢查總開關是刻意的 —— 手動收聽與鬧鐘是兩件獨立的事。
- */
-const onRadioLiveToggle = async () => {
+/** 直播鍵：該頻道沒在播就開始，正在播就停止。不依賴任何鬧鐘的存在。 */
+const onRadioLiveToggle = async (channelId: string) => {
   if (isTauri()) return;
   try {
     if (radioStatus.value?.playing) {
       await RadioAlarmService.stop();
     } else {
-      await RadioAlarmService.playLive();
-      showToast('開始收聽中廣新聞網直播');
+      await RadioAlarmService.playLive(channelId);
     }
   } catch (e) {
     reportError('中廣直播', e);
@@ -3419,11 +3406,7 @@ const onRadioLiveToggle = async () => {
   await refreshRadioStatus();
 };
 
-/**
- * 自我測試：登錄一個兩分鐘後的**真鬧鐘**，走與早上完全相同的路徑。
- *
- * 按完就可以把應用程式關掉 —— 這正是要驗的事。
- */
+/** 自我測試：登錄一個兩分鐘後的真鬧鐘，走與早上完全相同的路徑。按完就可以把應用程式關掉。 */
 const onRadioSelfTest = async () => {
   radioAlarmBusy.value = true;
   try {
@@ -3432,14 +3415,12 @@ const onRadioSelfTest = async () => {
       showToast('已取消測試鬧鐘');
     } else {
       const at = await RadioAlarmService.scheduleSelfTest();
-      if (at > 0) {
-        showToast('兩分鐘後會響。現在可以把本程式完全關掉，等它自己響。');
-      } else {
-        showToast('登錄測試鬧鐘失敗，請確認系統是否允許精確鬧鐘');
-      }
+      showToast(at > 0
+        ? '兩分鐘後會響。現在可以把本程式完全關掉，等它自己響。'
+        : '登錄測試鬧鐘失敗，請確認系統是否允許精確鬧鐘');
     }
   } catch (e) {
-    reportError('早報鬧鐘測試', e);
+    reportError('鬧鐘測試', e);
   } finally {
     radioAlarmBusy.value = false;
     await refreshRadioStatus();
@@ -3452,10 +3433,10 @@ const onRadioTest = async () => {
     await RadioAlarmService.test();
     showToast('試播開始，30 秒後自動停止');
   } catch (e) {
-    reportError('早報鬧鐘試播', e);
+    reportError('試播', e);
   } finally {
     radioAlarmBusy.value = false;
-    radioStatus.value = await RadioAlarmService.getStatus().catch(() => radioStatus.value);
+    await refreshRadioStatus();
   }
 };
 
@@ -3463,40 +3444,38 @@ const onRadioStop = async () => {
   try {
     await RadioAlarmService.stop();
   } catch (e) {
-    reportError('早報鬧鐘', e);
+    reportError('廣播鬧鐘', e);
   }
-  radioStatus.value = await RadioAlarmService.getStatus().catch(() => radioStatus.value);
+  await refreshRadioStatus();
 };
 
 const onRadioRequestNotification = async () => {
   try {
     await RadioAlarmService.requestNotificationPermission();
   } catch (e) {
-    reportError('早報鬧鐘', e);
+    reportError('廣播鬧鐘', e);
   }
-  radioStatus.value = await RadioAlarmService.getStatus().catch(() => radioStatus.value);
+  await refreshRadioStatus();
 };
 
 const onRadioOpenExactAlarmSettings = () => {
-  RadioAlarmService.openExactAlarmSettings().catch((e) => reportError('早報鬧鐘', e));
+  RadioAlarmService.openExactAlarmSettings().catch((e) => reportError('廣播鬧鐘', e));
 };
 
 const onRadioOpenBatterySettings = () => {
-  RadioAlarmService.openBatteryOptimizationSettings().catch((e) => reportError('早報鬧鐘', e));
+  RadioAlarmService.openBatteryOptimizationSettings().catch((e) => reportError('廣播鬧鐘', e));
 };
 
 /**
  * 取走原生端留下的播放失敗摘要，寫入錯誤紀錄。
- *
  * 失敗當下不直接寫：紀錄住在 WebView 的儲存中，而失敗發生時 WebView 多半沒在跑。
- * 取走後原生端即清除待寫標記，故同一筆不會被寫入兩次。
  */
 const drainRadioAlarmJournal = async () => {
   if (isTauri()) return;
   try {
     const pending = await RadioAlarmService.consumeJournal();
     if (!pending.hasEntry || !pending.message) return;
-    reportError('早報鬧鐘', pending.message, pending.time);
+    reportError('廣播鬧鐘', pending.message, pending.time);
   } catch (e) {
     console.error('[radioAlarm] 讀取失敗紀錄失敗', e);
   }
@@ -3507,8 +3486,9 @@ watch(showSettingsModal, (open) => {
     stopRadioStatusPolling();
     return;
   }
-  // 每次開啟都自收合開始 —— 這個對話框放不下一個畫面，摘要那一行已交代設定了什麼
-  radioStationExpanded.value = false;
+  // 每次開啟都自收合開始 —— 卡片的摘要那一行已交代設定了什麼
+  radioExpandedId.value = null;
+  radioAdvanced.value = false;
   void loadRadioAlarm();
   startRadioStatusPolling();
 });
@@ -3516,7 +3496,6 @@ watch(showSettingsModal, (open) => {
 onUnmounted(() => {
   stopRadioStatusPolling();
 });
-
 // 設定項的變更由 useStorage 自動持久化，此處僅提供使用者回饋
 const saveWifiConfig = () => {
   showToast('Wi-Fi 設定已儲存');
@@ -4976,59 +4955,120 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   flex-wrap: wrap;
 }
 /*
-  早報鬧鐘的第一層：電台。名稱與摘要可收縮，右側的控制項不壓縮。
+  廣播鬧鐘的卡片：時間為第一層，展開後是星期與頻道（design.md D9／D14）。
+  與 .success-action 同樣的道理：任何一列在窄畫面上放不下就換行，不擠出邊界。
 */
-.radio-station-header {
+.radio-alarm-card {
+  padding: 8px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.radio-alarm-card:last-of-type {
+  border-bottom: none;
+}
+.radio-alarm-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  cursor: pointer;
 }
-.radio-station-actions {
+.radio-alarm-time {
+  /* 看起來是文字，實際是可點的控制項；padding 維持可觸控範圍（visual-language） */
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.radio-alarm-summary {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.radio-alarm-head-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
   margin-left: auto;
 }
-/*
-  第二層：時間與細項。左側的虛線與主佇列的「頻道 > 播放清單」同一套視覺，
-  傳達的是層級而非裝飾。
-*/
-.radio-alarm-detail {
+.radio-alarm-duration {
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+.radio-alarm-body {
   margin-top: 8px;
   padding-left: 8px;
   border-left: 2px dashed #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-/*
-  早報鬧鐘的時間列。與 .success-action 同樣的道理：時間、時長、啟用開關與移除鍵
-  在窄畫面上放不進一行，寧可整列換行也不要把最後一個控制項擠出邊界。
-*/
-.radio-alarm-row {
+.radio-alarm-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.radio-alarm-label {
+  font-size: 12px;
+  color: #64748b;
+  width: 32px;
+  flex-shrink: 0;
+}
+.radio-weekdays {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.radio-weekday {
+  /* 七顆各 32px 是可觸控範圍的下限（MIN_TOUCH_TARGET_PX），視覺上只是一個字 */
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e2e8f0;
+  border-radius: 50%;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+.radio-weekday--on {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+.radio-channel-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
 }
-.radio-alarm-row:last-of-type {
+.radio-channel-row:last-of-type {
   border-bottom: none;
 }
-.radio-alarm-time {
-  font-size: 15px;
-  font-weight: 600;
-  color: #0f172a;
-  font-variant-numeric: tabular-nums;
+.radio-advanced-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px 0;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
 }
-.radio-alarm-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  margin-left: auto;
+.radio-advanced {
+  padding-left: 8px;
+  border-left: 2px dashed #e2e8f0;
 }
 .save-path {
   flex: 1;

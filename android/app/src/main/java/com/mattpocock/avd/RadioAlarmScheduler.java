@@ -56,11 +56,11 @@ public final class RadioAlarmScheduler {
         long now = System.currentTimeMillis();
         TimeZone zone = TimeZone.getDefault();
 
-        for (RadioAlarmConfig.Entry entry : config.enabledEntries()) {
-            long triggerAt = RadioAlarmSchedule.nextTrigger(now, entry.time, zone);
+        for (RadioAlarmConfig.Alarm alarm : config.enabledAlarms()) {
+            long triggerAt = RadioAlarmSchedule.nextTrigger(now, alarm.time, alarm.weekdays, zone);
             if (triggerAt < 0) continue;
-            if (schedule(context, entry, triggerAt)) {
-                scheduled.add(entry.id);
+            if (schedule(context, alarm, triggerAt)) {
+                scheduled.add(alarm.id);
             }
         }
 
@@ -69,7 +69,7 @@ public final class RadioAlarmScheduler {
     }
 
     /** 登錄單一項目的下一次觸發。 */
-    public static boolean schedule(Context context, RadioAlarmConfig.Entry entry, long triggerAt) {
+    public static boolean schedule(Context context, RadioAlarmConfig.Alarm entry, long triggerAt) {
         AlarmManager manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (manager == null) return false;
 
@@ -194,7 +194,7 @@ public final class RadioAlarmScheduler {
 
     // ---- PendingIntent 的組成 ----
 
-    private static PendingIntent buildOperation(Context context, RadioAlarmConfig.Entry entry, long triggerAt) {
+    private static PendingIntent buildOperation(Context context, RadioAlarmConfig.Alarm entry, long triggerAt) {
         Intent intent = buildFireIntent(context, entry.id);
         intent.putExtra(EXTRA_DURATION_MIN, entry.durationMin);
         intent.putExtra(EXTRA_SCHEDULED_AT, triggerAt);

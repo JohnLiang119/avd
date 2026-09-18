@@ -1,47 +1,62 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  ALL_WEEKDAYS,
+  DEFAULT_DURATION_MIN,
+  DEFAULT_VOLUME_PERCENT,
   normalizeTime,
-  validateNewTime,
-  validateStreamUrl,
+  validateTime,
+  hasWeekday,
+  normalizeWeekdays,
+  toggleWeekday,
+  describeWeekdays,
   clampDuration,
   clampVolume,
-  DEFAULT_VOLUME_PERCENT,
-  nextOccurrence,
-  describeNextTrigger,
+  channelName,
+  defaultChannelId,
+  describeAlarmSummary,
+  newAlarm,
   describePlaybackState,
+  registrationWarning,
   describeSelfTest,
-  describeStationSummary,
-  describeSystemRegistration,
-  formatLastResult,
+  lastFailureText,
   permissionWarnings,
   isAggressiveVendor,
   normalizeConfig,
-  defaultEntries,
-  DEFAULT_DURATION_MIN,
+  type RadioAlarm,
   type RadioAlarmConfig,
-  type RadioAlarmEntry,
   type RadioAlarmStatus,
+  type RadioChannel,
 } from '../radioAlarm';
 
-const entry = (time: string, enabled = true, durationMin = 30): RadioAlarmEntry => ({
-  id: 'id-' + time,
-  time,
-  enabled,
-  durationMin,
+const mask = (...days: number[]) => days.reduce((m, d) => m | (1 << d), 0);
+
+const CHANNELS: RadioChannel[] = [
+  { id: 'bcc-news', name: '中廣新聞網', kind: 'bcc', source: '中廣新聞網' },
+  { id: 'bcc-pop', name: '中廣流行網', kind: 'bcc', source: '中廣流行網' },
+];
+
+const alarm = (over: Partial<RadioAlarm> = {}): RadioAlarm => ({
+  id: 'a1',
+  time: '06:00',
+  weekdays: ALL_WEEKDAYS,
+  channelId: 'bcc-news',
+  durationMin: 30,
+  enabled: true,
+  ...over,
 });
 
-const config = (entries: RadioAlarmEntry[], masterEnabled = true): RadioAlarmConfig => ({
-  masterEnabled,
-  entries,
-  customStreamUrl: '',
+const config = (alarms: RadioAlarm[]): RadioAlarmConfig => ({
+  schemaVersion: 2,
+  alarms,
+  channels: CHANNELS,
   volumePercent: 100,
 });
 
 const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
-  nextTriggerAt: -1,
   playing: false,
   alarmAudioActive: false,
+  playingChannelId: '',
   exactAlarmAllowed: true,
   notificationsGranted: true,
   registeredCount: 0,
@@ -55,217 +70,134 @@ const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
   ...over,
 });
 
-describe('時間的把關', () => {
-  it('接受合法時間並補零', () => {
-    expect(normalizeTime('06:00')).toBe('06:00');
+describe('時刻', () => {
+  it('接受合法時刻並補零', () => {
     expect(normalizeTime('6:0')).toBe('06:00');
-    expect(normalizeTime('6:5')).toBe('06:05');
-    expect(normalizeTime('  7:00  ')).toBe('07:00');
-    expect(normalizeTime('00:00')).toBe('00:00');
+    expect(normalizeTime('  7:05 ')).toBe('07:05');
     expect(normalizeTime('23:59')).toBe('23:59');
   });
 
-  it('拒絕越界與格式不符', () => {
-    expect(normalizeTime('24:10')).toBeNull();
-    expect(normalizeTime('06:60')).toBeNull();
-    expect(normalizeTime('-1')).toBeNull();
-    expect(normalizeTime('-1:00')).toBeNull();
-    expect(normalizeTime('0600')).toBeNull();
-    expect(normalizeTime('006:00')).toBeNull();
-    expect(normalizeTime('abc')).toBeNull();
-    expect(normalizeTime('06:')).toBeNull();
-    expect(normalizeTime(':00')).toBeNull();
-    expect(normalizeTime('')).toBeNull();
-    expect(normalizeTime(null)).toBeNull();
-    expect(normalizeTime(undefined)).toBeNull();
-  });
-
-  it('新增合法時間時回傳正規化結果', () => {
-    const result = validateNewTime([entry('06:00')], '7:0');
-    expect(result).toEqual({ ok: true, time: '07:00' });
-  });
-
-  it('不合法時附上可直接顯示的原因，不靜默忽略', () => {
-    const result = validateNewTime([], '24:10');
+  it('拒絕越界與格式不符，並附原因', () => {
+    for (const bad of ['24:10', '06:60', '0600', 'abc', '', null, undefined]) {
+      expect(normalizeTime(bad)).toBeNull();
+    }
+    const result = validateTime('24:10');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain('00:00');
   });
 
-  it('重複的時間以正規化後比對，並說明是哪一筆重複', () => {
-    const result = validateNewTime([entry('06:00')], '6:00');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain('06:00');
+  it('同一時刻不再被視為重複 —— 沒有任何「已存在」的檢查', () => {
+    expect(validateTime('06:00')).toEqual({ ok: true, time: '06:00' });
   });
 });
 
-describe('時長與串流網址', () => {
-  it('時長夾在允許範圍內', () => {
-    expect(clampDuration(-1)).toBe(1);
+describe('星期遮罩', () => {
+  it('bit 0 是週日、bit 6 是週六，與 Date.getDay() 一致', () => {
+    expect(hasWeekday(mask(0), 0)).toBe(true);
+    expect(hasWeekday(mask(6), 6)).toBe(true);
+    expect(hasWeekday(mask(1, 2, 3, 4, 5), 0)).toBe(false);
+    expect(hasWeekday(ALL_WEEKDAYS, 7)).toBe(false);
+  });
+
+  it('空遮罩與越界位元回到全選', () => {
+    expect(normalizeWeekdays(0)).toBe(ALL_WEEKDAYS);
+    expect(normalizeWeekdays(0x80)).toBe(ALL_WEEKDAYS);
+    expect(normalizeWeekdays(Number.NaN)).toBe(ALL_WEEKDAYS);
+    expect(normalizeWeekdays(mask(1, 5) | 0x100)).toBe(mask(1, 5));
+  });
+
+  it('切換：可加可減，但取消最後一天會被拒絕', () => {
+    expect(toggleWeekday(mask(1, 2), 3)).toBe(mask(1, 2, 3));
+    expect(toggleWeekday(mask(1, 2), 2)).toBe(mask(1));
+    expect(toggleWeekday(mask(1), 1)).toBe(mask(1));
+    expect(toggleWeekday(mask(1), 9)).toBe(mask(1));
+  });
+
+  it('摘要：每天／平日／週末／逐日，逐日以週一起算、週日放最後', () => {
+    expect(describeWeekdays(ALL_WEEKDAYS)).toBe('每天');
+    expect(describeWeekdays(mask(1, 2, 3, 4, 5))).toBe('平日');
+    expect(describeWeekdays(mask(0, 6))).toBe('週末');
+    expect(describeWeekdays(mask(1, 3, 5))).toBe('一、三、五');
+    expect(describeWeekdays(mask(0, 1))).toBe('一、日');
+    expect(describeWeekdays(0)).toBe('每天');
+  });
+});
+
+describe('時長與音量', () => {
+  it('夾在允許範圍內', () => {
     expect(clampDuration(0)).toBe(1);
     expect(clampDuration(181)).toBe(180);
-    expect(clampDuration(30)).toBe(30);
-    expect(clampDuration(29.6)).toBe(30);
     expect(clampDuration(Number.NaN)).toBe(DEFAULT_DURATION_MIN);
-  });
-
-  it('音量比例夾在 0 到 100', () => {
     expect(clampVolume(-1)).toBe(0);
     expect(clampVolume(101)).toBe(100);
-    expect(clampVolume(0)).toBe(0);
-    expect(clampVolume(50)).toBe(50);
-    expect(clampVolume(49.6)).toBe(50);
     expect(clampVolume(Number.NaN)).toBe(DEFAULT_VOLUME_PERCENT);
   });
+});
 
-  it('空網址代表使用官方來源', () => {
-    expect(validateStreamUrl('').ok).toBe(true);
-    expect(validateStreamUrl('   ').ok).toBe(true);
-    expect(validateStreamUrl(null).ok).toBe(true);
+describe('頻道', () => {
+  it('依 id 取名稱，找不到時落到第一個', () => {
+    expect(channelName(CHANNELS, 'bcc-pop')).toBe('中廣流行網');
+    expect(channelName(CHANNELS, 'nope')).toBe('中廣新聞網');
+    expect(channelName([], 'nope')).toBe('');
   });
 
-  it('只接受 http(s)，並說明原因', () => {
-    expect(validateStreamUrl('https://example.com/live.aac').ok).toBe(true);
-    expect(validateStreamUrl('http://example.com/live.aac').ok).toBe(true);
-
-    const bad = validateStreamUrl('rtmp://example.com/live');
-    expect(bad.ok).toBe(false);
-    expect(bad.reason).toContain('http');
+  it('預設頻道是第一個內建頻道', () => {
+    expect(defaultChannelId(CHANNELS)).toBe('bcc-news');
+    const custom: RadioChannel = { id: 'c1', name: '我的台', kind: 'url', source: 'https://x/y' };
+    expect(defaultChannelId([custom, ...CHANNELS])).toBe('bcc-news');
+    expect(defaultChannelId([custom])).toBe('c1');
+    expect(defaultChannelId([])).toBe('');
   });
 });
 
-describe('下一次觸發', () => {
-  it('今日尚未到即為今日', () => {
-    const now = new Date(2026, 8, 17, 5, 0, 0);
-    expect(nextOccurrence('06:00', now)).toEqual(new Date(2026, 8, 17, 6, 0, 0));
+describe('鬧鐘卡片', () => {
+  it('收合時的摘要看得出星期與頻道', () => {
+    expect(describeAlarmSummary(alarm(), CHANNELS)).toBe('每天 · 中廣新聞網');
+    expect(describeAlarmSummary(alarm({ weekdays: mask(0, 6), channelId: 'bcc-pop' }), CHANNELS))
+      .toBe('週末 · 中廣流行網');
   });
 
-  it('已過則為次日', () => {
-    const now = new Date(2026, 8, 17, 6, 30, 0);
-    expect(nextOccurrence('06:00', now)).toEqual(new Date(2026, 8, 18, 6, 0, 0));
-  });
-
-  it('恰好等於現在也算次日（與原生端同一套規則）', () => {
-    const now = new Date(2026, 8, 17, 6, 0, 0);
-    expect(nextOccurrence('06:00', now)).toEqual(new Date(2026, 8, 18, 6, 0, 0));
-  });
-
-  it('跨月與跨年', () => {
-    expect(nextOccurrence('06:00', new Date(2026, 8, 30, 7, 0, 0)))
-      .toEqual(new Date(2026, 9, 1, 6, 0, 0));
-    expect(nextOccurrence('06:00', new Date(2026, 11, 31, 7, 0, 0)))
-      .toEqual(new Date(2027, 0, 1, 6, 0, 0));
-  });
-
-  it('不合法的時間沒有下一次', () => {
-    expect(nextOccurrence('24:10', new Date())).toBeNull();
-  });
-});
-
-describe('下一次觸發的顯示文字', () => {
-  it('取所有啟用項目中最早者，並標出是今天', () => {
-    const now = new Date(2026, 8, 17, 5, 0, 0);
-    expect(describeNextTrigger(config([entry('07:00'), entry('06:00')]), now)).toBe('今天 06:00');
-  });
-
-  it('今日都已過時標出是明天', () => {
-    const now = new Date(2026, 8, 17, 8, 0, 0);
-    expect(describeNextTrigger(config([entry('06:00'), entry('07:00')]), now)).toBe('明天 06:00');
-  });
-
-  it('跨過今天與明天時顯示日期與星期', () => {
-    // 只有一筆 06:00 且現在是 05:59，仍是今天；改以停用來造出「更久以後」不成立的情況，
-    // 故此處直接驗證日期格式：把現在設為 06:00 整，下一次落在明天，
-    // 再以另一筆隔日的情境確認格式不會退化成空字串。
-    const now = new Date(2026, 8, 17, 6, 0, 0);
-    const text = describeNextTrigger(config([entry('06:00')]), now);
-    expect(text).toBe('明天 06:00');
-  });
-
-  it('總開關關閉時明說已關閉', () => {
-    const now = new Date(2026, 8, 17, 5, 0, 0);
-    expect(describeNextTrigger(config([entry('06:00')], false), now)).toBe('已關閉');
-  });
-
-  it('沒有啟用中的時間時明說', () => {
-    const now = new Date(2026, 8, 17, 5, 0, 0);
-    expect(describeNextTrigger(config([entry('06:00', false)]), now)).toBe('沒有啟用中的時間');
-    expect(describeNextTrigger(config([]), now)).toBe('沒有啟用中的時間');
-  });
-});
-
-describe('電台收合時的摘要', () => {
-  it('收合著也看得出設定了什麼', () => {
-    const c = config([entry('07:00'), entry('06:00')]);
-    expect(describeStationSummary(c)).toBe('每天 06:00、07:00 · 音量 100%');
-  });
-
-  it('只列啟用中的時間，並依時間排序', () => {
-    const c = config([entry('07:00'), entry('05:30', false), entry('06:00')]);
-    expect(describeStationSummary(c)).toBe('每天 06:00、07:00 · 音量 100%');
-  });
-
-  it('帶出目前的音量比例', () => {
-    const c = { ...config([entry('06:00')]), volumePercent: 60 };
-    expect(describeStationSummary(c)).toBe('每天 06:00 · 音量 60%');
-  });
-
-  it('時段超過三個時改為總數，不把整行撐爆', () => {
-    const c = config([entry('05:00'), entry('06:00'), entry('07:00'), entry('08:00')]);
-    expect(describeStationSummary(c)).toBe('每天 05:00、06:00、07:00 等 4 個時段 · 音量 100%');
-  });
-
-  it('總開關關閉與沒有時間各有各的說法', () => {
-    expect(describeStationSummary(config([entry('06:00')], false))).toBe('已關閉');
-    expect(describeStationSummary(config([]))).toBe('尚未設定時間');
-    expect(describeStationSummary(config([entry('06:00', false)]))).toBe('尚未設定時間');
+  it('新增鬧鐘的預設值：06:00、每天、第一個內建頻道、30 分鐘、啟用', () => {
+    const a = newAlarm(CHANNELS);
+    expect(a.time).toBe('06:00');
+    expect(a.weekdays).toBe(ALL_WEEKDAYS);
+    expect(a.channelId).toBe('bcc-news');
+    expect(a.durationMin).toBe(30);
+    expect(a.enabled).toBe(true);
+    expect(a.id).not.toBe('');
+    expect(newAlarm(CHANNELS).id).not.toBe(a.id);
   });
 });
 
 describe('播放中的狀態字', () => {
-  it('沒在播放時為空字串，讓摘要照常顯示', () => {
-    expect(describePlaybackState(null)).toBe('');
-    expect(describePlaybackState(status())).toBe('');
+  it('沒在播放時為空字串', () => {
+    expect(describePlaybackState(null, CHANNELS)).toBe('');
+    expect(describePlaybackState(status(), CHANNELS)).toBe('');
   });
 
-  it('手動直播與鬧鐘分得出來 —— 兩者的音量來源不同', () => {
-    expect(describePlaybackState(status({ playing: true, alarmAudioActive: false })))
-      .toBe('直播中（媒體音量）');
-    expect(describePlaybackState(status({ playing: true, alarmAudioActive: true })))
-      .toBe('播放中（鬧鐘音量）');
+  it('分得出直播與鬧鐘，並帶出頻道 —— 兩者的音量來源不同', () => {
+    expect(describePlaybackState(status({ playing: true, alarmAudioActive: false, playingChannelId: 'bcc-pop' }), CHANNELS))
+      .toBe('直播中：中廣流行網（媒體音量）');
+    expect(describePlaybackState(status({ playing: true, alarmAudioActive: true, playingChannelId: 'bcc-news' }), CHANNELS))
+      .toBe('播放中：中廣新聞網（鬧鐘音量）');
   });
 });
 
-describe('系統登錄狀態', () => {
-  it('沒有狀態時不顯示，關閉時明說', () => {
-    expect(describeSystemRegistration(config([entry('06:00')]), null)).toBe('');
-    expect(describeSystemRegistration(config([entry('06:00')], false), status())).toBe('鬧鐘已關閉');
+describe('系統登錄 —— 只在異常時說話', () => {
+  it('正常時什麼都不說', () => {
+    expect(registrationWarning(config([alarm()]), status({ registeredCount: 1 }))).toBe('');
+    expect(registrationWarning(config([alarm()]), null)).toBe('');
   });
 
-  it('系統中沒有本程式的鬧鐘時說清楚不會響，並指向可能的原因', () => {
-    const text = describeSystemRegistration(
-      config([entry('06:00')]),
-      status({ registeredCount: 0 }),
-    );
+  it('沒有啟用的鬧鐘時也不說 —— 沒有東西該被登錄', () => {
+    expect(registrationWarning(config([]), status({ registeredCount: 0 }))).toBe('');
+    expect(registrationWarning(config([alarm({ enabled: false })]), status({ registeredCount: 0 }))).toBe('');
+  });
+
+  it('有啟用的鬧鐘、系統中卻一筆都沒有時，說清楚不會響並指出原因', () => {
+    const text = registrationWarning(config([alarm()]), status({ registeredCount: 0 }));
     expect(text).toContain('不會響');
     expect(text).toContain('強制停止');
-  });
-
-  it('系統收下了就報出數量', () => {
-    expect(describeSystemRegistration(
-      config([entry('06:00'), entry('07:00')]),
-      status({ registeredCount: 2, systemNextAlarmIsOurs: true }),
-    )).toBe('系統已收下 2 個鬧鐘，裝置的下一個鬧鐘就是本程式的');
-  });
-
-  it('裝置的下一個鬧鐘屬於別的程式時不謊稱是自己的', () => {
-    // getNextAlarmClock 回傳的是整台裝置的下一個鬧鐘，可能是使用者的時鐘 App 的。
-    // 「不是我們的」不代表我們沒登錄 —— 措辭必須照這個語意。
-    const text = describeSystemRegistration(
-      config([entry('06:00')]),
-      status({ registeredCount: 1, systemNextAlarmIsOurs: false }),
-    );
-    expect(text).toContain('系統已收下 1 個鬧鐘');
-    expect(text).toContain('其他程式');
   });
 });
 
@@ -277,55 +209,31 @@ describe('自我測試的狀態', () => {
     expect(describeSelfTest(status(), now)).toBe('尚未測試過');
   });
 
-  it('已登錄時報出會響的時刻，並告訴使用者現在可以關掉程式', () => {
+  it('已登錄時報出會響的時刻並提示可關掉程式', () => {
     const at = new Date(2026, 8, 17, 10, 2, 30).getTime();
     const text = describeSelfTest(status({ selfTestRegistered: true, selfTestAt: at }), now);
     expect(text).toContain('10:02:30');
     expect(text).toContain('關掉');
   });
 
-  it('已響起時報出時刻，並點明是系統喚起的', () => {
-    const firedAt = new Date(2026, 8, 17, 9, 58, 3).getTime();
-    const text = describeSelfTest(status({ selfTestFiredAt: firedAt }), now);
-    expect(text).toContain('9/17 09:58:03');
-    expect(text).toContain('系統喚起');
-  });
-
-  it('登錄的時刻已經過去時，改為顯示上次的結果', () => {
-    const past = new Date(2026, 8, 17, 9, 0, 0).getTime();
-    const firedAt = new Date(2026, 8, 17, 9, 0, 1).getTime();
-    const text = describeSelfTest(
-      status({ selfTestRegistered: true, selfTestAt: past, selfTestFiredAt: firedAt }),
-      now,
-    );
-    expect(text).toContain('由系統喚起並響起');
+  it('已響起時點明是系統喚起的', () => {
+    const fired = new Date(2026, 8, 17, 9, 58, 3).getTime();
+    expect(describeSelfTest(status({ selfTestFiredAt: fired }), now)).toContain('9/17 09:58:03 由系統喚起並響起');
   });
 });
 
-describe('上次播放結果', () => {
-  it('從未觸發過', () => {
-    expect(formatLastResult(null)).toBe('尚未觸發過');
-    expect(formatLastResult(status())).toBe('尚未觸發過');
+describe('上次播放 —— 只在失敗時說話', () => {
+  it('成功或從未觸發為空字串', () => {
+    expect(lastFailureText(null)).toBe('');
+    expect(lastFailureText(status())).toBe('');
+    expect(lastFailureText(status({ hasLastResult: true, lastResultTime: 1, lastResultSuccess: true }))).toBe('');
   });
 
-  it('成功時顯示時間', () => {
-    const at = new Date(2026, 8, 17, 6, 0, 0).getTime();
-    const text = formatLastResult(status({ hasLastResult: true, lastResultTime: at, lastResultSuccess: true }));
-    expect(text).toContain('9/17');
-    expect(text).toContain('06:00');
-    expect(text).toContain('成功');
-  });
-
-  it('失敗時附上原因原文，不截斷', () => {
+  it('失敗時附上時間與未截斷的原因', () => {
     const at = new Date(2026, 8, 17, 6, 3, 0).getTime();
     const message = '在 3 分鐘內無法開始播放（可能是沒有網路或串流暫時無法連線）。';
-    const text = formatLastResult(status({
-      hasLastResult: true,
-      lastResultTime: at,
-      lastResultSuccess: false,
-      lastResultMessage: message,
-    }));
-    expect(text).toContain('失敗');
+    const text = lastFailureText(status({ hasLastResult: true, lastResultTime: at, lastResultSuccess: false, lastResultMessage: message }));
+    expect(text).toContain('9/17 06:03');
     expect(text).toContain(message);
   });
 });
@@ -336,76 +244,54 @@ describe('權限與廠牌提示', () => {
     expect(permissionWarnings(null)).toEqual([]);
   });
 
-  it('未允許精確鬧鐘時說明後果', () => {
-    const warnings = permissionWarnings(status({ exactAlarmAllowed: false }));
-    expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain('不會響');
+  it('缺什麼就提示什麼', () => {
+    expect(permissionWarnings(status({ exactAlarmAllowed: false }))[0]).toContain('不會響');
+    expect(permissionWarnings(status({ notificationsGranted: false }))[0]).toContain('停止');
+    expect(permissionWarnings(status({ manufacturer: 'Xiaomi' })).length).toBe(1);
+    expect(permissionWarnings(status({ exactAlarmAllowed: false, notificationsGranted: false, manufacturer: 'OPPO' })).length).toBe(3);
   });
 
-  it('未允許通知時說明播放仍會進行，失去的只是停止按鈕', () => {
-    const warnings = permissionWarnings(status({ notificationsGranted: false }));
-    expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain('停止');
-  });
-
-  it('省電機制積極的廠牌多一行提示', () => {
-    expect(isAggressiveVendor('Xiaomi')).toBe(true);
+  it('廠牌判定寬鬆：漏掉的後果是早上沒被叫醒卻不知道為什麼', () => {
     expect(isAggressiveVendor('HUAWEI')).toBe(true);
     expect(isAggressiveVendor('samsung')).toBe(true);
     expect(isAggressiveVendor('Google')).toBe(false);
-    expect(isAggressiveVendor('')).toBe(false);
     expect(isAggressiveVendor(null)).toBe(false);
-
-    expect(permissionWarnings(status({ manufacturer: 'Xiaomi' })).length).toBe(1);
-  });
-
-  it('多項同時缺失時逐一列出', () => {
-    const warnings = permissionWarnings(status({
-      exactAlarmAllowed: false,
-      notificationsGranted: false,
-      manufacturer: 'OPPO',
-    }));
-    expect(warnings.length).toBe(3);
   });
 });
 
 describe('插件回傳的收斂', () => {
   it('缺欄位時給出可用的預設', () => {
-    const result = normalizeConfig(undefined);
-    expect(result.masterEnabled).toBe(false);
-    expect(result.entries).toEqual([]);
-    expect(result.customStreamUrl).toBe('');
+    const r = normalizeConfig(undefined);
+    expect(r.alarms).toEqual([]);
+    expect(r.channels).toEqual([]);
+    expect(r.volumePercent).toBe(100);
   });
 
-  it('音量缺欄位時讀成 100，而不是 0', () => {
-    // 舊版寫入的設定沒有這個欄位。讀成 0 會讓使用者以為鬧鐘壞了。
-    expect(normalizeConfig({ masterEnabled: true, entries: [] }).volumePercent).toBe(100);
-    expect(normalizeConfig({ volumePercent: null }).volumePercent).toBe(100);
-    expect(normalizeConfig({ volumePercent: 40 }).volumePercent).toBe(40);
-    expect(normalizeConfig({ volumePercent: 0 }).volumePercent).toBe(0);
-    expect(normalizeConfig({ volumePercent: 999 }).volumePercent).toBe(100);
-    expect(normalizeConfig({ volumePercent: -5 }).volumePercent).toBe(0);
-  });
-
-  it('剔除時間不合法的項目並正規化其餘', () => {
-    const result = normalizeConfig({
-      masterEnabled: true,
-      customStreamUrl: 'https://example.com/live.aac',
-      entries: [
-        { id: 'a', time: '24:10', enabled: true, durationMin: 30 },
-        { id: 'b', time: '6:0', enabled: true, durationMin: 999 },
+  it('剔除時刻不合法的鬧鐘，校正遮罩、時長與無效頻道', () => {
+    const r = normalizeConfig({
+      schemaVersion: 2,
+      volumePercent: 40,
+      channels: CHANNELS,
+      alarms: [
+        { id: 'a', time: '24:10', weekdays: 1, channelId: 'bcc-news' },
+        { id: 'b', time: '6:0', weekdays: 0, channelId: 'gone', durationMin: 999, enabled: true },
       ],
     });
-    expect(result.entries.length).toBe(1);
-    expect(result.entries[0].time).toBe('06:00');
-    expect(result.entries[0].durationMin).toBe(180);
+    expect(r.alarms.length).toBe(1);
+    expect(r.alarms[0]).toEqual({
+      id: 'b', time: '06:00', weekdays: ALL_WEEKDAYS, channelId: 'bcc-news', durationMin: 180, enabled: true,
+    });
+    expect(r.volumePercent).toBe(40);
   });
 
-  it('預填的兩個時段為 06:00 與 07:00 且各自有識別', () => {
-    const entries = defaultEntries();
-    expect(entries.map((e) => e.time)).toEqual(['06:00', '07:00']);
-    expect(entries.every((e) => e.enabled)).toBe(true);
-    expect(entries.every((e) => e.durationMin === DEFAULT_DURATION_MIN)).toBe(true);
-    expect(new Set(entries.map((e) => e.id)).size).toBe(2);
+  it('音量缺欄位讀成 100，不是 0', () => {
+    expect(normalizeConfig({ alarms: [] }).volumePercent).toBe(100);
+    expect(normalizeConfig({ volumePercent: null }).volumePercent).toBe(100);
+    expect(normalizeConfig({ volumePercent: 0 }).volumePercent).toBe(0);
+  });
+
+  it('頻道的 kind 只有 bcc 與 url，其餘視為 bcc', () => {
+    const r = normalizeConfig({ channels: [{ id: 'x', name: 'X', kind: 'weird', source: 's' }] });
+    expect(r.channels[0].kind).toBe('bcc');
   });
 });

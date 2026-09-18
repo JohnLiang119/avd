@@ -1,13 +1,12 @@
 /**
- * 早報鬧鐘的前端側：型別、插件封裝，以及顯示與驗證用的純函式。
+ * 廣播鬧鐘的前端側：型別、插件封裝，以及顯示與驗證用的純函式。
  *
  * **這裡刻意沒有任何 `defineSetting`。** 鬧鐘設定的權威來源在 Android 原生端
  * （見 config-persistence 規格的「原生端為權威來源的設定」）：鬧鐘必須在 WebView
  * 未執行時響，而前端的儲存埠此時讀不到。前端因此不保有可獨立寫入的副本 ——
  * 每次開啟設定介面都經插件回原生端讀，變更時整包寫回。
  *
- * 純函式與插件呼叫分開的理由與 `visualLanguage.ts` 相同：前者可被 vitest 直接驗證，
- * 而「時間輸入的把關」與「下一次是什麼時候」正是出錯時最不容易被看見的兩段。
+ * 模型以鬧鐘為主體（design.md D14）：一筆鬧鐘 = 時刻 + 星期 + 頻道 + 時長 + 啟用。
  */
 
 import { registerPlugin } from '@capacitor/core';
@@ -16,50 +15,47 @@ const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
 
 // ---- 型別 ----
 
-/** 一筆每日觸發時間。與原生端的 RadioAlarmConfig.Entry 對應。 */
-export interface RadioAlarmEntry {
+export interface RadioChannel {
+  id: string;
+  name: string;
+  /** bcc：向中廣官方 API 依名稱解析；url：自訂串流網址 */
+  kind: 'bcc' | 'url';
+  source: string;
+}
+
+export interface RadioAlarm {
   id: string;
   /** 已正規化的 HH:mm */
   time: string;
-  enabled: boolean;
+  /** 星期遮罩：bit 0 = 週日 … bit 6 = 週六，與 Date.getDay() 一致；必非零 */
+  weekdays: number;
+  channelId: string;
   durationMin: number;
+  enabled: boolean;
 }
 
 export interface RadioAlarmConfig {
-  masterEnabled: boolean;
-  entries: RadioAlarmEntry[];
-  /** 空字串代表使用官方來源 */
-  customStreamUrl: string;
-  /**
-   * 應用程式內的音量比例（0–100）。
-   *
-   * 這是**在系統鬧鐘音量之下**的縮放，不是系統音量本身 —— 去改系統鬧鐘音量
-   * 會連使用者真正的鬧鐘一起改掉。100% 即「完全照系統鬧鐘音量」。
-   */
+  schemaVersion: number;
+  alarms: RadioAlarm[];
+  channels: RadioChannel[];
+  /** 應用程式內的音量比例（0–100），在系統音量之下縮放 */
   volumePercent: number;
 }
 
 export interface RadioAlarmStatus {
-  /** 下一次觸發的 epoch 毫秒；沒有任何啟用項目時為 -1 */
-  nextTriggerAt: number;
   playing: boolean;
-  /**
-   * 播放中的是否為鬧鐘語意（鬧鐘或試播）。
-   * 手動直播走媒體音量，故為 false —— 介面據此顯示「直播中」而非「播放中」。
-   */
+  /** 播放中的是否為鬧鐘語意（鬧鐘或試播）；手動直播為 false */
   alarmAudioActive: boolean;
+  /** 播放中的頻道 id；沒在播放時為空字串 */
+  playingChannelId: string;
   exactAlarmAllowed: boolean;
   notificationsGranted: boolean;
-  /** 目前**實際存在於系統中**的本程式鬧鐘數量（向系統回讀，不是我們自己記得的） */
+  /** 實際存在於系統中的本程式鬧鐘數量（向系統回讀） */
   registeredCount: number;
-  /** 系統的「下一個鬧鐘」時刻，整台裝置共用；-1 代表沒有任何鬧鐘 */
   systemNextAlarmAt: number;
-  /** 系統的「下一個鬧鐘」是否為本程式的（可能是使用者的時鐘 App 的） */
   systemNextAlarmIsOurs: boolean;
-  /** 已登錄的自我測試觸發時刻；-1 代表沒有 */
   selfTestAt: number;
   selfTestRegistered: boolean;
-  /** 自我測試實際響起的時刻；-1 代表從未響過 */
   selfTestFiredAt: number;
   manufacturer: string;
   hasLastResult: boolean;
@@ -68,28 +64,34 @@ export interface RadioAlarmStatus {
   lastResultMessage?: string;
 }
 
-/** 待寫入錯誤紀錄的失敗摘要（原生端在播放失敗時留下）。 */
 export interface RadioAlarmJournalEntry {
   hasEntry: boolean;
-  /** 事件實際發生的時間，不是取走的時間 */
   time?: number;
   message?: string;
 }
 
-/** 時間輸入的把關結果。不合法時一律附上可直接顯示的原因。 */
 export type TimeValidation =
   | { ok: true; time: string }
   | { ok: false; reason: string };
 
-// ---- 純函式：時間的把關 ----
+// ---- 常數 ----
 
-/**
- * 正規化為 HH:mm。
- *
- * 與原生端的 `RadioAlarmConfig.normalizeTime` 採同一套規則（H:m 可接受、
- * 補零後輸出），兩邊各自有測試釘住。前端這一份存在的理由是**即時給出拒絕的原因** ——
- * 規格明訂不得靜默忽略。
- */
+export const ALL_WEEKDAYS = 0x7f;
+export const MIN_DURATION_MIN = 1;
+export const MAX_DURATION_MIN = 180;
+export const DEFAULT_DURATION_MIN = 30;
+export const MIN_VOLUME_PERCENT = 0;
+export const MAX_VOLUME_PERCENT = 100;
+export const DEFAULT_VOLUME_PERCENT = 100;
+export const DEFAULT_ALARM_TIME = '06:00';
+
+const WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
+const WEEKDAYS_MON_TO_FRI = 0b0111110;
+const WEEKDAYS_WEEKEND = 0b1000001;
+
+// ---- 時間 ----
+
+/** 正規化為 HH:mm；與原生端 `RadioAlarmConfig.normalizeTime` 同一套規則。 */
 export function normalizeTime(raw: string | null | undefined): string | null {
   if (raw == null) return null;
   const text = String(raw).trim();
@@ -107,168 +109,114 @@ export function normalizeTime(raw: string | null | undefined): string | null {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-/**
- * 新增一筆時間前的把關：格式、範圍，以及與既有清單是否重複。
- *
- * 重複的判定以正規化後的字串為準 —— 6:00 與 06:00 是同一個時刻，
- * 而使用者兩種都可能輸入。
- */
-export function validateNewTime(
-  entries: readonly RadioAlarmEntry[],
-  raw: string | null | undefined,
-): TimeValidation {
+/** 時刻的把關。不合法時附上可直接顯示的原因 —— 規格明訂不得靜默忽略。 */
+export function validateTime(raw: string | null | undefined): TimeValidation {
   const time = normalizeTime(raw);
-  if (time === null) {
-    return { ok: false, reason: '請輸入 00:00 至 23:59 之間的時間' };
-  }
-  if (entries.some((entry) => entry.time === time)) {
-    return { ok: false, reason: `清單中已經有 ${time} 了` };
-  }
+  if (time === null) return { ok: false, reason: '請輸入 00:00 至 23:59 之間的時間' };
   return { ok: true, time };
 }
 
-/** 播放時長的允許範圍，與原生端的常數一致。 */
-export const MIN_DURATION_MIN = 1;
-export const MAX_DURATION_MIN = 180;
-export const DEFAULT_DURATION_MIN = 30;
+// ---- 星期 ----
+
+export function hasWeekday(mask: number, day: number): boolean {
+  if (day < 0 || day > 6) return false;
+  return (mask & (1 << day)) !== 0;
+}
+
+/** 空遮罩或越界位元一律回到全選，與原生端一致。 */
+export function normalizeWeekdays(mask: number): number {
+  const cleaned = (Number.isFinite(mask) ? mask : 0) & ALL_WEEKDAYS;
+  return cleaned === 0 ? ALL_WEEKDAYS : cleaned;
+}
+
+/**
+ * 切換某一天。**取消最後一天會被拒絕**（回傳原遮罩）—— 規格明訂每筆至少保留一天。
+ */
+export function toggleWeekday(mask: number, day: number): number {
+  const current = normalizeWeekdays(mask);
+  if (day < 0 || day > 6) return current;
+  const bit = 1 << day;
+  if ((current & bit) !== 0) {
+    const next = current & ~bit;
+    return next === 0 ? current : next;
+  }
+  return current | bit;
+}
+
+/** 星期的摘要：每天／平日／週末／逐日列出。 */
+export function describeWeekdays(mask: number): string {
+  const m = normalizeWeekdays(mask);
+  if (m === ALL_WEEKDAYS) return '每天';
+  if (m === WEEKDAYS_MON_TO_FRI) return '平日';
+  if (m === WEEKDAYS_WEEKEND) return '週末';
+  // 以週一起算排序，週日放最後 —— 符合台灣的閱讀習慣
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  return order.filter((d) => hasWeekday(m, d)).map((d) => WEEKDAY_LABEL[d]).join('、');
+}
+
+// ---- 時長與音量 ----
 
 export function clampDuration(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_DURATION_MIN;
   const rounded = Math.round(value);
-  if (rounded < MIN_DURATION_MIN) return MIN_DURATION_MIN;
-  if (rounded > MAX_DURATION_MIN) return MAX_DURATION_MIN;
-  return rounded;
+  return Math.min(MAX_DURATION_MIN, Math.max(MIN_DURATION_MIN, rounded));
 }
-
-/** 音量比例的允許範圍與預設值，與原生端的常數一致。 */
-export const MIN_VOLUME_PERCENT = 0;
-export const MAX_VOLUME_PERCENT = 100;
-export const DEFAULT_VOLUME_PERCENT = 100;
 
 export function clampVolume(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_VOLUME_PERCENT;
   const rounded = Math.round(value);
-  if (rounded < MIN_VOLUME_PERCENT) return MIN_VOLUME_PERCENT;
-  if (rounded > MAX_VOLUME_PERCENT) return MAX_VOLUME_PERCENT;
-  return rounded;
+  return Math.min(MAX_VOLUME_PERCENT, Math.max(MIN_VOLUME_PERCENT, rounded));
 }
 
-/** 自訂串流網址的把關：空字串代表用官方，其餘必須是 http(s)。 */
-export function validateStreamUrl(raw: string | null | undefined): { ok: boolean; reason: string } {
-  const text = (raw ?? '').trim();
-  if (text === '') return { ok: true, reason: '' };
-  if (text.startsWith('http://') || text.startsWith('https://')) return { ok: true, reason: '' };
-  return { ok: false, reason: '請輸入以 http:// 或 https:// 開頭的網址，或留空以使用官方來源' };
+// ---- 頻道 ----
+
+export function channelName(channels: readonly RadioChannel[], id: string): string {
+  const found = channels.find((c) => c.id === id);
+  if (found) return found.name;
+  return channels[0]?.name ?? '';
 }
 
-// ---- 純函式：顯示用文字 ----
+/** 第一個內建頻道：新增鬧鐘的預設，也是無效頻道參照的落點。 */
+export function defaultChannelId(channels: readonly RadioChannel[]): string {
+  return channels.find((c) => c.kind === 'bcc')?.id ?? channels[0]?.id ?? '';
+}
 
-const WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
+// ---- 顯示用文字 ----
 
-/**
- * 「下一次觸發時間」的顯示文字。
- *
- * 以裝置本地時間計算，並標出是今天、明天還是更久以後 —— 只顯示 06:00 而不說是哪天，
- * 使用者無從判斷自己剛才的變更有沒有生效。
- */
-export function describeNextTrigger(config: RadioAlarmConfig, now: Date): string {
-  if (!config.masterEnabled) return '已關閉';
+/** 鬧鐘卡片收合時的摘要：星期與頻道。這一行要讓人不展開就看得出設定了什麼。 */
+export function describeAlarmSummary(alarm: RadioAlarm, channels: readonly RadioChannel[]): string {
+  return `${describeWeekdays(alarm.weekdays)} · ${channelName(channels, alarm.channelId)}`;
+}
 
-  const active = config.entries.filter((entry) => entry.enabled);
-  if (active.length === 0) return '沒有啟用中的時間';
-
-  let earliest: Date | null = null;
-  for (const entry of active) {
-    const at = nextOccurrence(entry.time, now);
-    if (at === null) continue;
-    if (earliest === null || at.getTime() < earliest.getTime()) earliest = at;
-  }
-  if (earliest === null) return '沒有啟用中的時間';
-
-  const hhmm = `${String(earliest.getHours()).padStart(2, '0')}:${String(earliest.getMinutes()).padStart(2, '0')}`;
-  const days = dayDifference(now, earliest);
-  if (days === 0) return `今天 ${hhmm}`;
-  if (days === 1) return `明天 ${hhmm}`;
-  return `${earliest.getMonth() + 1}/${earliest.getDate()}（週${WEEKDAY_LABEL[earliest.getDay()]}）${hhmm}`;
+/** 新增鬧鐘的預設值：06:00、每天、第一個內建頻道、30 分鐘、啟用。 */
+export function newAlarm(channels: readonly RadioChannel[]): RadioAlarm {
+  return {
+    id: `t${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    time: DEFAULT_ALARM_TIME,
+    weekdays: ALL_WEEKDAYS,
+    channelId: defaultChannelId(channels),
+    durationMin: DEFAULT_DURATION_MIN,
+    enabled: true,
+  };
 }
 
 /**
- * 某個 HH:mm 的下一次出現。
- *
- * 與原生端的 `RadioAlarmSchedule.nextTrigger` 同一套規則，包含「恰好等於現在即算次日」——
- * 兩邊若不一致，介面顯示的時間會與實際響的時間差一天。
- */
-export function nextOccurrence(time: string, now: Date): Date | null {
-  const normalized = normalizeTime(time);
-  if (normalized === null) return null;
-
-  const [hour, minute] = normalized.split(':').map(Number);
-  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
-  if (candidate.getTime() <= now.getTime()) {
-    candidate.setDate(candidate.getDate() + 1);
-  }
-  return candidate;
-}
-
-/** 以「日曆上的天數」計算相差幾天，而非除以 86400000 —— 後者在跨日界時會差一天。 */
-function dayDifference(from: Date, to: Date): number {
-  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime();
-  const b = new Date(to.getFullYear(), to.getMonth(), to.getDate()).getTime();
-  return Math.round((b - a) / 86400000);
-}
-
-/**
- * 電台那一層收合時顯示的摘要。
- *
- * 兩層選單的重點在這一行：**收合著也看得出設定了什麼**，不必展開。
- * 少了它，收合就只是把資訊藏起來，那比原本的長清單更糟。
- */
-export function describeStationSummary(config: RadioAlarmConfig): string {
-  if (!config.masterEnabled) return '已關閉';
-
-  const times = config.entries
-    .filter((entry) => entry.enabled)
-    .map((entry) => entry.time)
-    .sort();
-
-  if (times.length === 0) return '尚未設定時間';
-
-  // 時段多起來會把這一行撐爆，超過三個就改為總數
-  const shown = times.length > 3
-    ? `${times.slice(0, 3).join('、')} 等 ${times.length} 個時段`
-    : times.join('、');
-
-  return `每天 ${shown} · 音量 ${config.volumePercent}%`;
-}
-
-/**
- * 播放中時取代摘要顯示的狀態字；沒在播放時回傳空字串。
+ * 播放中的狀態字；沒在播放時回傳空字串。
  *
  * 手動直播與鬧鐘要分得出來，因為**兩者的音量來源不同** —— 使用者若看到「直播中」
- * 卻去調鬧鐘音量，會發現怎麼調都沒反應。以文字而非顏色表達：這是狀態不是操作
- * （見 visual-language 規格）。
+ * 卻去調鬧鐘音量，會發現怎麼調都沒反應。
  */
-export function describePlaybackState(status: RadioAlarmStatus | null): string {
+export function describePlaybackState(
+  status: RadioAlarmStatus | null,
+  channels: readonly RadioChannel[],
+): string {
   if (!status || !status.playing) return '';
-  return status.alarmAudioActive ? '播放中（鬧鐘音量）' : '直播中（媒體音量）';
+  const name = channelName(channels, status.playingChannelId);
+  return status.alarmAudioActive
+    ? `播放中：${name}（鬧鐘音量）`
+    : `直播中：${name}（媒體音量）`;
 }
 
-/** 「上次播放結果」的顯示文字。三種狀態：從未觸發、成功、失敗。 */
-export function formatLastResult(status: RadioAlarmStatus | null): string {
-  if (!status || !status.hasLastResult || !status.lastResultTime) return '尚未觸發過';
-
-  const at = new Date(status.lastResultTime);
-  const stamp = `${at.getMonth() + 1}/${at.getDate()} `
-    + `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
-
-  if (status.lastResultSuccess) {
-    return `${stamp} 播放成功`;
-  }
-  const message = (status.lastResultMessage || '').trim();
-  return message ? `${stamp} 失敗：${message}` : `${stamp} 失敗`;
-}
-
-/** 共用的時刻格式（M/D HH:mm）。 */
 function stampOf(at: number, withSeconds = false): string {
   const d = new Date(at);
   const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -277,131 +225,143 @@ function stampOf(at: number, withSeconds = false): string {
 }
 
 /**
- * 「系統到底有沒有收下這些鬧鐘」。
+ * 「系統到底有沒有收下這些鬧鐘」—— **只在異常時說話**。
  *
- * 這一行與 `describeNextTrigger` 的差別是整個功能可信度的關鍵：後者是**本程式自己
- * 算的**，設定裡寫了 06:00 它就說 06:00，即使系統中根本沒有任何鬧鐘 —— 也就是
- * 使用者最擔心的那個情況，它什麼都不會說。這一行則來自向系統回讀的結果。
+ * 有啟用的鬧鐘、系統中卻一筆都沒有，這是使用者最擔心的情況，也正是原本的介面
+ * 看起來最正常的時候（「下一次觸發」是本程式自己算的）。正常時回傳空字串。
  */
-export function describeSystemRegistration(
-  config: RadioAlarmConfig,
-  status: RadioAlarmStatus | null,
-): string {
+export function registrationWarning(config: RadioAlarmConfig, status: RadioAlarmStatus | null): string {
   if (!status) return '';
-  if (!config.masterEnabled) return '鬧鐘已關閉';
-
-  if (status.registeredCount === 0) {
-    return '系統中沒有本程式的鬧鐘，時間到不會響。請確認未被「強制停止」，並允許自啟動。';
-  }
-  if (status.systemNextAlarmIsOurs) {
-    return `系統已收下 ${status.registeredCount} 個鬧鐘，裝置的下一個鬧鐘就是本程式的`;
-  }
-  return `系統已收下 ${status.registeredCount} 個鬧鐘（裝置的下一個鬧鐘屬於其他程式）`;
+  const enabled = config.alarms.filter((a) => a.enabled).length;
+  if (enabled === 0 || status.registeredCount > 0) return '';
+  return '系統中沒有本程式的鬧鐘，時間到不會響。請確認未被「強制停止」，並允許自啟動。';
 }
 
 /**
- * 自我測試的狀態。
- *
- * 「已響起」這一筆是本功能最有說服力的證據：它由接收器寫入，而接收器只有在
- * **系統把本程式的程序叫起來**時才會執行 —— 使用者可以按下測試後把應用程式關掉，
- * 回來看到這一行，就知道關掉之後鬧鐘依然有效。
+ * 自我測試的狀態。「已響起」由接收器寫入，而接收器只有在**系統把程序叫起來**時
+ * 才會執行 —— 使用者關掉 App 回來看到這行，就知道關掉之後鬧鐘依然有效。
  */
 export function describeSelfTest(status: RadioAlarmStatus | null, now: Date): string {
   if (!status) return '';
-
   if (status.selfTestRegistered && status.selfTestAt > now.getTime()) {
     const at = new Date(status.selfTestAt);
-    const hhmmss = `${String(at.getHours()).padStart(2, '0')}:`
-      + `${String(at.getMinutes()).padStart(2, '0')}:`
-      + `${String(at.getSeconds()).padStart(2, '0')}`;
+    const hhmmss = [at.getHours(), at.getMinutes(), at.getSeconds()]
+      .map((n) => String(n).padStart(2, '0')).join(':');
     return `測試鬧鐘已登錄，${hhmmss} 會響。現在可以把本程式完全關掉再等它。`;
   }
-
   if (status.selfTestFiredAt > 0) {
     return `上次測試：${stampOf(status.selfTestFiredAt, true)} 由系統喚起並響起`;
   }
-
   return '尚未測試過';
 }
 
-/**
- * 需要提醒使用者去放行的系統限制。
- *
- * 一律以文字表達，不動用視覺語言中唯一的強調色 —— 這些是需要注意的狀態，
- * 不是不可逆的操作（見 visual-language 規格）。
- */
+/** 上次播放**失敗**時的說明；成功或從未觸發回傳空字串（安靜原則）。 */
+export function lastFailureText(status: RadioAlarmStatus | null): string {
+  if (!status || !status.hasLastResult || !status.lastResultTime || status.lastResultSuccess) return '';
+  const message = (status.lastResultMessage || '').trim();
+  return `${stampOf(status.lastResultTime)} 播放失敗${message ? `：${message}` : ''}`;
+}
+
+/** 需要提醒使用者去放行的系統限制；一切正常時為空陣列。 */
 export function permissionWarnings(status: RadioAlarmStatus | null): string[] {
   if (!status) return [];
   const warnings: string[] = [];
-
-  if (!status.exactAlarmAllowed) {
-    warnings.push('未允許精確鬧鐘：時間到可能不會響，請點此前往系統設定開啟。');
-  }
-  if (!status.notificationsGranted) {
-    warnings.push('未允許通知：播放仍會照常開始，但通知列不會有「停止」按鈕。');
-  }
+  if (!status.exactAlarmAllowed) warnings.push('未允許精確鬧鐘：時間到可能不會響。');
+  if (!status.notificationsGranted) warnings.push('未允許通知：播放仍會開始，但通知列不會有「停止」按鈕。');
   if (isAggressiveVendor(status.manufacturer)) {
-    warnings.push('部分廠牌的省電機制會關掉背景的鬧鐘。若某天早上沒響，請允許本程式自啟動並關閉其電池最佳化。');
+    warnings.push('此廠牌的省電機制可能關掉背景鬧鐘。若某天早上沒響，請允許自啟動並關閉電池最佳化。');
   }
   return warnings;
 }
 
-/**
- * 以省電機制積極著稱的廠牌。
- *
- * 這份清單只用來決定「要不要多顯示一行提示」，判斷錯了最多是多一行字，
- * 故寧可寬鬆也不要漏掉 —— 漏掉的後果是使用者某天早上沒被叫醒卻不知道為什麼。
- */
 const AGGRESSIVE_VENDORS = ['xiaomi', 'redmi', 'poco', 'huawei', 'honor', 'oppo', 'realme', 'oneplus', 'vivo', 'iqoo', 'meizu', 'samsung', 'asus', 'transsion', 'tecno', 'infinix'];
 
 export function isAggressiveVendor(manufacturer: string | null | undefined): boolean {
   const name = (manufacturer || '').trim().toLowerCase();
-  if (!name) return false;
-  return AGGRESSIVE_VENDORS.some((vendor) => name.includes(vendor));
+  return name !== '' && AGGRESSIVE_VENDORS.some((v) => name.includes(v));
+}
+
+// ---- 插件回傳的收斂 ----
+
+export function normalizeConfig(raw: any): RadioAlarmConfig {
+  const channels: RadioChannel[] = Array.isArray(raw?.channels)
+    ? raw.channels
+        .map((c: any) => ({
+          id: String(c?.id ?? ''),
+          name: String(c?.name ?? ''),
+          kind: c?.kind === 'url' ? 'url' as const : 'bcc' as const,
+          source: String(c?.source ?? ''),
+        }))
+        .filter((c: RadioChannel) => c.id !== '')
+    : [];
+
+  const fallbackChannel = defaultChannelId(channels);
+
+  const alarms: RadioAlarm[] = Array.isArray(raw?.alarms)
+    ? raw.alarms
+        .map((a: any) => ({
+          id: String(a?.id ?? ''),
+          time: normalizeTime(a?.time) ?? '',
+          weekdays: normalizeWeekdays(Number(a?.weekdays)),
+          channelId: channels.some((c) => c.id === a?.channelId) ? String(a.channelId) : fallbackChannel,
+          durationMin: clampDuration(Number(a?.durationMin)),
+          enabled: Boolean(a?.enabled),
+        }))
+        .filter((a: RadioAlarm) => a.time !== '' && a.id !== '')
+    : [];
+
+  return {
+    schemaVersion: Number(raw?.schemaVersion ?? 2),
+    alarms,
+    channels,
+    volumePercent: raw?.volumePercent === undefined || raw?.volumePercent === null
+      ? DEFAULT_VOLUME_PERCENT
+      : clampVolume(Number(raw.volumePercent)),
+  };
 }
 
 // ---- 插件封裝 ----
 
 export const RadioAlarmService = {
   async getConfig(): Promise<RadioAlarmConfig> {
-    const result = await YoutubeDlPlugin.getRadioAlarmConfig();
-    return normalizeConfig(result);
+    return normalizeConfig(await YoutubeDlPlugin.getRadioAlarmConfig());
   },
 
   async setConfig(config: RadioAlarmConfig): Promise<RadioAlarmConfig> {
     const result = await YoutubeDlPlugin.setRadioAlarmConfig({
-      masterEnabled: config.masterEnabled,
-      customStreamUrl: config.customStreamUrl ?? '',
       volumePercent: clampVolume(Number(config.volumePercent)),
-      entries: config.entries.map((entry) => ({
-        id: entry.id,
-        time: entry.time,
-        enabled: entry.enabled,
-        durationMin: entry.durationMin,
+      channels: config.channels.map((c) => ({ id: c.id, name: c.name, kind: c.kind, source: c.source })),
+      alarms: config.alarms.map((a) => ({
+        id: a.id,
+        time: a.time,
+        weekdays: a.weekdays,
+        channelId: a.channelId,
+        durationMin: a.durationMin,
+        enabled: a.enabled,
       })),
     });
     return normalizeConfig(result);
   },
 
   async getStatus(): Promise<RadioAlarmStatus> {
-    const result = await YoutubeDlPlugin.getRadioAlarmStatus();
+    const r = await YoutubeDlPlugin.getRadioAlarmStatus();
     return {
-      nextTriggerAt: Number(result?.nextTriggerAt ?? -1),
-      playing: Boolean(result?.playing),
-      alarmAudioActive: Boolean(result?.alarmAudioActive),
-      exactAlarmAllowed: Boolean(result?.exactAlarmAllowed),
-      notificationsGranted: Boolean(result?.notificationsGranted),
-      registeredCount: Number(result?.registeredCount ?? 0),
-      systemNextAlarmAt: Number(result?.systemNextAlarmAt ?? -1),
-      systemNextAlarmIsOurs: Boolean(result?.systemNextAlarmIsOurs),
-      selfTestAt: Number(result?.selfTestAt ?? -1),
-      selfTestRegistered: Boolean(result?.selfTestRegistered),
-      selfTestFiredAt: Number(result?.selfTestFiredAt ?? -1),
-      manufacturer: String(result?.manufacturer ?? ''),
-      hasLastResult: Boolean(result?.hasLastResult),
-      lastResultTime: result?.lastResultTime ? Number(result.lastResultTime) : undefined,
-      lastResultSuccess: result?.hasLastResult ? Boolean(result.lastResultSuccess) : undefined,
-      lastResultMessage: result?.lastResultMessage ? String(result.lastResultMessage) : undefined,
+      playing: Boolean(r?.playing),
+      alarmAudioActive: Boolean(r?.alarmAudioActive),
+      playingChannelId: String(r?.playingChannelId ?? ''),
+      exactAlarmAllowed: Boolean(r?.exactAlarmAllowed),
+      notificationsGranted: Boolean(r?.notificationsGranted),
+      registeredCount: Number(r?.registeredCount ?? 0),
+      systemNextAlarmAt: Number(r?.systemNextAlarmAt ?? -1),
+      systemNextAlarmIsOurs: Boolean(r?.systemNextAlarmIsOurs),
+      selfTestAt: Number(r?.selfTestAt ?? -1),
+      selfTestRegistered: Boolean(r?.selfTestRegistered),
+      selfTestFiredAt: Number(r?.selfTestFiredAt ?? -1),
+      manufacturer: String(r?.manufacturer ?? ''),
+      hasLastResult: Boolean(r?.hasLastResult),
+      lastResultTime: r?.lastResultTime ? Number(r.lastResultTime) : undefined,
+      lastResultSuccess: r?.hasLastResult ? Boolean(r.lastResultSuccess) : undefined,
+      lastResultMessage: r?.lastResultMessage ? String(r.lastResultMessage) : undefined,
     };
   },
 
@@ -409,12 +369,9 @@ export const RadioAlarmService = {
     await YoutubeDlPlugin.testRadioAlarm();
   },
 
-  /**
-   * 手動直播。刻意不需要先開啟鬧鐘總開關 ——
-   * 「現在想聽廣播」和「明天早上要被叫醒」是兩件事。
-   */
-  async playLive(): Promise<void> {
-    await YoutubeDlPlugin.playRadioLive();
+  /** 手動直播指定頻道。不依賴任何鬧鐘的存在。 */
+  async playLive(channelId: string): Promise<void> {
+    await YoutubeDlPlugin.playRadioLive({ channelId });
   },
 
   async stop(): Promise<void> {
@@ -422,23 +379,22 @@ export const RadioAlarmService = {
   },
 
   async consumeJournal(): Promise<RadioAlarmJournalEntry> {
-    const result = await YoutubeDlPlugin.consumeRadioAlarmJournal();
+    const r = await YoutubeDlPlugin.consumeRadioAlarmJournal();
     return {
-      hasEntry: Boolean(result?.hasEntry),
-      time: result?.time ? Number(result.time) : undefined,
-      message: result?.message ? String(result.message) : undefined,
+      hasEntry: Boolean(r?.hasEntry),
+      time: r?.time ? Number(r.time) : undefined,
+      message: r?.message ? String(r.message) : undefined,
     };
   },
 
   async requestNotificationPermission(): Promise<boolean> {
-    const result = await YoutubeDlPlugin.requestRadioAlarmNotificationPermission();
-    return Boolean(result?.granted);
+    const r = await YoutubeDlPlugin.requestRadioAlarmNotificationPermission();
+    return Boolean(r?.granted);
   },
 
-  /** 登錄兩分鐘後的一次性真鬧鐘，走與早上完全相同的路徑。 */
   async scheduleSelfTest(): Promise<number> {
-    const result = await YoutubeDlPlugin.scheduleRadioAlarmSelfTest();
-    return Number(result?.triggerAt ?? -1);
+    const r = await YoutubeDlPlugin.scheduleRadioAlarmSelfTest();
+    return Number(r?.triggerAt ?? -1);
   },
 
   async cancelSelfTest(): Promise<void> {
@@ -453,37 +409,3 @@ export const RadioAlarmService = {
     await YoutubeDlPlugin.openBatteryOptimizationSettings();
   },
 };
-
-/** 把插件回傳的鬆散結構收斂成確定的型別，避免各處各自防禦 undefined。 */
-export function normalizeConfig(raw: any): RadioAlarmConfig {
-  const entries: RadioAlarmEntry[] = Array.isArray(raw?.entries)
-    ? raw.entries
-        .map((item: any) => ({
-          id: String(item?.id ?? ''),
-          time: normalizeTime(item?.time) ?? '',
-          enabled: Boolean(item?.enabled),
-          durationMin: clampDuration(Number(item?.durationMin)),
-        }))
-        .filter((entry: RadioAlarmEntry) => entry.time !== '')
-    : [];
-
-  return {
-    masterEnabled: Boolean(raw?.masterEnabled),
-    entries,
-    customStreamUrl: String(raw?.customStreamUrl ?? ''),
-    // 舊版寫入的設定沒有這個欄位，必須讀成 100 —— 讀成 0 會讓人以為鬧鐘壞了
-    volumePercent: raw?.volumePercent === undefined || raw?.volumePercent === null
-      ? DEFAULT_VOLUME_PERCENT
-      : clampVolume(Number(raw.volumePercent)),
-  };
-}
-
-/** 首次開啟總開關時預填的兩個時段：06:00《早安新聞》與 07:00《中廣早報新聞》。 */
-export function defaultEntries(): RadioAlarmEntry[] {
-  return ['06:00', '07:00'].map((time, index) => ({
-    id: `t${Date.now() + index}_${time.replace(':', '')}`,
-    time,
-    enabled: true,
-    durationMin: DEFAULT_DURATION_MIN,
-  }));
-}

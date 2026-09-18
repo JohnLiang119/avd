@@ -25,19 +25,35 @@ public final class RadioAlarmConstants {
     public static final String CHANNEL_INFO_URL =
             "https://www.bcc.com.tw/webapi/BCCRadioWebAPI/ChannelInfoBat";
 
-    /** 要在 {@link #CHANNEL_INFO_URL} 的回應中尋找的頻道名稱（須與回應的 name 欄位完全相同）。 */
-    public static final String TARGET_CHANNEL_NAME = "中廣新聞網";
+    // ---- 內建頻道 ----
+    //
+    // id 是持久化用的穩定識別（設定檔與 last_good_url 的鍵都用它），apiName 是官方
+    // 回應中 name 欄位的值。兩者分開：官方若改名，只需改 apiName，使用者的設定不受影響。
 
-    /** 顯示用的電台名稱（通知與介面）。 */
-    public static final String STATION_LABEL = "中廣新聞網";
+    public static final String CHANNEL_NEWS_ID = "bcc-news";
+    public static final String CHANNEL_NEWS_API_NAME = "中廣新聞網";
+
+    public static final String CHANNEL_POP_ID = "bcc-pop";
+    public static final String CHANNEL_POP_API_NAME = "中廣流行網";
+
+    /** 舊格式的 customStreamUrl 遷移後所建立的自訂頻道 id。 */
+    public static final String LEGACY_CUSTOM_CHANNEL_ID = "custom-legacy";
 
     /**
-     * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得並以 curl 實測可讀到 ADTS AAC 音訊。
+     * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得，新聞網以 curl 實測可讀到 ADTS AAC 音訊。
      *
      * 這是**最後**一道退回，不是首選：官方端點與上次成功的位址都取不到時才會用到它。
      */
-    public static final String FALLBACK_STREAM_URL =
+    public static final String FALLBACK_STREAM_URL_NEWS =
             "https://stream.rcs.revma.com/fgtx07f3qtzuv";
+    public static final String FALLBACK_STREAM_URL_POP =
+            "https://stream.rcs.revma.com/s1zttsg3qtzuv";
+
+    /** 依頻道 id 取內建退回位址；未知的 id 落到新聞網 —— 退回鏈末端必須有東西。 */
+    public static String fallbackStreamUrlFor(String channelId) {
+        if (CHANNEL_POP_ID.equals(channelId)) return FALLBACK_STREAM_URL_POP;
+        return FALLBACK_STREAM_URL_NEWS;
+    }
 
     /** 查詢官方端點的連線與讀取逾時（毫秒）。逾時即退回，使用者不該為了查詢而等待。 */
     public static final int API_TIMEOUT_MS = 5000;

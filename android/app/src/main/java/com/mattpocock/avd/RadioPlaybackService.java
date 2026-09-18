@@ -64,6 +64,8 @@ public class RadioPlaybackService extends Service {
     /** 預定開始時刻：失敗窗自此起算，而非自服務實際啟動起算。 */
     public static final String EXTRA_SCHEDULED_AT = "scheduledAt";
     public static final String EXTRA_END_AT = "endAt";
+    /** 要播的頻道 id；缺省或找不到時落到設定的預設頻道。 */
+    public static final String EXTRA_CHANNEL_ID = "channelId";
     /** 本次播放屬於哪一種：{@link #MODE_ALARM}、{@link #MODE_TEST} 或 {@link #MODE_LIVE}。 */
     public static final String EXTRA_MODE = "mode";
 
@@ -85,6 +87,12 @@ public class RadioPlaybackService extends Service {
     /** 供前端查詢目前是否正在播放（介面的播放鍵據此切換為停止）。 */
     private static volatile boolean playing = false;
     private static volatile String activeMode = MODE_ALARM;
+    private static volatile String activeChannelId = "";
+
+    /** 目前播放中的頻道 id；沒在播放時為空字串。介面據此把該頻道的播放鍵換成停止。 */
+    public static String activeChannelId() {
+        return playing ? activeChannelId : "";
+    }
 
     public static boolean isPlaying() {
         return playing;
@@ -111,6 +119,7 @@ public class RadioPlaybackService extends Service {
     private long scheduledAt = 0L;
     private long endAt = 0L;
     private String mode = MODE_ALARM;
+    private RadioAlarmConfig.Channel channel;
     private boolean everReady = false;
 
     private final Runnable stopAtEnd = new Runnable() {
@@ -174,7 +183,8 @@ public class RadioPlaybackService extends Service {
 
         if (player != null) {
             // 已在播放：第二筆時間到達時 MUST NOT 中斷或重頭開始，只把結束時間延後到
-            // 兩者中較晚者（規格的「兩筆時間的播放重疊」情境）。
+            // 兩者中較晚者（規格的「兩筆時間的播放重疊」情境）。頻道維持第一筆的，
+            // 不中途切換 —— 切換等於重頭開始。
             if (requestedEnd > endAt) {
                 endAt = requestedEnd;
                 handler.removeCallbacks(stopAtEnd);
@@ -189,6 +199,8 @@ public class RadioPlaybackService extends Service {
         endAt = requestedEnd;
         mode = requestedMode;
         activeMode = requestedMode;
+        channel = store.getConfig().channelById(intent.getStringExtra(EXTRA_CHANNEL_ID));
+        activeChannelId = channel.id;
         everReady = false;
 
         startForegroundWithNotification();
@@ -212,7 +224,7 @@ public class RadioPlaybackService extends Service {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final String url = RadioStreamResolver.resolve(store);
+                final String url = RadioStreamResolver.resolve(store, channel);
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
@@ -477,7 +489,7 @@ public class RadioPlaybackService extends Service {
         else if (MODE_LIVE.equals(mode)) suffix = "（直播）";
 
         return new NotificationCompat.Builder(this, RadioAlarmConstants.PLAYBACK_CHANNEL_ID)
-                .setContentTitle(RadioAlarmConstants.STATION_LABEL + suffix)
+                .setContentTitle((channel == null ? "" : channel.name) + suffix)
                 .setContentText(text)
                 .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
                 .setContentIntent(RadioAlarmScheduler.buildShowIntent(this))

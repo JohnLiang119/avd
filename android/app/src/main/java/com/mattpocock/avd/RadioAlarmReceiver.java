@@ -60,33 +60,36 @@ public class RadioAlarmReceiver extends BroadcastReceiver {
             long firedAt = System.currentTimeMillis();
             store.recordSelfTestFired(firedAt);
             Log.d(TAG, "self test alarm fired at " + firedAt);
-            startPlayback(context, scheduledAt, firedAt + RadioAlarmConstants.SELF_TEST_PLAY_MS);
+            // 自我測試驗的是機制不是排程，頻道取預設即可
+            startPlayback(context, scheduledAt, firedAt + RadioAlarmConstants.SELF_TEST_PLAY_MS,
+                    store.getConfig().defaultChannel().id);
             return;
         }
 
         RadioAlarmConfig config = store.getConfig();
 
-        RadioAlarmConfig.Entry entry = null;
-        for (RadioAlarmConfig.Entry candidate : config.enabledEntries()) {
+        RadioAlarmConfig.Alarm alarm = null;
+        for (RadioAlarmConfig.Alarm candidate : config.enabledAlarms()) {
             if (candidate.id.equals(entryId)) {
-                entry = candidate;
+                alarm = candidate;
                 break;
             }
         }
-        if (entry == null) {
-            // 總開關已關、該筆已停用或已刪除，而這則廣播是取消前就排好的。不播。
+        if (alarm == null) {
+            // 該筆已停用或已刪除，而這則廣播是取消前就排好的。不播。
             Log.d(TAG, "alarm fired for an entry that is no longer active: " + entryId);
             return;
         }
 
-        long endAt = scheduledAt + entry.durationMin * 60L * 1000L;
-        startPlayback(context, scheduledAt, endAt);
+        long endAt = scheduledAt + alarm.durationMin * 60L * 1000L;
+        startPlayback(context, scheduledAt, endAt, alarm.channelId);
     }
 
-    private void startPlayback(Context context, long scheduledAt, long endAt) {
+    private void startPlayback(Context context, long scheduledAt, long endAt, String channelId) {
         Intent service = new Intent(context, RadioPlaybackService.class);
         service.setAction(RadioPlaybackService.ACTION_START);
         service.putExtra(RadioPlaybackService.EXTRA_MODE, RadioPlaybackService.MODE_ALARM);
+        service.putExtra(RadioPlaybackService.EXTRA_CHANNEL_ID, channelId);
         service.putExtra(RadioPlaybackService.EXTRA_SCHEDULED_AT, scheduledAt);
         service.putExtra(RadioPlaybackService.EXTRA_END_AT, endAt);
 
