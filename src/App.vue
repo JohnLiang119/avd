@@ -766,14 +766,14 @@
                 loading-text="正在複製檔案…"
                 :disabled="radioAlarmBusy || radioPickBusy"
                 @click="addRadioFileChannel"
-              >從手機選擇 mp3／mp4 新增頻道</van-button>
+              >新增 mp3／mp4 頻道</van-button>
               <!-- 股票報價頻道：先建一個空頻道，開明細加股票與金鑰（design.md D16） -->
               <van-button
                 size="small" block plain
                 style="margin: 0 0 8px; border-color: #e2e8f0; color: #64748b;"
                 :disabled="radioAlarmBusy || radioPickBusy"
                 @click="addRadioStockChannel"
-              >新增股票報價頻道（富果 API，口說）</van-button>
+              >新增股票頻道</van-button>
             </div>
           </van-cell-group>
 
