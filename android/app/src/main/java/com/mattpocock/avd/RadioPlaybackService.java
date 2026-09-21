@@ -279,33 +279,61 @@ public class RadioPlaybackService extends Service {
             public void run() {
                 final List<FugleQuoteClient.StockQuote> quotes =
                         FugleQuoteClient.fetchAll(channel.stocks, config.fugleApiKey);
-                final String text = StockReportScript.build(channel.name, quotes);
+                final List<String> sentences = StockReportScript.buildSentences(quotes);
                 final String failure = StockReportScript.allFailed(quotes)
                         ? StockReportScript.describeFailures(quotes) : null;
+
+                // 句間停頓用靜音檔實作（引擎對句號的停頓不可控）；秒數是頻道的設定。在這條
+                // 背景執行緒先寫好，合成完直接夾進播放清單。
+                final File ttsDir = new File(getCacheDir(), RadioAlarmConstants.TTS_CACHE_DIR_NAME);
+                File silenceFile = null;
+                String silenceError = null;
+                if (channel.pauseSeconds > 0) {
+                    try {
+                        silenceFile = SilenceWav.write(
+                                new File(ttsDir, "pause_" + Math.round(channel.pauseSeconds * 10) + ".wav"),
+                                channel.pauseSeconds);
+                    } catch (Exception e) {
+                        silenceError = e.getMessage();
+                    }
+                }
+                final File silence = silenceFile;
+                final String silenceFailure = silenceError;
+
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
-                        synthesizeAndPlay(text, failure);
+                        if (silenceFailure != null) {
+                            fail("無法建立停頓用的靜音檔：" + silenceFailure);
+                            return;
+                        }
+                        synthesizeAndPlay(sentences, ttsDir, silence, failure);
                     }
                 });
             }
         }, "radio-alarm-stock").start();
     }
 
-    private void synthesizeAndPlay(String text, String failure) {
+    /**
+     * 合成每一句，再把「句、停頓、句、停頓…」串成播放清單。最後一句後面也接一次停頓，
+     * 循環回第一句時就是同樣長度的一次停頓，不多也不少（使用者：循環之間不多停）。
+     */
+    private void synthesizeAndPlay(final List<String> sentences, File ttsDir, final File silence, String failure) {
         if (!playing) return;
         stockFailureMessage = failure;
-        Log.d(TAG, "stock report: " + text);
+        Log.d(TAG, "stock report: " + sentences);
 
-        File out = new File(new File(getCacheDir(), RadioAlarmConstants.TTS_CACHE_DIR_NAME), "report.wav");
-        RadioTts.synthesizeToFile(this, text, out, new RadioTts.Callback() {
+        RadioTts.synthesizeAll(this, sentences, ttsDir, new RadioTts.Callback() {
             @Override
-            public void onDone(final File file) {
+            public void onDone(final List<File> files) {
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
                         List<String> sources = new ArrayList<String>();
-                        sources.add(file.getAbsolutePath());
+                        for (File f : files) {
+                            sources.add(f.getAbsolutePath());
+                            if (silence != null) sources.add(silence.getAbsolutePath());
+                        }
                         preparePlayer(new RadioStreamResolver.Resolution(sources, true, 0));
                     }
                 });

@@ -52,6 +52,14 @@ public final class RadioAlarmConstants {
     public static final String TTS_CACHE_DIR_NAME = "radio_alarm_tts";
 
     /**
+     * 股票報價頻道句與句之間的停頓（秒）：預設與允許範圍。使用者要求可調 ——
+     * 語音引擎對句號的停頓不可控，故以靜音檔實作（見 SilenceWav）。
+     */
+    public static final double DEFAULT_STOCK_PAUSE_SECONDS = 1.0;
+    public static final double MIN_STOCK_PAUSE_SECONDS = 0.0;
+    public static final double MAX_STOCK_PAUSE_SECONDS = 10.0;
+
+    /**
      * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得，新聞網以 curl 實測可讀到 ADTS AAC 音訊。
      *
      * 這是**最後**一道退回，不是首選：官方端點與上次成功的位址都取不到時才會用到它。

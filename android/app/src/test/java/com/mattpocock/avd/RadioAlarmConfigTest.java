@@ -474,6 +474,22 @@ public class RadioAlarmConfigTest {
     }
 
     @Test
+    public void stockPauseIsClampedAndRoundTripped() {
+        assertEquals(1.0, RadioAlarmConfig.clampPauseSeconds(Double.NaN), 0.0001);
+        assertEquals(0.0, RadioAlarmConfig.clampPauseSeconds(-3), 0.0001);
+        assertEquals(10.0, RadioAlarmConfig.clampPauseSeconds(99), 0.0001);
+        assertEquals(2.5, RadioAlarmConfig.clampPauseSeconds(2.54), 0.0001);
+
+        String json = j("{'schemaVersion':2,'channels':[{'id':'s1','kind':'stock','stocks':[],'pauseSeconds':3.5}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);
+        assertEquals(3.5, config.channelById("s1").pauseSeconds, 0.0001);
+        assertEquals(3.5, RadioAlarmConfig.fromJson(config.toJson(), ROOT).channelById("s1").pauseSeconds, 0.0001);
+
+        String missing = j("{'schemaVersion':2,'channels':[{'id':'s2','kind':'stock','stocks':[]}]}");
+        assertEquals("缺欄位用預設 1 秒", 1.0, RadioAlarmConfig.fromJson(missing, ROOT).channelById("s2").pauseSeconds, 0.0001);
+    }
+
+    @Test
     public void emptyStockChannelIsKeptSoItCanSpeakTheProblem() {
         String json = j("{'schemaVersion':2,'channels':[{'id':'s1','name':'晨報','kind':'stock','stocks':[]}]}");
         RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);

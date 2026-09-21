@@ -6,14 +6,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 把多支股票的報價組成一段**要念出來**的繁體中文。
+ * 把多支股票的報價組成**要念出來**的句子。
  *
- * 純函式、不匯入 Android API，JUnit 釘住。寫法以「念出來聽得懂」為準，不是給人看的：
- * 百分比寫成「百分之 1.01」而非「1.01%」（語音引擎對 % 的念法不一），
- * 數字去掉多餘的零（1000 而非 1000.0），每支股票一句、句尾句號讓引擎停頓。
+ * 純函式、不匯入 Android API，JUnit 釘住。**極簡**（使用者實機聽過第一版後要求）：
+ * 每支只念「名稱 價格」，不念頻道名、日期、漲跌與漲跌幅 —— 那些在第一版裡讓一輪
+ * 變得又長又多停頓；要看細節打開 App 就好，鬧鐘要的是一聽就知道的兩個字加一個數字。
  *
- * 全部失敗時仍回傳一段話 —— 鬧鐘的第一要務是把人叫醒，聽到「無法取得股價」
- * 比一片安靜好；成敗另由 {@link #allFailed} 判定並記進上次結果。
+ * 回傳的是**一句一個元素的清單**，不是一段文字：句與句之間的停頓由播放端插入
+ * 指定秒數的靜音（使用者要求停頓長度可調），引擎自己對句號的停頓長度不可控。
+ * 播放器循環整串，聽起來就是「南亞 213。（停）台化 89。（停）南亞 213。…」。
  */
 public final class StockReportScript {
 
@@ -21,68 +22,50 @@ public final class StockReportScript {
     }
 
     /** 這個頻道一支股票都沒有時念的話。 */
-    public static final String EMPTY_CHANNEL_TEXT = "這個頻道尚未加入任何股票。";
+    public static final String EMPTY_CHANNEL_TEXT = "尚未加入任何股票。";
 
     /**
-     * 組稿。
+     * 組稿：依清單順序，每支一句「名稱 價格。」；取不到的那支念「名稱 無法取得。」，
+     * 位置不變（聽的人才知道少的是哪一支）。全部失敗時念「無法取得股價。」再逐一念原因。
      *
-     * @param channelName 頻道名稱，作為開場
-     * @param quotes      逐支查詢結果（含失敗的）
+     * @param quotes 逐支查詢結果（含失敗的）
+     * @return 至少一句；每句句尾帶句號讓引擎收尾語調正確
      */
-    public static String build(String channelName, List<FugleQuoteClient.StockQuote> quotes) {
-        String title = channelName == null || channelName.trim().isEmpty() ? "股市報價" : channelName.trim();
+    public static List<String> buildSentences(List<FugleQuoteClient.StockQuote> quotes) {
+        List<String> sentences = new ArrayList<String>();
         if (quotes == null || quotes.isEmpty()) {
-            return title + "。" + EMPTY_CHANNEL_TEXT;
+            sentences.add(EMPTY_CHANNEL_TEXT);
+            return sentences;
         }
 
-        List<FugleQuoteClient.StockQuote> ok = new ArrayList<FugleQuoteClient.StockQuote>();
-        List<FugleQuoteClient.StockQuote> failed = new ArrayList<FugleQuoteClient.StockQuote>();
+        boolean anyOk = false;
         for (FugleQuoteClient.StockQuote q : quotes) {
-            if (q.ok) ok.add(q);
-            else failed.add(q);
+            if (q.ok) {
+                anyOk = true;
+                break;
+            }
         }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append(title).append("。");
-
-        if (ok.isEmpty()) {
+        if (!anyOk) {
             // 全部失敗：把原因念出來。同一個原因只念一次（例如金鑰沒設，每支都是同一句）。
-            sb.append("無法取得股價。");
-            List<String> reasons = new ArrayList<String>();
-            for (FugleQuoteClient.StockQuote q : failed) {
-                if (!q.error.isEmpty() && !reasons.contains(q.error)) reasons.add(q.error);
+            sentences.add("無法取得股價。");
+            for (FugleQuoteClient.StockQuote q : quotes) {
+                String reason = q.error.isEmpty() ? "" : q.error + "。";
+                if (!reason.isEmpty() && !sentences.contains(reason)) sentences.add(reason);
             }
-            for (String reason : reasons) {
-                sb.append(reason).append("。");
-            }
-            return sb.toString();
+            return sentences;
         }
 
-        String date = formatDate(ok.get(0).date);
-        if (!date.isEmpty()) sb.append("資料日期 ").append(date).append("。");
-
-        for (FugleQuoteClient.StockQuote q : ok) {
-            sb.append(q.name).append("，");
-            sb.append(q.isClose ? "收盤 " : "目前 ").append(formatNumber(q.price)).append(" 元，");
-            if (Math.abs(q.change) < 0.0001) {
-                sb.append("平盤。");
-            } else {
-                boolean up = q.change > 0;
-                sb.append(up ? "上漲 " : "下跌 ").append(formatNumber(Math.abs(q.change))).append(" 元，");
-                sb.append(up ? "漲幅百分之 " : "跌幅百分之 ").append(formatNumber(Math.abs(q.changePercent))).append("。");
-            }
+        for (FugleQuoteClient.StockQuote q : quotes) {
+            sentences.add(q.name + " " + (q.ok ? formatNumber(q.price) : "無法取得") + "。");
         }
+        return sentences;
+    }
 
-        if (!failed.isEmpty()) {
-            sb.append("另有 ").append(failed.size()).append(" 支無法取得報價：");
-            for (int i = 0; i < failed.size(); i++) {
-                if (i > 0) sb.append("、");
-                sb.append(failed.get(i).name);
-            }
-            sb.append("。");
-        }
-
-        sb.append("以上是 ").append(ok.size()).append(" 支股票的報價。");
+    /** 整段文字（供紀錄與測試閱讀）；播放端請用 {@link #buildSentences}。 */
+    public static String build(List<FugleQuoteClient.StockQuote> quotes) {
+        StringBuilder sb = new StringBuilder();
+        for (String s : buildSentences(quotes)) sb.append(s);
         return sb.toString();
     }
 
@@ -117,20 +100,5 @@ public final class StockReportScript {
         BigDecimal bd = BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).stripTrailingZeros();
         String text = bd.toPlainString();
         return "-0".equals(text) ? "0" : text;
-    }
-
-    /** yyyy-MM-dd → 「9 月 19 日」；格式不符回傳空字串（不念）。 */
-    public static String formatDate(String isoDate) {
-        if (isoDate == null) return "";
-        String[] parts = isoDate.trim().split("-");
-        if (parts.length != 3) return "";
-        try {
-            int month = Integer.parseInt(parts[1]);
-            int day = Integer.parseInt(parts[2]);
-            if (month < 1 || month > 12 || day < 1 || day > 31) return "";
-            return month + " 月 " + day + " 日";
-        } catch (NumberFormatException e) {
-            return "";
-        }
     }
 }

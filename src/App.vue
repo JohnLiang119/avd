@@ -980,8 +980,23 @@
               @click="addStockToChannel(radioStockDetail.id)"
             >加入</van-button>
           </div>
+          <div class="radio-alarm-field" style="margin-top: 10px;">
+            <span class="radio-alarm-label">停頓</span>
+            <van-stepper
+              :model-value="radioStockDetail.pauseSeconds"
+              :min="0"
+              :max="10"
+              :step="0.5"
+              :decimal-length="1"
+              input-width="44px"
+              button-size="26px"
+              :disabled="radioAlarmBusy"
+              @change="(v: number | string) => onStockPauseChange(radioStockDetail!.id, v)"
+            />
+            <span style="font-size: 12px; color: #64748b;">秒</span>
+          </div>
           <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
-            鬧鐘時間到會抓最新報價，用中文語音念出每支的價格與漲跌。
+            鬧鐘時間到會抓最新報價，逐支念「名稱 價格」，句間停頓上面那個秒數，循環到時長結束。
           </p>
         </template>
         <van-button
@@ -1559,7 +1574,9 @@ import {
   isFileChannel,
   isStockChannel,
   normalizeStockSymbol,
+  clampPauseSeconds,
   DEFAULT_STOCK_CHANNEL_NAME,
+  DEFAULT_STOCK_PAUSE_SECONDS,
   lastFailureText,
   newAlarm,
   permissionWarnings,
@@ -3631,7 +3648,7 @@ const radioStockLookupBusy = ref(false);
 const addRadioStockChannel = async () => {
   if (isTauri()) return;
   const id = `stock${Date.now()}`;
-  const channel: RadioChannel = { id, name: DEFAULT_STOCK_CHANNEL_NAME, kind: 'stock', source: '', stocks: [] };
+  const channel: RadioChannel = { id, name: DEFAULT_STOCK_CHANNEL_NAME, kind: 'stock', source: '', stocks: [], pauseSeconds: DEFAULT_STOCK_PAUSE_SECONDS };
   await persistRadioAlarm({ ...radioAlarm.value, channels: [...radioAlarm.value.channels, channel] });
   if (radioAlarm.value.channels.some((c) => c.id === id)) openRadioChannelDetail(id);
 };
@@ -3687,6 +3704,17 @@ const addStockToChannel = async (channelId: string) => {
   ));
   radioStockSymbolDraft.value = '';
   await persistRadioAlarm({ ...radioAlarm.value, channels });
+};
+
+/** 句間停頓：用 @change（放開才觸發），避免 stepper 長按時連發寫入 */
+const onStockPauseChange = (channelId: string, value: number | string) => {
+  const pauseSeconds = clampPauseSeconds(Number(value));
+  const target = radioAlarm.value.channels.find((c) => c.id === channelId);
+  if (!target || !isStockChannel(target) || target.pauseSeconds === pauseSeconds) return;
+  const channels = radioAlarm.value.channels.map((c) => (
+    c.id === channelId && isStockChannel(c) ? { ...c, pauseSeconds } : c
+  ));
+  void persistRadioAlarm({ ...radioAlarm.value, channels });
 };
 
 const removeStockFromChannel = (channelId: string, symbol: string) => {

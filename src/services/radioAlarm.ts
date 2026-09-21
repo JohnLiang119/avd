@@ -56,6 +56,8 @@ export interface RadioStockItem {
 export interface RadioStockChannel extends RadioChannelBase {
   kind: 'stock';
   stocks: RadioStockItem[];
+  /** 句與句之間的停頓（秒，0–10，一位小數）；以靜音檔實作，循環之間也是同樣一次 */
+  pauseSeconds: number;
 }
 
 export type RadioChannel = RadioStreamChannel | RadioFileChannel | RadioStockChannel;
@@ -270,6 +272,16 @@ export function describeChannelSummary(channel: RadioChannel): string {
 }
 
 export const DEFAULT_STOCK_CHANNEL_NAME = '股市晨報';
+export const DEFAULT_STOCK_PAUSE_SECONDS = 1;
+export const MIN_STOCK_PAUSE_SECONDS = 0;
+export const MAX_STOCK_PAUSE_SECONDS = 10;
+
+/** 句間停頓夾在 0–10 秒、一位小數；非數字回預設。與原生端 clampPauseSeconds 同一套規則。 */
+export function clampPauseSeconds(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_STOCK_PAUSE_SECONDS;
+  const clamped = Math.min(MAX_STOCK_PAUSE_SECONDS, Math.max(MIN_STOCK_PAUSE_SECONDS, value));
+  return Math.round(clamped * 10) / 10;
+}
 
 /** 股票代號：1–10 個英數字，一律大寫；不合法回傳 null。與原生端 normalizeStockSymbol 同一套規則。 */
 export function normalizeStockSymbol(raw: string | null | undefined): string | null {
@@ -417,7 +429,10 @@ function normalizeChannel(c: any): RadioChannel | null {
       seen.add(symbol);
       stocks.push({ symbol, name: String(raw?.name ?? '').trim() });
     }
-    return { id, name: name || DEFAULT_STOCK_CHANNEL_NAME, kind, source, stocks };
+    return {
+      id, name: name || DEFAULT_STOCK_CHANNEL_NAME, kind, source, stocks,
+      pauseSeconds: clampPauseSeconds(Number(c?.pauseSeconds ?? DEFAULT_STOCK_PAUSE_SECONDS)),
+    };
   }
   return null;
 }
@@ -469,7 +484,7 @@ export const RadioAlarmService = {
           return { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) };
         }
         if (isStockChannel(c)) {
-          return { id: c.id, name: c.name, kind: c.kind, source: c.source, stocks: c.stocks.map((st) => ({ symbol: st.symbol, name: st.name })) };
+          return { id: c.id, name: c.name, kind: c.kind, source: c.source, stocks: c.stocks.map((st) => ({ symbol: st.symbol, name: st.name })), pauseSeconds: clampPauseSeconds(c.pauseSeconds) };
         }
         return { id: c.id, name: c.name, kind: c.kind, source: c.source };
       }),

@@ -107,17 +107,19 @@ public final class RadioAlarmConfig {
         public final List<LocalFile> files;
         /** 股票報價頻道的股票清單（念的順序）；其他種類為空清單。允許為空 —— 念「尚未加入任何股票」。 */
         public final List<StockItem> stocks;
+        /** 股票報價頻道句與句之間的停頓（秒，0–10，一位小數）；其他種類無意義。 */
+        public final double pauseSeconds;
 
         public Channel(String id, String name, String kind, String source) {
-            this(id, name, kind, source, null, null);
+            this(id, name, kind, source, null, null, RadioAlarmConstants.DEFAULT_STOCK_PAUSE_SECONDS);
         }
 
         public Channel(String id, String name, String kind, String source, List<LocalFile> files) {
-            this(id, name, kind, source, files, null);
+            this(id, name, kind, source, files, null, RadioAlarmConstants.DEFAULT_STOCK_PAUSE_SECONDS);
         }
 
         public Channel(String id, String name, String kind, String source, List<LocalFile> files,
-                       List<StockItem> stocks) {
+                       List<StockItem> stocks, double pauseSeconds) {
             this.id = id;
             this.name = name;
             this.kind = kind;
@@ -126,6 +128,7 @@ public final class RadioAlarmConfig {
                     files == null ? new ArrayList<LocalFile>() : new ArrayList<LocalFile>(files));
             this.stocks = Collections.unmodifiableList(
                     stocks == null ? new ArrayList<StockItem>() : new ArrayList<StockItem>(stocks));
+            this.pauseSeconds = clampPauseSeconds(pauseSeconds);
         }
 
         public boolean isBuiltIn() {
@@ -302,6 +305,14 @@ public final class RadioAlarmConfig {
         if (value < RadioAlarmConstants.MIN_DURATION_MIN) return RadioAlarmConstants.MIN_DURATION_MIN;
         if (value > RadioAlarmConstants.MAX_DURATION_MIN) return RadioAlarmConstants.MAX_DURATION_MIN;
         return value;
+    }
+
+    /** 股票報價的句間停頓夾在 0–10 秒並取到一位小數；NaN 回預設。 */
+    public static double clampPauseSeconds(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) return RadioAlarmConstants.DEFAULT_STOCK_PAUSE_SECONDS;
+        double clamped = Math.max(RadioAlarmConstants.MIN_STOCK_PAUSE_SECONDS,
+                Math.min(RadioAlarmConstants.MAX_STOCK_PAUSE_SECONDS, value));
+        return Math.round(clamped * 10) / 10.0;
     }
 
     /** 音量比例夾在 0–100；與時長同樣是夾值而非丟棄。 */
@@ -500,6 +511,7 @@ public final class RadioAlarmConfig {
                         stocks.put(stockItem);
                     }
                     item.put("stocks", stocks);
+                    item.put("pauseSeconds", c.pauseSeconds);
                 }
                 channelArr.put(item);
             }
@@ -559,7 +571,8 @@ public final class RadioAlarmConfig {
             } else if (CHANNEL_KIND_STOCK.equals(kind)) {
                 // 股票清單允許為空（觸發時會念「尚未加入任何股票」）；不合法或重複的代號剔除
                 List<StockItem> stocks = parseStocks(item.optJSONArray("stocks"));
-                list.add(new Channel(id, name.isEmpty() ? "股市晨報" : name, kind, source, null, stocks));
+                double pause = item.optDouble("pauseSeconds", RadioAlarmConstants.DEFAULT_STOCK_PAUSE_SECONDS);
+                list.add(new Channel(id, name.isEmpty() ? "股市晨報" : name, kind, source, null, stocks, pause));
             }
         }
         return list;

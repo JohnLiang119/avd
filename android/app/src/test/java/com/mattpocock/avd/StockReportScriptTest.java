@@ -6,12 +6,14 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 /**
- * 股票報價的解析與口說稿。
+ * 股票報價的解析、口說稿與停頓用的靜音檔。
  *
  * 這裡的失敗方式都是靜默的：挑錯欄位不會有例外，只會在早上念出錯的數字；
  * 錯誤回應若被當成報價，會念出「0 元」。所以逐條釘住。
@@ -104,45 +106,35 @@ public class StockReportScriptTest {
     // ---- 口說稿 ----
 
     @Test
-    public void numbersAreSpokenWithoutTrailingZerosOrPercentSigns() {
+    public void numbersAreSpokenWithoutTrailingZeros() {
         assertEquals("1000", StockReportScript.formatNumber(1000.0));
         assertEquals("52.35", StockReportScript.formatNumber(52.35));
         assertEquals("0.5", StockReportScript.formatNumber(0.5));
         assertEquals("1.01", StockReportScript.formatNumber(1.005));
         assertEquals("0", StockReportScript.formatNumber(Double.NaN));
-        assertEquals("9 月 19 日", StockReportScript.formatDate("2026-09-19"));
-        assertEquals("", StockReportScript.formatDate("bad"));
-        assertEquals("", StockReportScript.formatDate(null));
     }
 
     @Test
-    public void scriptReadsEachStockOnceWithDirectionAndPercent() {
+    public void scriptIsJustNameAndPricePerStockInOrder() {
+        // 使用者要的形式：「南亞 213。台化 89。」循環 —— 沒有開場、日期、漲跌、結尾
         List<FugleQuoteClient.StockQuote> quotes = new ArrayList<FugleQuoteClient.StockQuote>();
-        quotes.add(FugleQuoteClient.parseQuote("2330", "", ok(TSMC_JSON)));
-        quotes.add(FugleQuoteClient.parseQuote("2317", "", ok(j(
-                "{'name':'鴻海','previousClose':200,'closePrice':198,'change':-2,'changePercent':-1,'date':'2026-09-19','isClose':true}"))));
-        quotes.add(FugleQuoteClient.parseQuote("2412", "", ok(j(
-                "{'name':'中華電','previousClose':120,'closePrice':120,'change':0,'changePercent':0,'date':'2026-09-19','isClose':true}"))));
+        quotes.add(FugleQuoteClient.parseQuote("1303", "", ok(j(
+                "{'name':'南亞','previousClose':210,'closePrice':213,'change':3,'changePercent':1.43,'date':'2026-09-19','isClose':true}"))));
+        quotes.add(FugleQuoteClient.parseQuote("1326", "", ok(j(
+                "{'name':'台化','previousClose':90,'closePrice':89,'change':-1,'changePercent':-1.11,'date':'2026-09-19','isClose':true}"))));
 
-        String text = StockReportScript.build("股市晨報", quotes);
-        assertTrue(text.startsWith("股市晨報。資料日期 9 月 19 日。"));
-        assertTrue(text.contains("台積電，收盤 1000 元，上漲 10 元，漲幅百分之 1.01。"));
-        assertTrue(text.contains("鴻海，收盤 198 元，下跌 2 元，跌幅百分之 1。"));
-        assertTrue(text.contains("中華電，收盤 120 元，平盤。"));
-        assertTrue(text.endsWith("以上是 3 支股票的報價。"));
-        assertFalse("念出來的稿不該出現 % 符號", text.contains("%"));
+        assertEquals(Arrays.asList("南亞 213。", "台化 89。"), StockReportScript.buildSentences(quotes));
+        assertEquals("南亞 213。台化 89。", StockReportScript.build(quotes));
         assertFalse(StockReportScript.allFailed(quotes));
     }
 
     @Test
-    public void partialFailureIsSpokenAndCounted() {
+    public void partialFailureKeepsItsSlot() {
         List<FugleQuoteClient.StockQuote> quotes = new ArrayList<FugleQuoteClient.StockQuote>();
         quotes.add(FugleQuoteClient.parseQuote("2330", "", ok(TSMC_JSON)));
         quotes.add(FugleQuoteClient.parseQuote("9999", "", new FugleQuoteClient.Response(404, "{}")));
 
-        String text = StockReportScript.build("晨報", quotes);
-        assertTrue(text.contains("另有 1 支無法取得報價：9999。"));
-        assertTrue(text.endsWith("以上是 1 支股票的報價。"));
+        assertEquals(Arrays.asList("台積電 1000。", "9999 無法取得。"), StockReportScript.buildSentences(quotes));
         assertFalse("有一支成功就不算全部失敗", StockReportScript.allFailed(quotes));
     }
 
@@ -152,9 +144,8 @@ public class StockReportScriptTest {
         quotes.add(FugleQuoteClient.parseQuote("2330", "台積電", null));
         quotes.add(FugleQuoteClient.parseQuote("2317", "鴻海", null));
 
-        String text = StockReportScript.build("晨報", quotes);
-        assertTrue(text.contains("無法取得股價。"));
-        assertEquals("同一個原因只念一次", 1, text.split("連不上富果伺服器").length - 1);
+        List<String> sentences = StockReportScript.buildSentences(quotes);
+        assertEquals("同一個原因只念一次", Arrays.asList("無法取得股價。", "連不上富果伺服器。"), sentences);
         assertTrue(StockReportScript.allFailed(quotes));
         assertTrue(StockReportScript.describeFailures(quotes).contains("2330 連不上富果伺服器"));
     }
@@ -162,7 +153,29 @@ public class StockReportScriptTest {
     @Test
     public void emptyChannelIsSpokenNotFailed() {
         List<FugleQuoteClient.StockQuote> none = new ArrayList<FugleQuoteClient.StockQuote>();
-        assertTrue(StockReportScript.build("晨報", none).contains(StockReportScript.EMPTY_CHANNEL_TEXT));
+        assertEquals(Arrays.asList(StockReportScript.EMPTY_CHANNEL_TEXT), StockReportScript.buildSentences(none));
         assertFalse(StockReportScript.allFailed(none));
+    }
+
+    // ---- 停頓用的靜音檔 ----
+
+    @Test
+    public void silenceWavHasAValidHeaderAndExactLength() throws IOException {
+        File out = File.createTempFile("avd-silence", ".wav");
+        out.deleteOnExit();
+
+        File written = SilenceWav.write(out, 1.5);
+        int dataBytes = SilenceWav.dataBytesFor(1.5);
+        assertEquals("16 kHz 單聲道 16 位元：1.5 秒 = 48000 位元組", 48000, dataBytes);
+        assertEquals(44L + dataBytes, written.length());
+
+        byte[] header = SilenceWav.header(dataBytes);
+        assertEquals('R', header[0]);
+        assertEquals('W', header[8]);
+        assertEquals("PCM", 1, header[20]);
+        assertEquals("data 長度小端序", (byte) (dataBytes & 0xff), header[40]);
+
+        assertEquals("零秒與負數不產生樣本", 0, SilenceWav.dataBytesFor(0));
+        assertEquals(0, SilenceWav.dataBytesFor(-1));
     }
 }
