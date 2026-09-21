@@ -595,4 +595,6 @@ design.md 新增 D14、改寫 D4／D9。
   規格「頻道」需求與「本地檔案頻道的播放」需求、design.md D15、proposal.md（What Changes 補本地檔案頻道、
   Impact 補兩個插件方法與私有目錄）皆已寫入；`openspec validate live-radio-alarm` 通過；三份 delta 無 BOM。
 - [ ] 14.7 實機驗證【本地檔案】逐條對照規格 Scenario：新增三檔頻道順序正確；其中一檔無法複製時不建頻道並提示；移除頻道後副本消失且鬧鐘落回新聞網未消失；清單短於時長時循環；mp4 只出聲不解影像；清除 App 資料（保留設定的模擬：手動刪副本）後觸發不出聲且有失敗通知；部分缺檔時照播其餘且上次結果載明數量；靜音下仍以鬧鐘音量響；手動收聽 file 頻道走媒體音量且循環至上限
-- [ ] 14.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`（說明鬧鐘可選本地 mp3／mp4 播放清單）
+- [x] 14.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`（說明鬧鐘可選本地 mp3／mp4 播放清單）
+
+  功能 commit `2c4cc00`；版本 1.0.105 → 1.0.106（versionCode 143），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
