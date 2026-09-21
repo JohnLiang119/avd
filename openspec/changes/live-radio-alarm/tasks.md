@@ -645,3 +645,5 @@ design.md 新增 D14、改寫 D4／D9。
   新增鈕文字精簡：功能 commit `b26969a`；版本 1.0.113 → 1.0.114（versionCode 151），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 
   可用名稱加入股票：功能 commit `d66b604`；版本 1.0.114 → 1.0.115（versionCode 152），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+  停頓分兩個（股票間、下一輪）：功能 commit `b4b2e4a`；版本 1.0.115 → 1.0.116（versionCode 153），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
