@@ -330,4 +330,113 @@ public class RadioAlarmConfigTest {
         }
         assertNotNull(again.defaultChannel());
     }
+
+    // ---- 本地檔案頻道（design.md D15）----
+
+    private static final String ROOT = "/data/user/0/com.mattpocock.avd/files/radio_alarm";
+
+    private static final String FILE_CHANNEL_JSON = j("{'schemaVersion':2,"
+            + "'channels':[{'id':'f1','name':'早晨歌單','kind':'file','source':'',"
+            + "'files':[{'path':'" + ROOT + "/f1/001_a.mp3','displayName':'a.mp3'},"
+            + "{'path':'" + ROOT + "/f1/002_b.mp3','displayName':'b.mp3'},"
+            + "{'path':'" + ROOT + "/f1/003_c.mp4','displayName':'c.mp4'}]}],"
+            + "'alarms':[{'id':'a','time':'06:00','channelId':'f1'}]}");
+
+    @Test
+    public void localPathMustLiveUnderTheRoot() {
+        assertTrue(RadioAlarmConfig.isValidLocalFilePath(ROOT + "/f1/001_a.mp3", ROOT));
+        assertTrue("root 結尾多一個斜線也要能比對", RadioAlarmConfig.isValidLocalFilePath(ROOT + "/f1/001_a.mp3", ROOT + "/"));
+        assertFalse("私有目錄以外一律拒絕", RadioAlarmConfig.isValidLocalFilePath("/storage/emulated/0/Music/a.mp3", ROOT));
+        assertFalse("同前綴的其他目錄不算在 root 之下", RadioAlarmConfig.isValidLocalFilePath(ROOT + "_evil/a.mp3", ROOT));
+        assertFalse("`..` 不得逃出 root", RadioAlarmConfig.isValidLocalFilePath(ROOT + "/f1/../../a.mp3", ROOT));
+        assertFalse("root 本身不是檔案", RadioAlarmConfig.isValidLocalFilePath(ROOT, ROOT));
+        assertFalse("沒有 root 就沒有「之下」可言", RadioAlarmConfig.isValidLocalFilePath(ROOT + "/f1/a.mp3", null));
+        assertFalse(RadioAlarmConfig.isValidLocalFilePath(null, ROOT));
+        assertFalse(RadioAlarmConfig.isValidLocalFilePath("", ROOT));
+    }
+
+    @Test
+    public void parsesFileChannelKeepingOrderAndNames() {
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(FILE_CHANNEL_JSON, ROOT);
+        assertEquals(3, config.channels.size());
+
+        RadioAlarmConfig.Channel f1 = config.channelById("f1");
+        assertEquals(RadioAlarmConfig.CHANNEL_KIND_FILE, f1.kind);
+        assertTrue(f1.isLocalFile());
+        assertFalse(f1.isBuiltIn());
+        assertEquals("早晨歌單", f1.name);
+        assertEquals("順序即播放順序，MUST NOT 重排", 3, f1.files.size());
+        assertEquals(ROOT + "/f1/001_a.mp3", f1.files.get(0).path);
+        assertEquals("a.mp3", f1.files.get(0).displayName);
+        assertEquals("c.mp4", f1.files.get(2).displayName);
+        assertEquals("f1", config.alarms.get(0).channelId);
+    }
+
+    @Test
+    public void fileChannelIsDroppedWithoutARootAndAlarmFallsBackToDefault() {
+        // 單參數 fromJson 沒有 root：等同舊版讀到新版寫入的頻道 —— 剔除，鬧鐘落回預設頻道
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(FILE_CHANNEL_JSON);
+        assertEquals(2, config.channels.size());
+        assertEquals("鬧鐘 MUST NOT 因頻道消失而不見", 1, config.alarms.size());
+        assertEquals(NEWS, config.alarms.get(0).channelId);
+    }
+
+    @Test
+    public void filePathsOutsideTheRootAreDroppedAndEmptyChannelDisappears() {
+        String mixed = j("{'schemaVersion':2,'channels':[{'id':'f1','kind':'file',"
+                + "'files':[{'path':'/storage/emulated/0/Music/x.mp3'},{'path':'" + ROOT + "/f1/002_b.mp3'}]}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(mixed, ROOT);
+        RadioAlarmConfig.Channel f1 = config.channelById("f1");
+        assertEquals("越界的路徑剔除、其餘保留", 1, f1.files.size());
+        assertEquals("002_b.mp3", f1.files.get(0).displayName);
+        assertEquals("沒有名稱時用第一個檔案的顯示名稱", "002_b.mp3", f1.name);
+
+        String allOutside = j("{'schemaVersion':2,'channels':[{'id':'f2','kind':'file',"
+                + "'files':[{'path':'/sdcard/a.mp3'}]}],'alarms':[{'id':'a','time':'06:00','channelId':'f2'}]}");
+        RadioAlarmConfig config2 = RadioAlarmConfig.fromJson(allOutside, ROOT);
+        assertFalse("清單剔到空即剔除整個頻道", config2.hasChannel("f2"));
+        assertEquals(NEWS, config2.alarms.get(0).channelId);
+
+        String emptyList = j("{'schemaVersion':2,'channels':[{'id':'f3','kind':'file','files':[]}]}");
+        assertFalse(RadioAlarmConfig.fromJson(emptyList, ROOT).hasChannel("f3"));
+    }
+
+    @Test
+    public void unknownKindIsDropped() {
+        String json = j("{'schemaVersion':2,'channels':[{'id':'x','name':'X','kind':'weird','source':'s'}],"
+                + "'alarms':[{'id':'a','time':'06:00','channelId':'x'}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);
+        assertEquals(2, config.channels.size());
+        assertEquals(NEWS, config.alarms.get(0).channelId);
+    }
+
+    @Test
+    public void streamChannelsIgnoreTheRoot() {
+        // bcc 與 url 的 source 行為不因 root 參數而改變
+        String json = j("{'schemaVersion':2,'channels':[{'id':'c1','name':'我的台','kind':'url','source':'https://example.com/a.aac'}]}");
+        RadioAlarmConfig withRoot = RadioAlarmConfig.fromJson(json, ROOT);
+        RadioAlarmConfig withoutRoot = RadioAlarmConfig.fromJson(json);
+        assertEquals("https://example.com/a.aac", withRoot.channelById("c1").source);
+        assertEquals("https://example.com/a.aac", withoutRoot.channelById("c1").source);
+        assertTrue(withRoot.channelById("c1").files.isEmpty());
+        assertTrue(withRoot.channelById(NEWS).files.isEmpty());
+    }
+
+    @Test
+    public void fileChannelSurvivesRoundTrip() {
+        RadioAlarmConfig original = RadioAlarmConfig.fromJson(FILE_CHANNEL_JSON, ROOT);
+        String persisted = original.toJson();
+        assertTrue(persisted.contains("\"files\""));
+
+        RadioAlarmConfig restored = RadioAlarmConfig.fromJson(persisted, ROOT);
+        RadioAlarmConfig.Channel f1 = restored.channelById("f1");
+        assertEquals(RadioAlarmConfig.CHANNEL_KIND_FILE, f1.kind);
+        assertEquals("早晨歌單", f1.name);
+        assertEquals(3, f1.files.size());
+        for (int i = 0; i < 3; i++) {
+            assertEquals(original.channels.get(2).files.get(i).path, f1.files.get(i).path);
+            assertEquals(original.channels.get(2).files.get(i).displayName, f1.files.get(i).displayName);
+        }
+        assertEquals("f1", restored.alarms.get(0).channelId);
+    }
 }

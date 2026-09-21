@@ -549,3 +549,50 @@ design.md 新增 D14、改寫 D4／D9。
 ## 13. 歸檔
 
 - [ ] 13.1 歸檔前確認：`config-persistence` 的 MODIFIED 合併後無 TBD、原三個 Scenario 完整保留；`live-radio-alarm` 新主規格的 Purpose 正確寫入（兩份 delta 皆無 BOM 是此事的前提，`head -c 3 | xxd -p` 不得為 `efbbbf`）
+
+## 14. 本地檔案頻道（使用者要求後追加；design.md D15）
+
+第 13 節的歸檔在本節完成後才進行。本節的紅線沿用第 0 節的兩條，另加一條：**file 頻道只播私有目錄下的副本**，任何指向私有目錄以外的路徑一律拒絕 —— 那正是複製要避免的東西。
+
+- [x] 14.1 原生模型：`RadioAlarmConfig.Channel` 新增 kind `file`，以有序清單 `files`（私有目錄下的絕對路徑）取代單一 `source`，`source` 留作顯示摘要；`parseChannels` 對 file 驗證「清單非空且每個路徑皆位於 `filesDir/radio_alarm/` 下」，不合者剔除；`toJson` 對稱輸出；schemaVersion 維持 2；完成方式：JUnit 涵蓋合法清單、空清單剔除、路徑越界剔除、bcc／url 的 source 行為不變、舊版讀到 file 頻道時剔除且鬧鐘落回預設頻道，`gradlew :app:testDebugUnitTest` 綠燈
+
+  `RadioAlarmConfig` 新增 `CHANNEL_KIND_FILE`、`LocalFile { path, displayName }`、`Channel.files`
+  （其他 kind 為空清單）、`isValidLocalFilePath(path, root)`（純字串：必須在 root 之下、無空片段與 `..`）、
+  `fromJson(json, localFileRoot)`（root 為 null 時 file 頻道一律剔除，等同舊版讀到新 kind 的行為）。
+  `RadioAlarmStore` 以 `RadioAlarmFiles.rootPath()` 為 root 提供 `parseConfig()`，插件寫回改走它。
+  JUnit 新增 7 個（`RadioAlarmConfigTest` 30 個全綠）。
+- [x] 14.2 選檔與複製的插件方法 `pickRadioAlarmFiles`：`ACTION_OPEN_DOCUMENT` 加 `EXTRA_ALLOW_MULTIPLE`，MIME `audio/*`＋`video/*`，經 Capacitor `startActivityForResult` 回傳；於背景執行緒逐檔以 `ContentResolver.openInputStream` 複製到 `filesDir/radio_alarm/<channelId>/<序號>_<DISPLAY_NAME>`，任一檔失敗即刪除已複製的部分並 reject 附原因；成功回傳 `{ channelId, files: [{ path, displayName }] }`；另加 `removeRadioAlarmChannelFiles({ channelId })` 刪除整個資料夾；完成方式：實機選 3 個檔（含 1 個 mp4）後 `adb shell run-as` 可見三個副本，空間不足（以大檔模擬）時無殘留資料夾
+
+  新增 `RadioAlarmFiles`（rootDir／channelDir／displayName／sanitizeFileName／copyInto／deleteChannelDir，
+  channelId 含 `/`、`..` 一律拒絕）。`YoutubeDlPlugin.pickRadioAlarmFiles` 以 `startActivityForResult`
+  ＋`@ActivityCallback radioAlarmFilesPicked` 收 ClipData 多選，背景執行緒逐檔複製到
+  `filesDir/radio_alarm/<channelId>/NNN_<原名>`，任一失敗即 `deleteChannelDir` 並 reject 附原因；
+  取消回 `{cancelled:true}`。`removeRadioAlarmChannelFiles` 刪整個資料夾。**實機驗證併入 14.7。**
+- [x] 14.3 播放服務的 file 分支：`RadioStreamResolver.resolve` 對 file 回傳存在且可讀的路徑清單（不碰網路）；`preparePlayer` 改收 `List<MediaItem>`，bcc／url 傳單元素清單；file 模式設 `REPEAT_MODE_ALL` 並以 `TrackSelectionParameters` 停用 `TRACK_TYPE_VIDEO`；清單為空即 `fail("…檔案不存在")` 走既有失敗流程且 MUST NOT 改播其他頻道；部分缺檔時照播其餘並於 `recordSuccess` 訊息附「有 N 個檔案無法讀取」；`STATE_ENDED` 在 file 模式只記錄不重試；`new ExoPlayer.Builder` 仍只有一處；完成方式：實機以兩個 4 分鐘 mp3 設 10 分鐘鬧鐘，聽到第三次開頭後於 10 分停止；mp4 播放中 `adb shell dumpsys media.codec` 無影像解碼器；`run-as` 刪掉副本後觸發，出現失敗通知且不出聲
+
+  `RadioStreamResolver.resolve` 改回傳 `Resolution { sources, local, missingCount }`；`resolveLocal`
+  逐檔檢查 isFile／canRead／length>0，保留順序、跳過缺檔（JUnit 以暫存檔釘住 2 個情境，共 12 個全綠）。
+  `RadioPlaybackService.preparePlayer(Resolution)`：空清單即 `fail("頻道「…」的檔案不存在或無法讀取，未播放。")`
+  走既有失敗流程、不改播；file 模式 `REPEAT_MODE_ALL`＋`setTrackTypeDisabled(TRACK_TYPE_VIDEO)`、
+  `STATE_ENDED` 只記錄、`onPlayerError` 直接 fail；多個 `MediaItem` 以 `setMediaItems` 一次交給播放器；
+  `recordSuccess` 訊息附「（有 N 個檔案無法讀取，已跳過）」。`new ExoPlayer.Builder` 仍只有一處。
+  `compileDebugJavaWithJavac` 通過。**實機驗證併入 14.7。**
+- [x] 14.4 前端型別與收斂：`RadioChannel` 改為以 `kind` 區分的 union（`file` 含 `files: { path, displayName }[]`）；`normalizeConfig` 改為三值判斷，未知 kind 剔除（修掉「非 url 一律當 bcc」）；`RadioAlarmService` 新增 `pickFiles()`、`removeChannelFiles()`；`channelName` 等純函式對 file 頻道正常運作；完成方式：vitest 涵蓋 file 頻道的 normalize、未知 kind 剔除、鬧鐘指向被剔除頻道時落回預設，`npm test` 綠燈
+
+  `RadioChannel` 改為 `RadioStreamChannel | RadioFileChannel` union，新增 `RadioLocalFile`、`isFileChannel`、
+  `defaultFileChannelName`、`describeChannelFiles`；`normalizeChannel` 三值判斷、未知 kind 與空清單的 file 剔除；
+  `RadioAlarmService.pickFiles()`／`removeChannelFiles()`；`setConfig` 對 file 頻道送出 `files`。
+  vitest 改寫「非 url 一律當 bcc」那條並新增 4 個（`npm test` 413 passed）。
+- [x] 14.5 介面：頻道列加一顆新增（開選檔器，複製期間顯示忙碌、失敗以文字提示原因）；非內建頻道可展開檢視檔案清單（顯示名稱、順序）、改名、移除（移除即呼叫 `removeChannelFiles` 並整包 `setConfig`，指向它的鬧鐘由原生端落回預設頻道）；新頻道預設名稱為第一個檔案的顯示名稱，多檔時加「等 N 個檔案」；直播鈕對 file 頻道照常可用；不引入新色碼、不加多行解釋段落；完成方式：`npx vue-tsc --noEmit` 與 `npm run build` 通過，`grep` 確認無新色碼
+
+  頻道列改為 `.radio-channel-item`（列＋可展開的 body）：非內建頻道右側有 ▼／▲，展開後為檔案順序清單
+  （`<ol>`）、名稱欄（失焦或 Enter 寫回）、「移除這個頻道」；清單下方一顆「從手機選擇 mp3／mp4 新增頻道」，
+  複製期間 `loading` 顯示「正在複製檔案…」。`addRadioFileChannel` 寫回失敗時呼叫 `removeChannelFiles` 清副本；
+  `removeRadioChannel` 正在播該頻道先停、寫回成功後刪副本。新增 CSS 只用既有中性色
+  （`#0f172a`／`#64748b`／`#94a3b8`／`#e2e8f0`）。`npx vue-tsc --noEmit` 與 `npm run build` 通過。
+- [x] 14.6 規格與文件同步：`specs/live-radio-alarm/spec.md` 的「頻道」需求與新增的「本地檔案頻道的播放」需求（本節依據）已寫入；design.md D15 已寫入；proposal.md 的「What Changes」補一條本地檔案頻道、「Impact」補插件方法與私有目錄；完成方式：`openspec validate live-radio-alarm` 通過，三份 delta 皆無 BOM
+
+  規格「頻道」需求與「本地檔案頻道的播放」需求、design.md D15、proposal.md（What Changes 補本地檔案頻道、
+  Impact 補兩個插件方法與私有目錄）皆已寫入；`openspec validate live-radio-alarm` 通過；三份 delta 無 BOM。
+- [ ] 14.7 實機驗證【本地檔案】逐條對照規格 Scenario：新增三檔頻道順序正確；其中一檔無法複製時不建頻道並提示；移除頻道後副本消失且鬧鐘落回新聞網未消失；清單短於時長時循環；mp4 只出聲不解影像；清除 App 資料（保留設定的模擬：手動刪副本）後觸發不出聲且有失敗通知；部分缺檔時照播其餘且上次結果載明數量；靜音下仍以鬧鐘音量響；手動收聽 file 頻道走媒體音量且循環至上限
+- [ ] 14.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`（說明鬧鐘可選本地 mp3／mp4 播放清單）

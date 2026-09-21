@@ -8,6 +8,7 @@
 - **串流來源解析**：內建頻道於觸發時向中廣官方頻道資訊 API 依名稱取得即時串流網址（實測新聞網為 `https://stream.rcs.revma.com/fgtx07f3qtzuv`，AAC）；API 取不到時按頻道退回上次成功播放的網址，再退回該頻道的內建網址。自訂頻道直接用其網址，略過 API。
 - **鬧鐘設定的權威來源在 Android 原生端**：鬧鐘必須在 WebView 未啟動時也能響，故鬧鐘清單、頻道、音量皆由原生端持有；前端不另存副本，透過插件方法讀寫。
 - **重開機、系統時間或時區變更後自動重新登錄鬧鐘**；鬧鐘一律登錄為「下一次」單次觸發，響完再登錄下一次。
+- **本地檔案頻道**：頻道除了電台直播，也可以是使用者自手機選取的一或多個 mp3／mp4 —— 選檔時複製進 App 私有目錄，一個頻道是一份固定順序的播放清單，鬧鐘觸發後循環播到時長結束；影片只解音訊。檔案讀不到即依失敗流程通知，不改播電台。頻道列因此新增「新增／檢視檔案／改名／移除」的介面（自訂串流網址的新增介面仍不做）。
 - **偏好設定新增「鬧鐘」區段**：以時間為第一層的鬧鐘卡片（展開後為星期、頻道、時長）、頻道列（每個頻道附直播鈕）、音量滑桿；試播與自我測試收於「進階」。介面遵守「正常時安靜、異常才說話」。Windows（Tauri）端不顯示此區段。
 - **失敗回報**：觸發時無網路或串流不可用，於限時重試後停止並以通知告知；失敗摘要保留於原生端，下次開啟 App 時寫入既有的錯誤紀錄。
 - **新增 Android 權限**：精確鬧鐘（`USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM`）、媒體播放型前景服務、開機完成廣播、通知（執行期請求）。
@@ -33,7 +34,7 @@
 
 ## Impact
 
-- **Android 原生**（`android/app/src/main/java/com/mattpocock/avd/`）：新增鬧鐘接收器（鬧鐘觸發、開機完成、時間與時區變更）、媒體播放前景服務、鬧鐘排程與設定儲存類別；`YoutubeDlPlugin` 新增讀寫設定、試播、查詢狀態的插件方法；`AndroidManifest.xml` 新增元件與權限；`build.gradle` 新增 media3 ExoPlayer 依賴（可靠播放無長度的 AAC 串流）。
+- **Android 原生**（`android/app/src/main/java/com/mattpocock/avd/`）：新增鬧鐘接收器（鬧鐘觸發、開機完成、時間與時區變更）、媒體播放前景服務、鬧鐘排程與設定儲存類別；`YoutubeDlPlugin` 新增讀寫設定、試播、查詢狀態的插件方法，以及本地檔案頻道的選檔複製（`pickRadioAlarmFiles`，系統選檔器多選後複製至 `filesDir/radio_alarm/<channelId>/`）與副本刪除（`removeRadioAlarmChannelFiles`）；`AndroidManifest.xml` 新增元件與權限；`build.gradle` 新增 media3 ExoPlayer 依賴（可靠播放無長度的 AAC 串流）。
 - **前端**：`App.vue` 偏好設定新增區段；新增服務模組封裝插件方法與純函式（時間字串驗證、「下一次觸發」顯示），純函式附 vitest 測試。
 - **對外網路存取**：`www.bcc.com.tw` 的官方 API 與 `stream.rcs.revma.com` 串流；均為公開端點，不需憑證。
 - **不影響**：Windows/Tauri 端與 TV 模式的既有行為、下載佇列、頻道追蹤。

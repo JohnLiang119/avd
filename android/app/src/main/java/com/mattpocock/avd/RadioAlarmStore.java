@@ -57,16 +57,29 @@ public final class RadioAlarmStore {
     }
 
     private final SharedPreferences prefs;
+    /** 本地檔案頻道副本的根目錄；file 頻道的路徑 MUST 落在其下，否則解析時剔除。 */
+    private final String localFileRoot;
 
     public RadioAlarmStore(Context context) {
-        this.prefs = context.getApplicationContext()
-                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        Context app = context.getApplicationContext();
+        this.prefs = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        this.localFileRoot = RadioAlarmFiles.rootPath(app);
     }
 
     // ---- 設定 ----
 
     public RadioAlarmConfig getConfig() {
-        return RadioAlarmConfig.fromJson(prefs.getString(KEY_CONFIG, null));
+        return parseConfig(prefs.getString(KEY_CONFIG, null));
+    }
+
+    /**
+     * 以本裝置的私有目錄為準解析一份設定 JSON。
+     *
+     * 所有「從外部進來的設定」（持久化內容、前端寫回）都 MUST 經過這裡，
+     * 路徑把關才會一致地套用。
+     */
+    public RadioAlarmConfig parseConfig(String json) {
+        return RadioAlarmConfig.fromJson(json, localFileRoot);
     }
 
     public void setConfig(RadioAlarmConfig config) {

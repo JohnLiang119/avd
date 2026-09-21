@@ -719,19 +719,74 @@
               <!--
                 直播鍵跟著頻道走，不依賴任何鬧鐘 —— 「現在想聽」與「明天要被叫醒」是兩件事。
                 播放中同一個位置換成停止（visualLanguage 的 stop），其他頻道維持播放。
+
+                本地檔案頻道（design.md D15）可展開：檔案清單（順序即播放順序）、名稱、移除。
+                內建頻道沒有可調的東西，不給展開。
               -->
-              <div v-for="channel in radioAlarm.channels" :key="channel.id" class="radio-channel-row">
-                <span style="font-size: 14px; color: #0f172a;">{{ channel.name }}</span>
-                <van-button
-                  size="mini"
-                  :title="radioStatus?.playingChannelId === channel.id ? '停止' : '立即收聽'"
-                  :style="GLYPH_BUTTON_STYLE"
-                  @click="onRadioLiveToggle(channel.id)"
-                >{{ radioStatus?.playingChannelId === channel.id ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
+              <div v-for="channel in radioAlarm.channels" :key="channel.id" class="radio-channel-item">
+                <div class="radio-channel-row">
+                  <div
+                    style="min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 6px;"
+                    :style="channel.kind !== 'bcc' ? 'cursor: pointer;' : ''"
+                    @click="channel.kind !== 'bcc' && toggleRadioChannelExpanded(channel.id)"
+                  >
+                    <span style="font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ channel.name }}</span>
+                    <span v-if="isFileChannel(channel)" style="font-size: 11px; color: #94a3b8; flex-shrink: 0;">{{ describeChannelFiles(channel) }}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                    <van-button
+                      size="mini"
+                      :title="radioStatus?.playingChannelId === channel.id ? '停止' : '立即收聽'"
+                      :style="GLYPH_BUTTON_STYLE"
+                      @click="onRadioLiveToggle(channel.id)"
+                    >{{ radioStatus?.playingChannelId === channel.id ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
+                    <button
+                      v-if="channel.kind !== 'bcc'"
+                      type="button"
+                      class="radio-alarm-chevron"
+                      :title="radioChannelExpandedId === channel.id ? '收合' : '展開設定'"
+                      @click="toggleRadioChannelExpanded(channel.id)"
+                    >{{ radioChannelExpandedId === channel.id ? '▲' : '▼' }}</button>
+                  </div>
+                </div>
+                <div v-if="radioChannelExpandedId === channel.id && isFileChannel(channel)" class="radio-channel-body">
+                  <ol class="radio-channel-files">
+                    <li v-for="file in channel.files" :key="file.path">{{ file.displayName }}</li>
+                  </ol>
+                  <div class="radio-alarm-field">
+                    <span class="radio-alarm-label">名稱</span>
+                    <van-field
+                      v-model="radioChannelNameDraft"
+                      placeholder="頻道名稱"
+                      maxlength="40"
+                      style="padding: 4px 8px; flex: 1;"
+                      @blur="renameRadioChannel(channel.id)"
+                      @keyup.enter="renameRadioChannel(channel.id)"
+                    />
+                  </div>
+                  <van-button
+                    size="small" block plain
+                    style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
+                    :disabled="radioAlarmBusy"
+                    @click="removeRadioChannel(channel.id)"
+                  >移除這個頻道</van-button>
+                </div>
               </div>
               <div v-if="radioPlayingLabel" style="font-size: 11px; color: #64748b; padding: 4px 0 8px;">
                 {{ radioPlayingLabel }}
               </div>
+              <!--
+                新增本地檔案頻道：系統選檔器多選 → 複製進私有目錄 → 整包寫回。
+                複製期間按鈕顯示忙碌；失敗以文字提示原因，不會留下只有部分檔案的頻道。
+              -->
+              <van-button
+                size="small" block plain
+                style="margin: 6px 0 8px; border-color: #e2e8f0; color: #64748b;"
+                :loading="radioPickBusy"
+                loading-text="正在複製檔案…"
+                :disabled="radioAlarmBusy || radioPickBusy"
+                @click="addRadioFileChannel"
+              >從手機選擇 mp3／mp4 新增頻道</van-button>
             </div>
           </van-cell-group>
 
@@ -1402,9 +1457,12 @@ import { matchPermanentError } from './services/downloadErrors';
 import {
   RadioAlarmService,
   describeAlarmSummary,
+  describeChannelFiles,
   describePlaybackState,
   describeSelfTest,
+  defaultFileChannelName,
   hasWeekday,
+  isFileChannel,
   lastFailureText,
   newAlarm,
   permissionWarnings,
@@ -1416,6 +1474,7 @@ import {
   type RadioAlarm,
   type RadioAlarmConfig,
   type RadioAlarmStatus,
+  type RadioChannel,
 } from './services/radioAlarm';
 import {
   nextQuotaResetTime,
@@ -3397,6 +3456,91 @@ const removeRadioAlarm = (id: string) => {
   void persistRadioAlarm({ ...radioAlarm.value, alarms });
 };
 
+// ---- 本地檔案頻道（design.md D15）----
+
+/** 目前展開的頻道；純介面狀態，預設全部收合 */
+const radioChannelExpandedId = ref<string | null>(null);
+/** 選檔與複製進行中：複製影片檔可能要幾十秒，按鈕要看得出在忙 */
+const radioPickBusy = ref(false);
+/** 展開的頻道名稱草稿；失焦或 Enter 才寫回 */
+const radioChannelNameDraft = ref('');
+
+const toggleRadioChannelExpanded = (id: string) => {
+  if (radioChannelExpandedId.value === id) {
+    radioChannelExpandedId.value = null;
+    return;
+  }
+  radioChannelExpandedId.value = id;
+  radioChannelNameDraft.value = radioAlarm.value.channels.find((c) => c.id === id)?.name ?? '';
+};
+
+/**
+ * 選檔 → 複製進私有目錄 → 整包寫回。
+ *
+ * 複製由原生端保證「全部成功或一個都不留」；寫回若失敗（persistRadioAlarm 會自行
+ * 回報並重新載入），這裡再把副本清掉 —— 不留沒有頻道指向的孤兒資料夾。
+ */
+const addRadioFileChannel = async () => {
+  if (isTauri() || radioPickBusy.value) return;
+  radioPickBusy.value = true;
+  try {
+    const picked = await RadioAlarmService.pickFiles();
+    if (picked.cancelled || !picked.channelId) return;
+
+    const channel: RadioChannel = {
+      id: picked.channelId,
+      name: defaultFileChannelName(picked.files),
+      kind: 'file',
+      source: '',
+      files: picked.files,
+    };
+    await persistRadioAlarm({ ...radioAlarm.value, channels: [...radioAlarm.value.channels, channel] });
+
+    if (!radioAlarm.value.channels.some((c) => c.id === picked.channelId)) {
+      await RadioAlarmService.removeChannelFiles(picked.channelId).catch(() => {});
+      showToast('新增頻道失敗，已清除複製的檔案');
+      return;
+    }
+    toggleRadioChannelExpanded(picked.channelId);
+  } catch (e) {
+    // 原生端 reject 的訊息已含原因（如空間不足），直接給使用者看
+    reportError('廣播鬧鐘', e);
+    showToast(String((e as { message?: string })?.message ?? e));
+  } finally {
+    radioPickBusy.value = false;
+  }
+};
+
+const renameRadioChannel = (id: string) => {
+  const name = radioChannelNameDraft.value.trim();
+  const target = radioAlarm.value.channels.find((c) => c.id === id);
+  if (!target || !name || name === target.name) return;
+  const channels = radioAlarm.value.channels.map((c) => (c.id === id ? { ...c, name } : c));
+  void persistRadioAlarm({ ...radioAlarm.value, channels });
+};
+
+/**
+ * 移除非內建頻道。指向它的鬧鐘由原生端落回第一個內建頻道（不會消失）；
+ * 本地檔案頻道的副本在設定寫回成功後刪除。正在播它就先停。
+ */
+const removeRadioChannel = async (id: string) => {
+  const target = radioAlarm.value.channels.find((c) => c.id === id);
+  if (!target || target.kind === 'bcc') return;
+  if (radioChannelExpandedId.value === id) radioChannelExpandedId.value = null;
+  if (radioStatus.value?.playingChannelId === id) {
+    await RadioAlarmService.stop().catch(() => {});
+  }
+  const channels = radioAlarm.value.channels.filter((c) => c.id !== id);
+  await persistRadioAlarm({ ...radioAlarm.value, channels });
+  if (isFileChannel(target) && !radioAlarm.value.channels.some((c) => c.id === id)) {
+    try {
+      await RadioAlarmService.removeChannelFiles(id);
+    } catch (e) {
+      reportError('廣播鬧鐘', e);
+    }
+  }
+};
+
 /**
  * 音量比例的變更。用 `@change`（放開才觸發）而非 `@update:model-value`：
  * 後者會在一次拖曳中送出數十次寫入與重新排程。播放進行中時原生端會即時套用。
@@ -5070,16 +5214,25 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   border-color: #0f172a;
   color: #ffffff;
 }
+.radio-channel-item + .radio-channel-item {
+  border-top: 1px solid #e2e8f0;
+}
 .radio-channel-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px solid #e2e8f0;
 }
-.radio-channel-row:last-of-type {
-  border-bottom: none;
+.radio-channel-body {
+  padding: 0 0 10px 4px;
+}
+.radio-channel-files {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.7;
 }
 .radio-advanced-toggle {
   display: block;

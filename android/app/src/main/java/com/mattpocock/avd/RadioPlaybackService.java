@@ -24,11 +24,15 @@ import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -50,6 +54,10 @@ import java.util.Locale;
  * 鬧鐘與試播採 USAGE_ALARM：走系統鬧鐘音量，勿擾或靜音時仍會出聲（見 design.md D3）。
  * 手動直播採 USAGE_MEDIA —— 鬧鐘能蓋過靜音是因為使用者要求被叫醒，手動按播放
  * 並沒有這個要求（見 design.md D12）。
+ *
+ * 來源有直播與本地檔案兩種（design.md D15），差別是**參數**而非分岔：檔案頻道以多個
+ * MediaItem 加 REPEAT_MODE_ALL 循環到時長結束、停用影像軌只解音訊、播放器出錯即失敗
+ * （本機沒有「斷線重連」可言）；建播放器的地方仍只有一處。
  */
 @OptIn(markerClass = UnstableApi.class)
 public class RadioPlaybackService extends Service {
@@ -121,6 +129,10 @@ public class RadioPlaybackService extends Service {
     private String mode = MODE_ALARM;
     private RadioAlarmConfig.Channel channel;
     private boolean everReady = false;
+    /** 本次播的是否為本機檔案（決定循環、影像軌、出錯的處理）。 */
+    private boolean localPlayback = false;
+    /** 檔案頻道中被跳過的檔案數；上次結果要載明，使用者才知道少了東西。 */
+    private int missingFiles = 0;
 
     private final Runnable stopAtEnd = new Runnable() {
         @Override
@@ -128,7 +140,7 @@ public class RadioPlaybackService extends Service {
             Log.d(TAG, "planned end reached");
             // 只有鬧鐘的結果才記進「上次播放」—— 試播與手動直播不是鬧鐘的成敗
             if (MODE_ALARM.equals(mode)) {
-                store.recordSuccess(System.currentTimeMillis(), "播放完成");
+                store.recordSuccess(System.currentTimeMillis(), "播放完成" + missingFilesSuffix());
             }
             stopEverything();
         }
@@ -158,7 +170,7 @@ public class RadioPlaybackService extends Service {
 
         if (ACTION_STOP.equals(action)) {
             if (MODE_ALARM.equals(mode) && everReady) {
-                store.recordSuccess(System.currentTimeMillis(), "使用者停止播放");
+                store.recordSuccess(System.currentTimeMillis(), "使用者停止播放" + missingFilesSuffix());
             }
             stopEverything();
             return START_NOT_STICKY;
@@ -202,6 +214,8 @@ public class RadioPlaybackService extends Service {
         channel = store.getConfig().channelById(intent.getStringExtra(EXTRA_CHANNEL_ID));
         activeChannelId = channel.id;
         everReady = false;
+        localPlayback = false;
+        missingFiles = 0;
 
         startForegroundWithNotification();
         acquireLocks();
@@ -220,23 +234,35 @@ public class RadioPlaybackService extends Service {
         handler.postDelayed(giveUp, Math.max(1000L, deadline - System.currentTimeMillis()));
         handler.postDelayed(stopAtEnd, Math.max(1000L, endAt - System.currentTimeMillis()));
 
-        // 來源解析會碰網路，不可在主執行緒；解析完回到主執行緒建立播放器。
+        // 來源解析會碰網路（直播）或檔案系統（檔案），不可在主執行緒；解析完回到主執行緒建立播放器。
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final String url = RadioStreamResolver.resolve(store, channel);
+                final RadioStreamResolver.Resolution resolution = RadioStreamResolver.resolve(store, channel);
                 handler.post(new Runnable() {
                     @Override
                     public void run() {
-                        preparePlayer(url);
+                        preparePlayer(resolution);
                     }
                 });
             }
         }, "radio-alarm-resolve").start();
     }
 
-    private void preparePlayer(String url) {
+    private void preparePlayer(RadioStreamResolver.Resolution resolution) {
         if (!playing) return; // 解析期間已被停止
+
+        localPlayback = resolution.local;
+        missingFiles = resolution.missingCount;
+
+        if (resolution.isEmpty()) {
+            // 檔案頻道讀不到就是失敗：不出聲、不退回電台（design.md D15）。
+            // 直播不會走到這裡 —— 退回鏈末端一定有內建常數。
+            fail(localPlayback
+                    ? "頻道「" + channel.name + "」的檔案不存在或無法讀取，未播放。"
+                    : "找不到可播放的來源。");
+            return;
+        }
 
         try {
             requestAudioFocus();
@@ -248,7 +274,18 @@ public class RadioPlaybackService extends Service {
                             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                             .build(),
                     false);
-            player.setRepeatMode(Player.REPEAT_MODE_OFF);
+            // 檔案頻道：清單播畢自第一個重新開始，直到時長到達（REPEAT_MODE_ALL 由
+            // 播放器自己換歌，不在 STATE_ENDED 裡手動接續）。直播維持不循環。
+            player.setRepeatMode(localPlayback ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+            if (localPlayback) {
+                // mp4 沒有 surface 也會把影像軌解碼再丟掉，6 點時 CPU 白跑整段時長；
+                // 停用影像軌只解音訊。這是參數而不是換一套 RenderersFactory —— 建播放器仍只有一處。
+                TrackSelectionParameters audioOnly = player.getTrackSelectionParameters()
+                        .buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                        .build();
+                player.setTrackSelectionParameters(audioOnly);
+            }
             player.addListener(new Player.Listener() {
                 @Override
                 public void onPlaybackStateChanged(int state) {
@@ -259,6 +296,12 @@ public class RadioPlaybackService extends Service {
                         updateNotification();
                     }
                     if (state == Player.STATE_ENDED) {
+                        if (localPlayback) {
+                            // REPEAT_MODE_ALL 下理論上不會結束；真的結束就只記錄，
+                            // 本機檔案沒有「斷線」可以重連。
+                            Log.w(TAG, "local playlist ended unexpectedly");
+                            return;
+                        }
                         // 直播不該結束；真的結束就當作斷線，重新載入。
                         Log.w(TAG, "stream ended unexpectedly, retrying");
                         retry();
@@ -267,6 +310,11 @@ public class RadioPlaybackService extends Service {
 
                 @Override
                 public void onPlayerError(PlaybackException error) {
+                    if (localPlayback) {
+                        // 本機檔案出錯（損毀、格式不支援）重試也不會好，直接依失敗流程處理。
+                        fail("播放檔案失敗：" + error.getMessage());
+                        return;
+                    }
                     // 斷線、換網路、CDN 暫時性錯誤都會走到這裡。失敗窗未到就重試，
                     // 到了則由 giveUp 收尾 —— 早上沒有人在旁邊按重試。
                     Log.w(TAG, "player error, retrying", error);
@@ -276,10 +324,15 @@ public class RadioPlaybackService extends Service {
 
             applyVolume();
 
-            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)));
+            List<MediaItem> items = new ArrayList<MediaItem>();
+            for (String source : resolution.sources) {
+                Uri uri = localPlayback ? Uri.fromFile(new File(source)) : Uri.parse(source);
+                items.add(MediaItem.fromUri(uri));
+            }
+            player.setMediaItems(items);
             player.prepare();
             player.setPlayWhenReady(true);
-            Log.d(TAG, "preparing " + url);
+            Log.d(TAG, "preparing " + items.size() + " item(s), first: " + resolution.sources.get(0));
         } catch (Exception e) {
             fail("建立播放器失敗：" + e);
         }
@@ -300,6 +353,12 @@ public class RadioPlaybackService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "failed to apply volume", e);
         }
+    }
+
+    /** 上次結果的補述：有檔案被跳過時使用者要知道，成功但有話要說。 */
+    private String missingFilesSuffix() {
+        if (!localPlayback || missingFiles <= 0) return "";
+        return "（有 " + missingFiles + " 個檔案無法讀取，已跳過）";
     }
 
     private void retry() {

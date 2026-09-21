@@ -40,6 +40,15 @@ public final class RadioAlarmConstants {
     public static final String LEGACY_CUSTOM_CHANNEL_ID = "custom-legacy";
 
     /**
+     * 本地檔案頻道副本的根目錄名稱（位於 filesDir 之下）。
+     *
+     * 選檔後一律複製到這裡再播（design.md D15）：私有目錄不需權限、不受使用者整理
+     * 檔案影響，是「6 點時檔案讀不到」唯一可靠的解法。設定中的 file 頻道路徑 MUST
+     * 全部落在此目錄之下，否則剔除。
+     */
+    public static final String LOCAL_FILES_DIR_NAME = "radio_alarm";
+
+    /**
      * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得，新聞網以 curl 實測可讀到 ADTS AAC 音訊。
      *
      * 這是**最後**一道退回，不是首選：官方端點與上次成功的位址都取不到時才會用到它。

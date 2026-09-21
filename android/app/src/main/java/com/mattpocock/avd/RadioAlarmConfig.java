@@ -13,7 +13,8 @@ import java.util.Locale;
  * 廣播鬧鐘的設定：鬧鐘清單、頻道清單、音量比例。
  *
  * 模型以**鬧鐘為主體**（design.md D14）：一筆鬧鐘 = 時刻 + 星期 + 頻道 + 時長 + 啟用，
- * 頻道是鬧鐘的屬性而非容器。沒有總開關 —— 每筆自有開關，清單預設為空即達成
+ * 頻道是鬧鐘的屬性而非容器。頻道有三種來源：官方 API（bcc）、自訂串流（url）、
+ * 複製進私有目錄的本地檔案清單（file，design.md D15）。沒有總開關 —— 每筆自有開關，清單預設為空即達成
  * 「升級後不會無預警響」。
  *
  * 這個類別刻意**不匯入任何 Android API**（只用 org.json 與 java.util），使其可在
@@ -35,6 +36,30 @@ public final class RadioAlarmConfig {
     /** 頻道的來源種類。 */
     public static final String CHANNEL_KIND_BCC = "bcc";
     public static final String CHANNEL_KIND_URL = "url";
+    /** 本地檔案頻道：一份複製進私有目錄的有序播放清單（design.md D15）。 */
+    public static final String CHANNEL_KIND_FILE = "file";
+
+    /**
+     * 本地檔案頻道中的一個檔案。
+     *
+     * path 是私有目錄下副本的絕對路徑；displayName 是選檔當下取得的原始檔名，
+     * 只供介面與通知顯示，不參與任何路徑運算。
+     */
+    public static final class LocalFile {
+        public final String path;
+        public final String displayName;
+
+        public LocalFile(String path, String displayName) {
+            this.path = path == null ? "" : path.trim();
+            String name = displayName == null ? "" : displayName.trim();
+            this.displayName = name.isEmpty() ? baseName(this.path) : name;
+        }
+
+        private static String baseName(String path) {
+            int slash = path.lastIndexOf('/');
+            return slash < 0 ? path : path.substring(slash + 1);
+        }
+    }
 
     /**
      * 一個可播放的頻道。
@@ -46,17 +71,33 @@ public final class RadioAlarmConfig {
         public final String id;
         public final String name;
         public final String kind;
+        /**
+         * bcc：官方 API 的頻道名稱；url：串流網址；file：顯示用摘要（不參與播放）。
+         * file 種類實際要播的內容在 {@link #files}。
+         */
         public final String source;
+        /** 本地檔案頻道的有序播放清單；其他種類為空清單。順序即播放順序，MUST NOT 重排。 */
+        public final List<LocalFile> files;
 
         public Channel(String id, String name, String kind, String source) {
+            this(id, name, kind, source, null);
+        }
+
+        public Channel(String id, String name, String kind, String source, List<LocalFile> files) {
             this.id = id;
             this.name = name;
             this.kind = kind;
             this.source = source;
+            this.files = Collections.unmodifiableList(
+                    files == null ? new ArrayList<LocalFile>() : new ArrayList<LocalFile>(files));
         }
 
         public boolean isBuiltIn() {
             return CHANNEL_KIND_BCC.equals(kind);
+        }
+
+        public boolean isLocalFile() {
+            return CHANNEL_KIND_FILE.equals(kind);
         }
     }
 
@@ -227,6 +268,31 @@ public final class RadioAlarmConfig {
         return text.startsWith("http://") || text.startsWith("https://");
     }
 
+    /**
+     * 本地檔案頻道的路徑是否可接受：**必須落在私有目錄 root 之下**，且不得含 `..` 片段。
+     *
+     * 這是紅線：複製進私有目錄的用意就是不引用外部檔案（見 design.md D15）；
+     * 接受私有目錄以外的路徑，等於把複製要避免的所有失敗方式（權限、SD 卡、
+     * 使用者整理檔案）又放回來。root 為 null 或空時一律拒絕 —— 沒有 root 就沒有
+     * 「私有目錄之下」可言。
+     *
+     * 純字串比對，不碰檔案系統，可在 JVM 測試。
+     */
+    public static boolean isValidLocalFilePath(String path, String root) {
+        if (path == null || root == null) return false;
+        String p = path.trim();
+        String r = root.trim();
+        if (p.isEmpty() || r.isEmpty()) return false;
+        while (r.endsWith("/") && r.length() > 1) r = r.substring(0, r.length() - 1);
+        if (!p.startsWith(r + "/")) return false;
+        String rest = p.substring(r.length() + 1);
+        if (rest.isEmpty()) return false;
+        for (String segment : rest.split("/")) {
+            if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) return false;
+        }
+        return true;
+    }
+
     /** 產生一筆新鬧鐘的識別。 */
     public static String newId(String time) {
         String suffix = time == null ? "x" : time.replace(":", "");
@@ -241,6 +307,17 @@ public final class RadioAlarmConfig {
      * 走 {@link #migrateLegacy} 一次性遷移。
      */
     public static RadioAlarmConfig fromJson(String json) {
+        return fromJson(json, null);
+    }
+
+    /**
+     * 同 {@link #fromJson(String)}，並指定本地檔案頻道允許的私有目錄。
+     *
+     * @param localFileRoot 本地檔案副本所在的私有目錄絕對路徑；為 null 時所有 file 頻道
+     *                      一律剔除（沒有 root 就沒有「私有目錄之下」可言），指向它們的
+     *                      鬧鐘落回預設頻道
+     */
+    public static RadioAlarmConfig fromJson(String json, String localFileRoot) {
         if (json == null || json.trim().isEmpty()) return defaults();
 
         JSONObject root;
@@ -257,7 +334,7 @@ public final class RadioAlarmConfig {
 
         int volume = clampVolume(root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
 
-        List<Channel> channels = parseChannels(root.optJSONArray("channels"));
+        List<Channel> channels = parseChannels(root.optJSONArray("channels"), localFileRoot);
         RadioAlarmConfig scaffold = new RadioAlarmConfig(new ArrayList<Alarm>(), channels, volume);
 
         List<Alarm> alarms = new ArrayList<Alarm>();
@@ -352,6 +429,16 @@ public final class RadioAlarmConfig {
                 item.put("name", c.name);
                 item.put("kind", c.kind);
                 item.put("source", c.source);
+                if (c.isLocalFile()) {
+                    JSONArray files = new JSONArray();
+                    for (LocalFile f : c.files) {
+                        JSONObject fileItem = new JSONObject();
+                        fileItem.put("path", f.path);
+                        fileItem.put("displayName", f.displayName);
+                        files.put(fileItem);
+                    }
+                    item.put("files", files);
+                }
                 channelArr.put(item);
             }
             root.put("channels", channelArr);
@@ -377,8 +464,14 @@ public final class RadioAlarmConfig {
 
     // ---- 內部 ----
 
-    /** 解析頻道清單；不合法的自訂頻道剔除。內建頻道由建構子保證存在。 */
-    private static List<Channel> parseChannels(JSONArray arr) {
+    /**
+     * 解析頻道清單；不合法的自訂頻道剔除。內建頻道由建構子保證存在。
+     *
+     * file 頻道：清單非空、且每個路徑都在 localFileRoot 之下才接受；越界的路徑剔除
+     * 該路徑，剔到清單為空即剔除整個頻道。**不認識的 kind 一律剔除** —— 這正是
+     * 舊版讀到新版寫入的頻道時的降版安全性。
+     */
+    private static List<Channel> parseChannels(JSONArray arr, String localFileRoot) {
         List<Channel> list = new ArrayList<Channel>();
         if (arr == null) return list;
         for (int i = 0; i < arr.length(); i++) {
@@ -397,9 +490,26 @@ public final class RadioAlarmConfig {
             } else if (CHANNEL_KIND_BCC.equals(kind)) {
                 if (source.isEmpty()) continue;
                 list.add(new Channel(id, name.isEmpty() ? source : name, kind, source));
+            } else if (CHANNEL_KIND_FILE.equals(kind)) {
+                List<LocalFile> files = parseLocalFiles(item.optJSONArray("files"), localFileRoot);
+                if (files.isEmpty()) continue;
+                list.add(new Channel(id, name.isEmpty() ? files.get(0).displayName : name, kind, source, files));
             }
         }
         return list;
+    }
+
+    private static List<LocalFile> parseLocalFiles(JSONArray arr, String localFileRoot) {
+        List<LocalFile> files = new ArrayList<LocalFile>();
+        if (arr == null) return files;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            String path = item.optString("path", "").trim();
+            if (!isValidLocalFilePath(path, localFileRoot)) continue;
+            files.add(new LocalFile(path, item.optString("displayName", "")));
+        }
+        return files;
     }
 
     /**

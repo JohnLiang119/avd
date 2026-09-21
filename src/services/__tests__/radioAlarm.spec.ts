@@ -23,6 +23,9 @@ import {
   permissionWarnings,
   isAggressiveVendor,
   normalizeConfig,
+  isFileChannel,
+  defaultFileChannelName,
+  describeChannelFiles,
   type RadioAlarm,
   type RadioAlarmConfig,
   type RadioAlarmStatus,
@@ -290,8 +293,66 @@ describe('插件回傳的收斂', () => {
     expect(normalizeConfig({ volumePercent: 0 }).volumePercent).toBe(0);
   });
 
-  it('頻道的 kind 只有 bcc 與 url，其餘視為 bcc', () => {
-    const r = normalizeConfig({ channels: [{ id: 'x', name: 'X', kind: 'weird', source: 's' }] });
-    expect(r.channels[0].kind).toBe('bcc');
+  it('不認識的 kind 剔除，指向它的鬧鐘落回預設頻道 —— 不再「非 url 一律當 bcc」', () => {
+    const r = normalizeConfig({
+      channels: [...CHANNELS, { id: 'x', name: 'X', kind: 'weird', source: 's' }],
+      alarms: [{ id: 'a', time: '06:00', channelId: 'x' }],
+    });
+    expect(r.channels.map((c) => c.id)).toEqual(['bcc-news', 'bcc-pop']);
+    expect(r.alarms[0].channelId).toBe('bcc-news');
+  });
+
+  it('file 頻道保留檔案清單與順序；沒有檔案的 file 頻道剔除', () => {
+    const r = normalizeConfig({
+      channels: [
+        ...CHANNELS,
+        { id: 'f1', name: '', kind: 'file', source: '', files: [
+          { path: '/data/x/radio_alarm/f1/001_a.mp3', displayName: 'a.mp3' },
+          { path: '/data/x/radio_alarm/f1/002_b.mp4', displayName: 'b.mp4' },
+          { path: '', displayName: '沒有路徑的要剔除' },
+        ] },
+        { id: 'f2', name: '空', kind: 'file', source: '', files: [] },
+        { id: 'f3', name: '缺欄位', kind: 'file', source: '' },
+      ],
+      alarms: [{ id: 'a', time: '06:00', channelId: 'f1' }, { id: 'b', time: '07:00', channelId: 'f2' }],
+    });
+    expect(r.channels.map((c) => c.id)).toEqual(['bcc-news', 'bcc-pop', 'f1']);
+    const f1 = r.channels[2];
+    expect(isFileChannel(f1)).toBe(true);
+    if (isFileChannel(f1)) {
+      expect(f1.files.map((f) => f.displayName)).toEqual(['a.mp3', 'b.mp4']);
+      expect(f1.name).toBe('a.mp3 等 2 個檔案');
+    }
+    expect(r.alarms[0].channelId).toBe('f1');
+    expect(r.alarms[1].channelId).toBe('bcc-news');
+  });
+});
+
+describe('本地檔案頻道', () => {
+  const files = [
+    { path: '/p/001_morning.mp3', displayName: 'morning.mp3' },
+    { path: '/p/002_news.mp4', displayName: 'news.mp4' },
+  ];
+
+  it('預設名稱：單檔用檔名，多檔加「等 N 個檔案」，空清單不留空字串', () => {
+    expect(defaultFileChannelName([files[0]])).toBe('morning.mp3');
+    expect(defaultFileChannelName(files)).toBe('morning.mp3 等 2 個檔案');
+    expect(defaultFileChannelName([])).toBe('本地檔案');
+  });
+
+  it('頻道列摘要只對 file 頻道說話', () => {
+    const fileChannel: RadioChannel = { id: 'f1', name: '歌單', kind: 'file', source: '', files };
+    expect(describeChannelFiles(fileChannel)).toBe('2 個檔案');
+    expect(describeChannelFiles(CHANNELS[0])).toBe('');
+  });
+
+  it('既有的純函式對 file 頻道照常運作', () => {
+    const fileChannel: RadioChannel = { id: 'f1', name: '歌單', kind: 'file', source: '', files };
+    const all = [...CHANNELS, fileChannel];
+    expect(channelName(all, 'f1')).toBe('歌單');
+    expect(defaultChannelId(all)).toBe('bcc-news');
+    expect(describeAlarmSummary(alarm({ channelId: 'f1', weekdays: 0b0111110 }), all)).toBe('平日 · 歌單');
+    expect(describePlaybackState(status({ playing: true, alarmAudioActive: true, playingChannelId: 'f1' }), all))
+      .toBe('播放中：歌單（鬧鐘音量）');
   });
 });

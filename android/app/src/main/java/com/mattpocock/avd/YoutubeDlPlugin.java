@@ -1,6 +1,7 @@
 package com.mattpocock.avd;
 
 import android.Manifest;
+import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -14,9 +15,12 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.PermissionState;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+
+import androidx.activity.result.ActivityResult;
 
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLException;
@@ -31,7 +35,9 @@ import java.io.File;
 import android.content.Context;
 import android.content.SharedPreferences;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 import java.net.InetAddress;
@@ -1648,11 +1654,11 @@ public class YoutubeDlPlugin extends Plugin {
             root.put("alarms", copyArray(call.getArray("alarms")));
             root.put("channels", copyArray(call.getArray("channels")));
 
-            // 一律經 fromJson 過濾：前端負責顯示拒絕的原因，這裡是最後一道防守，
-            // 確保寫進持久化的內容必定可用（不合法的時間剔除、重複去除、時長夾回範圍）。
-            RadioAlarmConfig config = RadioAlarmConfig.fromJson(root.toString());
-
+            // 一律經 parseConfig 過濾：前端負責顯示拒絕的原因，這裡是最後一道防守，
+            // 確保寫進持久化的內容必定可用（不合法的時間剔除、時長夾回範圍、
+            // 本地檔案頻道的路徑必須在私有目錄之下）。
             RadioAlarmStore store = new RadioAlarmStore(getContext());
+            RadioAlarmConfig config = store.parseConfig(root.toString());
             store.setConfig(config);
 
             // 設定變更 MUST 立即生效，不需重新啟動應用程式。
@@ -1855,6 +1861,114 @@ public class YoutubeDlPlugin extends Plugin {
         }
     }
 
+    /**
+     * 本地檔案頻道的選檔：開系統選檔器（可多選，限音訊與影片），選完在背景把每個檔案
+     * 複製進私有目錄，全部成功才回傳；任一個失敗就刪掉已複製的部分並拒絕，
+     * MUST NOT 留下只有部分檔案的頻道（design.md D15）。
+     *
+     * 這裡只複製、不寫設定：頻道要不要成立由前端整包 setRadioAlarmConfig 決定，
+     * 寫入失敗時前端負責呼叫 removeRadioAlarmChannelFiles 清掉副本。
+     */
+    @PluginMethod
+    public void pickRadioAlarmFiles(PluginCall call) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"audio/*", "video/*"});
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(call, intent, "radioAlarmFilesPicked");
+        } catch (Exception e) {
+            Log.e(TAG, "pickRadioAlarmFiles failed", e);
+            call.reject("無法開啟選檔器: " + e.getMessage());
+        }
+    }
+
+    @ActivityCallback
+    private void radioAlarmFilesPicked(final PluginCall call, ActivityResult result) {
+        if (call == null) return;
+
+        final List<Uri> uris = new ArrayList<Uri>();
+        Intent data = result == null ? null : result.getData();
+        if (result != null && result.getResultCode() == android.app.Activity.RESULT_OK && data != null) {
+            ClipData clip = data.getClipData();
+            if (clip != null) {
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    Uri uri = clip.getItemAt(i).getUri();
+                    if (uri != null) uris.add(uri);
+                }
+            } else if (data.getData() != null) {
+                uris.add(data.getData());
+            }
+        }
+
+        if (uris.isEmpty()) {
+            JSObject ret = new JSObject();
+            ret.put("cancelled", true);
+            ret.put("channelId", "");
+            ret.put("files", new JSArray());
+            call.resolve(ret);
+            return;
+        }
+
+        final Context context = getContext();
+        final String channelId = RadioAlarmFiles.newChannelId();
+        final File dir = RadioAlarmFiles.channelDir(context, channelId);
+        if (dir == null) {
+            call.reject("無法建立頻道資料夾");
+            return;
+        }
+
+        // 複製可能要幾秒到幾十秒（影片檔），不可在主執行緒
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSArray files = new JSArray();
+                try {
+                    for (int i = 0; i < uris.size(); i++) {
+                        Uri uri = uris.get(i);
+                        String displayName = RadioAlarmFiles.displayName(context.getContentResolver(), uri);
+                        File copy = RadioAlarmFiles.copyInto(context.getContentResolver(), uri, dir, i + 1, displayName);
+                        JSObject item = new JSObject();
+                        item.put("path", copy.getAbsolutePath());
+                        item.put("displayName", displayName);
+                        files.put(item);
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("cancelled", false);
+                    ret.put("channelId", channelId);
+                    ret.put("files", files);
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    // 任一個失敗：整個頻道不建立，已複製的部分一併清掉
+                    Log.e(TAG, "copying picked files failed", e);
+                    RadioAlarmFiles.deleteChannelDir(context, channelId);
+                    String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    call.reject("複製檔案失敗，未建立頻道: " + reason);
+                }
+            }
+        }, "radio-alarm-copy").start();
+    }
+
+    /** 刪除某個本地檔案頻道的全部副本（頻道被移除時由前端呼叫）。 */
+    @PluginMethod
+    public void removeRadioAlarmChannelFiles(PluginCall call) {
+        String channelId = call.getString("channelId");
+        if (!RadioAlarmFiles.isSafeChannelId(channelId)) {
+            call.reject("channelId 不合法");
+            return;
+        }
+        try {
+            boolean deleted = RadioAlarmFiles.deleteChannelDir(getContext(), channelId.trim());
+            JSObject ret = new JSObject();
+            ret.put("deleted", deleted);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "removeRadioAlarmChannelFiles failed", e);
+            call.reject("刪除頻道檔案失敗: " + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void requestRadioAlarmNotificationPermission(PluginCall call) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -1944,6 +2058,16 @@ public class YoutubeDlPlugin extends Plugin {
             item.put("name", c.name);
             item.put("kind", c.kind);
             item.put("source", c.source);
+            if (c.isLocalFile()) {
+                JSArray files = new JSArray();
+                for (RadioAlarmConfig.LocalFile f : c.files) {
+                    JSObject fileItem = new JSObject();
+                    fileItem.put("path", f.path);
+                    fileItem.put("displayName", f.displayName);
+                    files.put(fileItem);
+                }
+                item.put("files", files);
+            }
             channels.put(item);
         }
         ret.put("channels", channels);

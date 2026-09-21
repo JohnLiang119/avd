@@ -7,6 +7,8 @@
  * 每次開啟設定介面都經插件回原生端讀，變更時整包寫回。
  *
  * 模型以鬧鐘為主體（design.md D14）：一筆鬧鐘 = 時刻 + 星期 + 頻道 + 時長 + 啟用。
+ * 頻道有三種來源：官方 API（bcc）、自訂串流（url）、複製進私有目錄的本地檔案
+ * 播放清單（file，design.md D15）。
  */
 
 import { registerPlugin } from '@capacitor/core';
@@ -15,12 +17,36 @@ const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
 
 // ---- 型別 ----
 
-export interface RadioChannel {
+/** 本地檔案頻道中的一個檔案：私有目錄下副本的路徑，與選檔當下的原始檔名。 */
+export interface RadioLocalFile {
+  path: string;
+  displayName: string;
+}
+
+interface RadioChannelBase {
   id: string;
   name: string;
-  /** bcc：向中廣官方 API 依名稱解析；url：自訂串流網址 */
-  kind: 'bcc' | 'url';
   source: string;
+}
+
+/** bcc：向中廣官方 API 依名稱解析；url：自訂串流網址。source 就是解析用的字串。 */
+export interface RadioStreamChannel extends RadioChannelBase {
+  kind: 'bcc' | 'url';
+}
+
+/**
+ * 本地檔案頻道：一份有序播放清單，順序固定照選取、循環到時長結束（design.md D15）。
+ * source 只是顯示用摘要，實際內容在 files。
+ */
+export interface RadioFileChannel extends RadioChannelBase {
+  kind: 'file';
+  files: RadioLocalFile[];
+}
+
+export type RadioChannel = RadioStreamChannel | RadioFileChannel;
+
+export function isFileChannel(channel: RadioChannel): channel is RadioFileChannel {
+  return channel.kind === 'file';
 }
 
 export interface RadioAlarm {
@@ -62,6 +88,13 @@ export interface RadioAlarmStatus {
   lastResultTime?: number;
   lastResultSuccess?: boolean;
   lastResultMessage?: string;
+}
+
+/** 選檔的結果：使用者取消時 cancelled 為 true 且 files 為空。 */
+export interface RadioPickedFiles {
+  cancelled: boolean;
+  channelId: string;
+  files: RadioLocalFile[];
 }
 
 export interface RadioAlarmJournalEntry {
@@ -181,6 +214,22 @@ export function defaultChannelId(channels: readonly RadioChannel[]): string {
   return channels.find((c) => c.kind === 'bcc')?.id ?? channels[0]?.id ?? '';
 }
 
+/**
+ * 新建本地檔案頻道的預設名稱：第一個檔案的顯示名稱，多檔時加「等 N 個檔案」。
+ * 使用者可再改名；空清單回傳固定字樣而非空字串，介面不該出現沒有名字的列。
+ */
+export function defaultFileChannelName(files: readonly RadioLocalFile[]): string {
+  const first = (files[0]?.displayName ?? '').trim();
+  if (!first) return '本地檔案';
+  return files.length > 1 ? `${first} 等 ${files.length} 個檔案` : first;
+}
+
+/** 頻道列上本地檔案頻道的摘要：有幾個檔案。 */
+export function describeChannelFiles(channel: RadioChannel): string {
+  if (!isFileChannel(channel)) return '';
+  return `${channel.files.length} 個檔案`;
+}
+
 // ---- 顯示用文字 ----
 
 /** 鬧鐘卡片收合時的摘要：星期與頻道。這一行要讓人不展開就看得出設定了什麼。 */
@@ -283,16 +332,35 @@ export function isAggressiveVendor(manufacturer: string | null | undefined): boo
 
 // ---- 插件回傳的收斂 ----
 
+/**
+ * 把插件回傳的一個頻道收斂成型別正確的物件；不認識的 kind、或沒有檔案的 file 頻道
+ * 回傳 null 由呼叫端剔除 —— 早先「非 url 一律當 bcc」會把 file 頻道誤標成內建頻道，
+ * 然後拿檔名去問中廣 API。
+ */
+function normalizeChannel(c: any): RadioChannel | null {
+  const id = String(c?.id ?? '');
+  if (id === '') return null;
+  const name = String(c?.name ?? '');
+  const source = String(c?.source ?? '');
+  const kind = c?.kind;
+  if (kind === 'bcc' || kind === 'url') {
+    return { id, name, kind, source };
+  }
+  if (kind === 'file') {
+    const files: RadioLocalFile[] = Array.isArray(c?.files)
+      ? c.files
+          .map((f: any) => ({ path: String(f?.path ?? ''), displayName: String(f?.displayName ?? '') }))
+          .filter((f: RadioLocalFile) => f.path !== '')
+      : [];
+    if (files.length === 0) return null;
+    return { id, name: name || defaultFileChannelName(files), kind, source, files };
+  }
+  return null;
+}
+
 export function normalizeConfig(raw: any): RadioAlarmConfig {
   const channels: RadioChannel[] = Array.isArray(raw?.channels)
-    ? raw.channels
-        .map((c: any) => ({
-          id: String(c?.id ?? ''),
-          name: String(c?.name ?? ''),
-          kind: c?.kind === 'url' ? 'url' as const : 'bcc' as const,
-          source: String(c?.source ?? ''),
-        }))
-        .filter((c: RadioChannel) => c.id !== '')
+    ? raw.channels.map(normalizeChannel).filter((c: RadioChannel | null): c is RadioChannel => c !== null)
     : [];
 
   const fallbackChannel = defaultChannelId(channels);
@@ -330,7 +398,11 @@ export const RadioAlarmService = {
   async setConfig(config: RadioAlarmConfig): Promise<RadioAlarmConfig> {
     const result = await YoutubeDlPlugin.setRadioAlarmConfig({
       volumePercent: clampVolume(Number(config.volumePercent)),
-      channels: config.channels.map((c) => ({ id: c.id, name: c.name, kind: c.kind, source: c.source })),
+      channels: config.channels.map((c) => (
+        isFileChannel(c)
+          ? { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) }
+          : { id: c.id, name: c.name, kind: c.kind, source: c.source }
+      )),
       alarms: config.alarms.map((a) => ({
         id: a.id,
         time: a.time,
@@ -376,6 +448,30 @@ export const RadioAlarmService = {
 
   async stop(): Promise<void> {
     await YoutubeDlPlugin.stopRadioAlarm();
+  },
+
+  /**
+   * 開系統選檔器（可多選）並把選到的檔案複製進私有目錄。只複製、不寫設定：
+   * 頻道要不要成立由呼叫端整包 setConfig 決定；失敗時呼叫端 MUST 以
+   * removeChannelFiles 清掉副本。
+   */
+  async pickFiles(): Promise<RadioPickedFiles> {
+    const r = await YoutubeDlPlugin.pickRadioAlarmFiles();
+    const files: RadioLocalFile[] = Array.isArray(r?.files)
+      ? r.files
+          .map((f: any) => ({ path: String(f?.path ?? ''), displayName: String(f?.displayName ?? '') }))
+          .filter((f: RadioLocalFile) => f.path !== '')
+      : [];
+    return {
+      cancelled: Boolean(r?.cancelled) || files.length === 0,
+      channelId: String(r?.channelId ?? ''),
+      files,
+    };
+  },
+
+  /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */
+  async removeChannelFiles(channelId: string): Promise<void> {
+    await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
   },
 
   async consumeJournal(): Promise<RadioAlarmJournalEntry> {

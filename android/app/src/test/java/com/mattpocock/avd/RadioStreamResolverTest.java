@@ -1,9 +1,16 @@
 package com.mattpocock.avd;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNull;
 
 import org.junit.Test;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 自官方端點的回應中依頻道名稱挑出串流網址。
@@ -119,5 +126,59 @@ public class RadioStreamResolverTest {
         assertNull(RadioStreamResolver.pickStreamUrl("[null,null]", NEWS));
         assertNull(RadioStreamResolver.pickStreamUrl(REAL_SAMPLE, null));
         assertNull(RadioStreamResolver.pickStreamUrl(REAL_SAMPLE, ""));
+    }
+
+    // ---- 檔案頻道：不碰網路、沒有退回鏈（design.md D15）----
+
+    private static File tempFileWithBytes(String name, int size) throws IOException {
+        File f = File.createTempFile("avd-radio-" + name, ".bin");
+        f.deleteOnExit();
+        FileOutputStream out = new FileOutputStream(f);
+        try {
+            out.write(new byte[size]);
+        } finally {
+            out.close();
+        }
+        return f;
+    }
+
+    private static RadioAlarmConfig.Channel fileChannel(List<RadioAlarmConfig.LocalFile> files) {
+        return new RadioAlarmConfig.Channel("f1", "歌單", RadioAlarmConfig.CHANNEL_KIND_FILE, "", files);
+    }
+
+    @Test
+    public void localResolutionKeepsOrderAndSkipsMissingFiles() throws IOException {
+        File a = tempFileWithBytes("a", 10);
+        File b = tempFileWithBytes("b", 10);
+        File gone = tempFileWithBytes("gone", 10);
+        assertTrue(gone.delete());
+
+        List<RadioAlarmConfig.LocalFile> files = new ArrayList<RadioAlarmConfig.LocalFile>();
+        files.add(new RadioAlarmConfig.LocalFile(a.getAbsolutePath(), "a.mp3"));
+        files.add(new RadioAlarmConfig.LocalFile(gone.getAbsolutePath(), "gone.mp3"));
+        files.add(new RadioAlarmConfig.LocalFile(b.getAbsolutePath(), "b.mp3"));
+
+        RadioStreamResolver.Resolution r = RadioStreamResolver.resolveLocal(fileChannel(files));
+        assertTrue(r.local);
+        assertEquals("跳過讀不到的，其餘照播", 2, r.sources.size());
+        assertEquals("順序 MUST 維持清單順序", a.getAbsolutePath(), r.sources.get(0));
+        assertEquals(b.getAbsolutePath(), r.sources.get(1));
+        assertEquals("上次結果要能載明數量", 1, r.missingCount);
+    }
+
+    @Test
+    public void localResolutionWithNothingReadableIsEmptyNotAFallback() throws IOException {
+        File gone = tempFileWithBytes("gone2", 10);
+        assertTrue(gone.delete());
+        File empty = tempFileWithBytes("empty", 0);
+
+        List<RadioAlarmConfig.LocalFile> files = new ArrayList<RadioAlarmConfig.LocalFile>();
+        files.add(new RadioAlarmConfig.LocalFile(gone.getAbsolutePath(), "gone.mp3"));
+        files.add(new RadioAlarmConfig.LocalFile(empty.getAbsolutePath(), "empty.mp3"));
+
+        RadioStreamResolver.Resolution r = RadioStreamResolver.resolveLocal(fileChannel(files));
+        assertTrue("讀不到就是失敗，MUST NOT 退回電台網址", r.isEmpty());
+        assertEquals(2, r.missingCount);
+        assertTrue(r.local);
     }
 }
