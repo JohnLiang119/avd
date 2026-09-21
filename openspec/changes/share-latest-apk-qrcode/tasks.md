@@ -13,4 +13,6 @@
 ## 2. 驗證與進版
 
 - [ ] 2.1 實機驗證：Android 與 Windows 各開一次對話框，以另一支手機相機掃描 QR code 能開到 GitHub 最新發布頁；「複製連結」貼到記事本為正確網址
-- [ ] 2.2 功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+- [x] 2.2 功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+  功能 commit `312e64d`；版本 1.0.106 → 1.0.107（versionCode 144），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
