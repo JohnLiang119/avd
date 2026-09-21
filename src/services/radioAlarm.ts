@@ -91,6 +91,13 @@ export interface RadioAlarmConfig {
   fugleApiKey: string;
 }
 
+/** 插件 searchStocks 的回傳：以名稱或代號片段找到的候選；抓不到清單時 ok=false。 */
+export interface StockSearch {
+  ok: boolean;
+  matches: RadioStockItem[];
+  error: string;
+}
+
 /** 插件 lookupStock 的回傳：查不到時 ok=false 且 error 為可顯示的原因。 */
 export interface StockLookup {
   ok: boolean;
@@ -557,6 +564,17 @@ export const RadioAlarmService = {
   /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */
   async removeChannelFiles(channelId: string): Promise<void> {
     await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
+  },
+
+  /** 以名稱或代號片段找候選股票（富果股票清單，快取一天）。抓不到清單不拋，看 ok。 */
+  async searchStocks(query: string): Promise<StockSearch> {
+    const r = await YoutubeDlPlugin.searchStocks({ query });
+    const matches: RadioStockItem[] = Array.isArray(r?.matches)
+      ? r.matches
+          .map((m: any) => ({ symbol: String(m?.symbol ?? '').trim().toUpperCase(), name: String(m?.name ?? '').trim() }))
+          .filter((m: RadioStockItem) => m.symbol !== '')
+      : [];
+    return { ok: Boolean(r?.ok), matches, error: String(r?.error ?? '') };
   },
 
   /** 以目前設定的富果金鑰查一支股票的名稱與現價（加入股票時確認代號）。查不到不拋，看 ok。 */

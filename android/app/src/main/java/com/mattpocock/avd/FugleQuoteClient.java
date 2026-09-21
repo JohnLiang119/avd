@@ -148,9 +148,14 @@ public final class FugleQuoteClient {
 
     /** 查一支。任何連線層的失敗回傳 null（連不上）；HTTP 錯誤照樣回傳 code 與內容供 parse 分辨。 */
     public static Response fetch(String symbol, String apiKey) {
+        return fetchUrl(QUOTE_URL_PREFIX + symbol, apiKey);
+    }
+
+    /** 帶金鑰 GET 任一個富果端點（報價、股票清單共用）。連線層失敗回傳 null。 */
+    public static Response fetchUrl(String urlText, String apiKey) {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL(QUOTE_URL_PREFIX + symbol);
+            URL url = new URL(urlText);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setRequestProperty("X-API-KEY", apiKey);
@@ -168,7 +173,7 @@ public final class FugleQuoteClient {
                 int read;
                 while ((read = in.read(buffer)) != -1) {
                     out.write(buffer, 0, read);
-                    if (out.size() > 256 * 1024) break; // 一支股票的報價不該有這麼大
+                    if (out.size() > 2 * 1024 * 1024) break; // 整個市場的股票清單也不該超過 2 MB
                 }
                 in.close();
                 body = out.toString("UTF-8");

@@ -967,8 +967,8 @@
           <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
             <van-field
               v-model="radioStockSymbolDraft"
-              placeholder="股票代號，如 2330"
-              maxlength="10"
+              placeholder="代號或名稱，如 2330、台積電"
+              maxlength="20"
               style="padding: 4px 8px; flex: 1;"
               @keyup.enter="addStockToChannel(radioStockDetail.id)"
             />
@@ -1516,6 +1516,17 @@
       @confirm="onBatchModalConfirm"
       @cancel="onBatchModalCancel"
     />
+    <!-- 以名稱搜尋股票命中多筆時挑一筆 -->
+    <van-action-sheet
+      v-model:show="showRadioStockPicker"
+      :actions="radioStockPickerActions"
+      cancel-text="取消"
+      title="找到多筆，請選一支"
+      close-on-click-action
+      @select="onRadioStockPick"
+      style="max-width: 400px; margin: 0 auto; left: 0; right: 0;"
+    />
+
     <van-action-sheet
       v-model:show="showRestoreSheet"
       :actions="restoreActions"
@@ -1589,6 +1600,7 @@ import {
   type RadioAlarmConfig,
   type RadioAlarmStatus,
   type RadioChannel,
+  type RadioStockItem,
 } from './services/radioAlarm';
 import {
   nextQuotaResetTime,
@@ -3659,51 +3671,102 @@ const saveFugleApiKey = () => {
   void persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: key });
 };
 
-/**
- * 加入一支股票：先用目前的金鑰查名稱與現價確認代號沒打錯；查不到（沒金鑰、離線、代號錯）
- * 仍可加入，只是沒有名稱、並以 Toast 說明原因 —— 早上會念出實際的錯誤。
- */
-const addStockToChannel = async (channelId: string) => {
-  const symbol = normalizeStockSymbol(radioStockSymbolDraft.value);
-  if (!symbol) {
-    showToast('股票代號只能是 1 到 10 個英數字');
-    return;
-  }
-  const target = radioAlarm.value.channels.find((c) => c.id === channelId);
-  if (!target || !isStockChannel(target)) return;
-  if (target.stocks.some((st) => st.symbol === symbol)) {
+/** 以名稱搜尋到多筆時的候選；使用者從 action sheet 挑一筆 */
+const radioStockMatches = ref<RadioStockItem[]>([]);
+const showRadioStockPicker = ref(false);
+const radioStockPickerFor = ref<string | null>(null);
+const radioStockPickerActions = computed(() => radioStockMatches.value.map((m) => ({ name: describeStock(m), symbol: m.symbol })));
+
+/** 把一支股票寫進頻道並清空輸入框。重複的不加。 */
+const appendStockToChannel = async (channelId: string, symbol: string, name: string) => {
+  const current = radioAlarm.value.channels.find((c) => c.id === channelId);
+  if (!current || !isStockChannel(current)) return;
+  if (current.stocks.some((st) => st.symbol === symbol)) {
     showToast('已經加過這支了');
     return;
   }
-
-  // 金鑰若剛輸入還沒失焦，先寫回，否則查詢會用舊金鑰
-  if (radioFugleKeyDraft.value.trim() !== radioAlarm.value.fugleApiKey) {
-    await persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: radioFugleKeyDraft.value.trim() });
-  }
-
-  radioStockLookupBusy.value = true;
-  let name = '';
-  try {
-    const found = await RadioAlarmService.lookupStock(symbol);
-    if (found.ok) {
-      name = found.name;
-      showToast(`${describeStock({ symbol, name })}，目前 ${found.price} 元`);
-    } else {
-      showToast({ message: `查不到 ${symbol}：${found.error}。仍已加入，早上會念出實際狀況。`, duration: 4000 });
-    }
-  } catch (e) {
-    reportError('股票報價頻道', e);
-  } finally {
-    radioStockLookupBusy.value = false;
-  }
-
-  const current = radioAlarm.value.channels.find((c) => c.id === channelId);
-  if (!current || !isStockChannel(current)) return;
   const channels = radioAlarm.value.channels.map((c) => (
     c.id === channelId && isStockChannel(c) ? { ...c, stocks: [...c.stocks, { symbol, name }] } : c
   ));
   radioStockSymbolDraft.value = '';
   await persistRadioAlarm({ ...radioAlarm.value, channels });
+};
+
+/** 金鑰若剛輸入還沒失焦，先寫回，否則查詢會用舊金鑰 */
+const flushFugleKeyDraft = async () => {
+  if (radioFugleKeyDraft.value.trim() !== radioAlarm.value.fugleApiKey) {
+    await persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: radioFugleKeyDraft.value.trim() });
+  }
+};
+
+/**
+ * 加入一支股票，輸入可以是**代號或名稱**。
+ *
+ * 代號：用目前的金鑰查名稱與現價確認沒打錯；查不到（沒金鑰、離線、代號錯）仍可加入，
+ * 只是沒有名稱、並以 Toast 說明原因 —— 早上會念出實際的錯誤。
+ * 名稱：以富果的股票清單搜尋；剛好一筆直接加入，多筆跳出候選讓使用者挑，沒有就提示。
+ */
+const addStockToChannel = async (channelId: string) => {
+  const raw = radioStockSymbolDraft.value.trim();
+  if (!raw) {
+    showToast('請輸入股票代號或名稱');
+    return;
+  }
+  const target = radioAlarm.value.channels.find((c) => c.id === channelId);
+  if (!target || !isStockChannel(target)) return;
+
+  await flushFugleKeyDraft();
+
+  const symbol = normalizeStockSymbol(raw);
+  radioStockLookupBusy.value = true;
+  try {
+    if (symbol) {
+      if (target.stocks.some((st) => st.symbol === symbol)) {
+        showToast('已經加過這支了');
+        return;
+      }
+      let name = '';
+      const found = await RadioAlarmService.lookupStock(symbol);
+      if (found.ok) {
+        name = found.name;
+        showToast(`${describeStock({ symbol, name })}，目前 ${found.price} 元`);
+      } else {
+        showToast({ message: `查不到 ${symbol}：${found.error}。仍已加入，早上會念出實際狀況。`, duration: 4000 });
+      }
+      await appendStockToChannel(channelId, symbol, name);
+      return;
+    }
+
+    const result = await RadioAlarmService.searchStocks(raw);
+    if (!result.ok) {
+      showToast({ message: result.error || '搜尋失敗', duration: 4000 });
+      return;
+    }
+    if (result.matches.length === 0) {
+      showToast(`找不到名稱含「${raw}」的股票`);
+      return;
+    }
+    if (result.matches.length === 1) {
+      await appendStockToChannel(channelId, result.matches[0].symbol, result.matches[0].name);
+      return;
+    }
+    radioStockMatches.value = result.matches;
+    radioStockPickerFor.value = channelId;
+    showRadioStockPicker.value = true;
+  } catch (e) {
+    reportError('股票報價頻道', e);
+    showToast(String((e as { message?: string })?.message ?? e));
+  } finally {
+    radioStockLookupBusy.value = false;
+  }
+};
+
+const onRadioStockPick = (action: { symbol: string; name: string }) => {
+  const channelId = radioStockPickerFor.value;
+  const picked = radioStockMatches.value.find((m) => m.symbol === action.symbol);
+  showRadioStockPicker.value = false;
+  if (!channelId || !picked) return;
+  void appendStockToChannel(channelId, picked.symbol, picked.name);
 };
 
 /** 句間停頓：用 @change（放開才觸發），避免 stepper 長按時連發寫入 */

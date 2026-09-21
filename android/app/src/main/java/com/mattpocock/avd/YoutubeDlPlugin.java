@@ -1980,6 +1980,61 @@ public class YoutubeDlPlugin extends Plugin {
         }, "radio-alarm-lookup").start();
     }
 
+    /**
+     * 以名稱（或代號片段）找股票：抓富果的上市＋上櫃股票清單（快取一天）後在本機比對，
+     * 回傳最多 10 筆 { symbol, name }。沒有金鑰或抓不到清單時 ok=false 並附原因。
+     */
+    @PluginMethod
+    public void searchStocks(final PluginCall call) {
+        final String query = call.getString("query", "");
+        if (query == null || query.trim().isEmpty()) {
+            call.reject("請輸入名稱或代號");
+            return;
+        }
+        final RadioAlarmStore store = new RadioAlarmStore(getContext());
+        final String apiKey = store.getConfig().fugleApiKey;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                JSObject ret = new JSObject();
+                long now = System.currentTimeMillis();
+                String cached = store.getFreshTickersJson(now);
+                List<RadioAlarmConfig.StockItem> all;
+                if (cached != null) {
+                    all = FugleTickerSearch.parseCacheJson(cached);
+                } else {
+                    if (apiKey == null || apiKey.trim().isEmpty()) {
+                        ret.put("ok", false);
+                        ret.put("error", "尚未設定富果 API 金鑰，無法以名稱搜尋");
+                        ret.put("matches", new JSArray());
+                        call.resolve(ret);
+                        return;
+                    }
+                    all = FugleTickerSearch.fetchAll(apiKey.trim());
+                    if (all.isEmpty()) {
+                        ret.put("ok", false);
+                        ret.put("error", "抓不到富果的股票清單（請確認網路與金鑰）");
+                        ret.put("matches", new JSArray());
+                        call.resolve(ret);
+                        return;
+                    }
+                    store.setTickersJson(FugleTickerSearch.mergeToCacheJson(all), now);
+                }
+                JSArray matches = new JSArray();
+                for (RadioAlarmConfig.StockItem it : FugleTickerSearch.search(all, query)) {
+                    JSObject item = new JSObject();
+                    item.put("symbol", it.symbol);
+                    item.put("name", it.name);
+                    matches.put(item);
+                }
+                ret.put("ok", true);
+                ret.put("error", "");
+                ret.put("matches", matches);
+                call.resolve(ret);
+            }
+        }, "radio-alarm-search").start();
+    }
+
     /** 刪除某個本地檔案頻道的全部副本（頻道被移除時由前端呼叫）。 */
     @PluginMethod
     public void removeRadioAlarmChannelFiles(PluginCall call) {

@@ -629,6 +629,8 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 15.6 前端：`RadioStockChannel` 型別、`isStockChannel`、`describeChannelSummary`（取代 describeChannelFiles）、`normalizeStockSymbol`、`describeStock`、`RadioAlarmConfig.fugleApiKey`、`RadioAlarmService.lookupStock`；介面：頻道列「新增股票報價頻道」、明細對話框（名稱、金鑰密碼欄失焦寫回、股票清單可移除、代號輸入＋「加入」先查名稱、移除頻道）；完成方式：vitest 新增 3 個綠燈、`vue-tsc` 與 `npm run build` 通過、無新色碼
 
   型別、純函式、`lookupStock` 封裝與介面（新增鈕、明細對話框：名稱、金鑰密碼欄、股票清單可移除、代號加入先查名稱）皆已加入；vitest 新增 3 個（共 421 個）；`vue-tsc`、`npm run build` 通過；只用既有色碼。
+
+  **可用名稱加入**（使用者要求）：新增 `FugleTickerSearch`（parseTickers／cache／search 純函式，JUnit 3 個）、`FugleQuoteClient.fetchUrl`、Store 的股票清單快取（一天）、插件 `searchStocks`；前端 `searchStocks` 封裝、輸入框接受名稱、多筆命中以 action sheet 挑選。
 - [ ] 15.7 實機驗證【股票報價】：填金鑰、加入 2330 與 2317 看到名稱與現價；設 2 分鐘後鬧鐘、時長 2 分，時間到念出頻道名、日期、兩支報價並循環至 2 分停；加入一個不存在的代號後再觸發，念出其餘並說「另有 1 支無法取得」；清空金鑰觸發，念出「尚未設定富果 API 金鑰」且上次結果顯示失敗；飛航模式觸發念出連不上並記失敗；手動收聽股票頻道走媒體音量；`adb shell dumpsys media.codec` 無影像解碼器
 - [x] 15.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
 

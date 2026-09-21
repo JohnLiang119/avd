@@ -33,6 +33,10 @@ public final class RadioAlarmStore {
     private static final String KEY_SELF_TEST_AT = "self_test_at";
     private static final String KEY_SELF_TEST_FIRED_AT = "self_test_fired_at";
 
+    /** 富果股票清單（代號＋名稱）的快取與抓取時間，供以名稱找代號。 */
+    private static final String KEY_TICKERS_JSON = "fugle_tickers_json";
+    private static final String KEY_TICKERS_AT = "fugle_tickers_at";
+
     private static final String KEY_RESULT_TIME = "last_result_time";
     private static final String KEY_RESULT_SUCCESS = "last_result_success";
     private static final String KEY_RESULT_MESSAGE = "last_result_message";
@@ -163,6 +167,20 @@ public final class RadioAlarmStore {
 
     public void clearSelfTest() {
         prefs.edit().putLong(KEY_SELF_TEST_AT, -1L).apply();
+    }
+
+    // ---- 富果股票清單快取（以名稱找代號用）----
+
+    /** @return 快取的清單 JSON；沒有或已過期回傳 null */
+    public String getFreshTickersJson(long now) {
+        long at = prefs.getLong(KEY_TICKERS_AT, 0L);
+        if (at <= 0L || now - at > FugleTickerSearch.CACHE_TTL_MS) return null;
+        String json = prefs.getString(KEY_TICKERS_JSON, "");
+        return json == null || json.isEmpty() ? null : json;
+    }
+
+    public void setTickersJson(String json, long at) {
+        prefs.edit().putString(KEY_TICKERS_JSON, json == null ? "" : json).putLong(KEY_TICKERS_AT, at).apply();
     }
 
     // ---- 上次播放結果 ----
