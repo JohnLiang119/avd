@@ -637,3 +637,5 @@ design.md 新增 D14、改寫 D4／D9。
   口說稿極簡與停頓可調：功能 commit `03b99d7`；版本 1.0.110 → 1.0.111（versionCode 148），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 
   停頓上限放寬至 600 秒：功能 commit `e684629`；版本 1.0.111 → 1.0.112（versionCode 149），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+  停頓改整數秒、最小 1：功能 commit `83de2e8`；版本 1.0.112 → 1.0.113（versionCode 150），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
