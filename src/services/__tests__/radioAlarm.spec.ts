@@ -383,10 +383,11 @@ describe('股票報價頻道', () => {
     expect(normalizeStockSymbol(undefined)).toBeNull();
   });
 
-  it('句間停頓夾在 0 到 10 秒、一位小數；缺欄位用預設 1 秒', () => {
+  it('句間停頓夾在 0 到 600 秒、一位小數；缺欄位用預設 1 秒', () => {
     expect(clampPauseSeconds(Number.NaN)).toBe(1);
     expect(clampPauseSeconds(-2)).toBe(0);
-    expect(clampPauseSeconds(99)).toBe(10);
+    expect(clampPauseSeconds(99)).toBe(99);
+    expect(clampPauseSeconds(9999)).toBe(600);
     expect(clampPauseSeconds(2.54)).toBe(2.5);
     const r = normalizeConfig({ channels: [{ id: 's', kind: 'stock', stocks: [], pauseSeconds: 3.5 }] });
     expect(isStockChannel(r.channels[0]) && r.channels[0].pauseSeconds).toBe(3.5);

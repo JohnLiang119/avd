@@ -477,7 +477,8 @@ public class RadioAlarmConfigTest {
     public void stockPauseIsClampedAndRoundTripped() {
         assertEquals(1.0, RadioAlarmConfig.clampPauseSeconds(Double.NaN), 0.0001);
         assertEquals(0.0, RadioAlarmConfig.clampPauseSeconds(-3), 0.0001);
-        assertEquals(10.0, RadioAlarmConfig.clampPauseSeconds(99), 0.0001);
+        assertEquals(99.0, RadioAlarmConfig.clampPauseSeconds(99), 0.0001);
+        assertEquals(600.0, RadioAlarmConfig.clampPauseSeconds(9999), 0.0001);
         assertEquals(2.5, RadioAlarmConfig.clampPauseSeconds(2.54), 0.0001);
 
         String json = j("{'schemaVersion':2,'channels':[{'id':'s1','kind':'stock','stocks':[],'pauseSeconds':3.5}]}");

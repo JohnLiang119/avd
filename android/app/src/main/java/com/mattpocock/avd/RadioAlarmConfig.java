@@ -107,7 +107,7 @@ public final class RadioAlarmConfig {
         public final List<LocalFile> files;
         /** 股票報價頻道的股票清單（念的順序）；其他種類為空清單。允許為空 —— 念「尚未加入任何股票」。 */
         public final List<StockItem> stocks;
-        /** 股票報價頻道句與句之間的停頓（秒，0–10，一位小數）；其他種類無意義。 */
+        /** 股票報價頻道句與句之間的停頓（秒，0–600，一位小數）；其他種類無意義。 */
         public final double pauseSeconds;
 
         public Channel(String id, String name, String kind, String source) {
@@ -307,7 +307,7 @@ public final class RadioAlarmConfig {
         return value;
     }
 
-    /** 股票報價的句間停頓夾在 0–10 秒並取到一位小數；NaN 回預設。 */
+    /** 股票報價的句間停頓夾在 0–600 秒並取到一位小數；NaN 回預設。 */
     public static double clampPauseSeconds(double value) {
         if (Double.isNaN(value) || Double.isInfinite(value)) return RadioAlarmConstants.DEFAULT_STOCK_PAUSE_SECONDS;
         double clamped = Math.max(RadioAlarmConstants.MIN_STOCK_PAUSE_SECONDS,

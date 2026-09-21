@@ -985,10 +985,10 @@
             <van-stepper
               :model-value="radioStockDetail.pauseSeconds"
               :min="0"
-              :max="10"
+              :max="600"
               :step="0.5"
               :decimal-length="1"
-              input-width="44px"
+              input-width="56px"
               button-size="26px"
               :disabled="radioAlarmBusy"
               @change="(v: number | string) => onStockPauseChange(radioStockDetail!.id, v)"

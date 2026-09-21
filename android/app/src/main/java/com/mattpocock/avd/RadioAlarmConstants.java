@@ -57,7 +57,7 @@ public final class RadioAlarmConstants {
      */
     public static final double DEFAULT_STOCK_PAUSE_SECONDS = 1.0;
     public static final double MIN_STOCK_PAUSE_SECONDS = 0.0;
-    public static final double MAX_STOCK_PAUSE_SECONDS = 10.0;
+    public static final double MAX_STOCK_PAUSE_SECONDS = 600.0;
 
     /**
      * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得，新聞網以 curl 實測可讀到 ADTS AAC 音訊。
