@@ -984,10 +984,10 @@
             <span class="radio-alarm-label">停頓</span>
             <van-stepper
               :model-value="radioStockDetail.pauseSeconds"
-              :min="0"
+              :min="1"
               :max="600"
-              :step="0.5"
-              :decimal-length="1"
+              :step="1"
+              integer
               input-width="56px"
               button-size="26px"
               :disabled="radioAlarmBusy"

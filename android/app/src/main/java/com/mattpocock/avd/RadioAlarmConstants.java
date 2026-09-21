@@ -56,7 +56,7 @@ public final class RadioAlarmConstants {
      * 語音引擎對句號的停頓不可控，故以靜音檔實作（見 SilenceWav）。
      */
     public static final double DEFAULT_STOCK_PAUSE_SECONDS = 1.0;
-    public static final double MIN_STOCK_PAUSE_SECONDS = 0.0;
+    public static final double MIN_STOCK_PAUSE_SECONDS = 1.0;
     public static final double MAX_STOCK_PAUSE_SECONDS = 600.0;
 
     /**

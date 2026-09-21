@@ -56,7 +56,7 @@ export interface RadioStockItem {
 export interface RadioStockChannel extends RadioChannelBase {
   kind: 'stock';
   stocks: RadioStockItem[];
-  /** 句與句之間的停頓（秒，0–600，一位小數）；以靜音檔實作，循環之間也是同樣一次 */
+  /** 句與句之間的停頓（整數秒，1–600）；以靜音檔實作，循環之間也是同樣一次 */
   pauseSeconds: number;
 }
 
@@ -273,14 +273,14 @@ export function describeChannelSummary(channel: RadioChannel): string {
 
 export const DEFAULT_STOCK_CHANNEL_NAME = '股市晨報';
 export const DEFAULT_STOCK_PAUSE_SECONDS = 1;
-export const MIN_STOCK_PAUSE_SECONDS = 0;
+export const MIN_STOCK_PAUSE_SECONDS = 1;
 export const MAX_STOCK_PAUSE_SECONDS = 600;
 
-/** 句間停頓夾在 0–600 秒、一位小數；非數字回預設。與原生端 clampPauseSeconds 同一套規則。 */
+/** 句間停頓：整數秒、夾在 1–600（不允許 0）；非數字回預設。與原生端 clampPauseSeconds 同一套規則。 */
 export function clampPauseSeconds(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_STOCK_PAUSE_SECONDS;
   const clamped = Math.min(MAX_STOCK_PAUSE_SECONDS, Math.max(MIN_STOCK_PAUSE_SECONDS, value));
-  return Math.round(clamped * 10) / 10;
+  return Math.round(clamped);
 }
 
 /** 股票代號：1–10 個英數字，一律大寫；不合法回傳 null。與原生端 normalizeStockSymbol 同一套規則。 */
