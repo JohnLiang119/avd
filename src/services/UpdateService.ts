@@ -1,5 +1,6 @@
 import { registerPlugin } from '@capacitor/core';
 import { isTauri } from './DownloadService';
+import { pickApkAsset, versionFromTag, type ApkAsset } from './releaseAssets';
 import { downloadDir } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -51,10 +52,17 @@ export function compareSemVer(v1: string, v2: string): number {
 }
 
 /**
- * GitHub 最新發布頁。設定頁的「分享下載連結」QR code 與更新失敗時的「在瀏覽器開啟下載」
- * 都指向這裡；用 `latest` 而非某一版的附件網址，QR code 才不會在下一版發布後過期。
+ * GitHub 最新發布頁。更新失敗時的「在瀏覽器開啟下載」指向這裡；「分享下載連結」的
+ * QR code 優先指向最新 APK 本身（見 fetchLatestApk），查不到時才退回這個頁面。
  */
 export const LATEST_RELEASE_URL = 'https://github.com/JohnLiang119/avd/releases/latest';
+
+const LATEST_RELEASE_API_URL = 'https://api.github.com/repos/JohnLiang119/avd/releases/latest';
+
+/** 最新版 APK 的下載資訊，供「分享下載連結」的 QR code 使用。 */
+export interface LatestApk extends ApkAsset {
+  version: string;
+}
 
 export const UpdateService = {
   /**
@@ -143,6 +151,33 @@ export const UpdateService = {
     } catch (e) {
       // 離線、逾時或連線失敗，靜默返回無更新
       return defaultResult;
+    }
+  },
+
+  /**
+   * 查詢 GitHub 最新正式版（不含 pre-release）的 APK 下載網址。
+   *
+   * 與 checkForUpdates 分開：後者在「不是新版」時刻意不回傳網址，而分享連結
+   * 正是使用者已在最新版時最常用的情境。離線、逾時、找不到 APK 一律回傳 null，
+   * 由呼叫端退回發布頁 —— 不拋例外。
+   */
+  async fetchLatestApk(timeoutMs = 5000): Promise<LatestApk | null> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const resp = await fetch(LATEST_RELEASE_API_URL, {
+        signal: controller.signal,
+        headers: { 'Accept': 'application/vnd.github.v3+json' },
+      });
+      clearTimeout(timeoutId);
+      if (!resp.ok) return null;
+
+      const release = await resp.json();
+      const asset = pickApkAsset(release?.assets);
+      if (!asset) return null;
+      return { ...asset, version: versionFromTag(release?.tag_name) };
+    } catch (e) {
+      return null;
     }
   },
 

@@ -896,8 +896,8 @@
               <van-switch v-model="testModeEnabled" size="18px" />
             </template>
           </van-cell>
-          <!-- 給別人掃的 QR code：指向 GitHub 最新發布頁，兩個平台都有（design.md D1／D2） -->
-          <van-cell title="分享下載連結" label="QR code 給別人掃，下載最新版" is-link @click="showShareDownloadModal = true" />
+          <!-- 給別人掃的 QR code：指向最新版 APK 本身，只在 Android 提供（design.md D1／D2） -->
+          <van-cell v-if="!isTauri()" title="分享下載連結" label="QR code 給別人掃，直接下載最新版 APK" is-link @click="openShareDownload" />
         </van-cell-group>
       </div>
     </van-dialog>
@@ -912,11 +912,15 @@
       style="max-width: 320px; width: 86%;"
     >
       <div style="padding: 16px 20px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
-        <qrcode-vue :value="LATEST_RELEASE_URL" :size="180" level="M" />
+        <!-- 正在向 GitHub 查最新 APK 時先不畫 QR code：畫了退回網址再換掉，對方可能已經掃了 -->
+        <div v-if="shareDownloadLoading" style="height: 180px; display: flex; align-items: center;">
+          <van-loading size="24px" />
+        </div>
+        <qrcode-vue v-else :value="shareDownloadUrl" :size="180" level="M" />
         <p style="font-size: 12px; color: #64748b; margin: 0; text-align: center; line-height: 1.6;">
-          用手機相機掃描，開啟 GitHub 最新版本頁面，下載 Android 的 AVD_*.apk 或 Windows 的 AVD_*_x64.msi。
+          {{ shareDownloadHint }}
         </p>
-        <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all; text-align: center;">{{ LATEST_RELEASE_URL }}</p>
+        <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all; text-align: center;">{{ shareDownloadUrl }}</p>
       </div>
     </van-dialog>
 
@@ -1535,7 +1539,7 @@ import {
   KEYWORD_MAX_LENGTH,
   type ChannelAnchor
 } from './composables/useChannelMatching';
-import { UpdateService, LATEST_RELEASE_URL, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
+import { UpdateService, LATEST_RELEASE_URL, type LatestApk, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { createStorage } from './composables/useStorage';
 import { LocalStorageAdapter, TauriStoreAdapter, localStorageLegacyFallback } from './composables/storageAdapters';
 import {
@@ -3211,14 +3215,38 @@ const onParsingCancel = () => {
 const errorLog = storage.defineSetting<ErrorEntry[]>('avd_error_log', []);
 const showErrorLogModal = ref(false);
 
-// ---- 分享下載連結（auto-update 規格「分享最新版下載連結」）----
+// ---- 分享下載連結（auto-update 規格「分享最新版 APK 下載連結」，僅 Android）----
 const showShareDownloadModal = ref(false);
+const shareDownloadLoading = ref(false);
+/** 向 GitHub 查到的最新 APK；查不到為 null，QR code 退回發布頁 */
+const shareLatestApk = ref<LatestApk | null>(null);
+
+const shareDownloadUrl = computed(() => shareLatestApk.value?.url ?? LATEST_RELEASE_URL);
+const shareDownloadHint = computed(() => {
+  if (shareDownloadLoading.value) return '正在向 GitHub 查詢最新版…';
+  if (shareLatestApk.value) {
+    const v = shareLatestApk.value.version ? ` v${shareLatestApk.value.version}` : '';
+    return `用手機相機掃描，直接下載最新版${v} 的 Android 安裝檔（${shareLatestApk.value.name}）。`;
+  }
+  return '目前連不上 GitHub，這個 QR code 開的是最新版本頁面，進去後點 AVD_*.apk 下載。';
+});
+
+/** 每次開啟都重查：上次查到的可能已經不是最新版 */
+const openShareDownload = async () => {
+  showShareDownloadModal.value = true;
+  shareDownloadLoading.value = true;
+  try {
+    shareLatestApk.value = await UpdateService.fetchLatestApk(5000);
+  } finally {
+    shareDownloadLoading.value = false;
+  }
+};
 
 /** 「複製連結」不關閉對話框（對方可能還在掃）；「關閉」才關。 */
 const onShareDownloadClose = async (action: string): Promise<boolean> => {
   if (action !== 'confirm') return true;
   try {
-    await navigator.clipboard.writeText(LATEST_RELEASE_URL);
+    await navigator.clipboard.writeText(shareDownloadUrl.value);
     showToast('已複製下載連結');
   } catch (e) {
     reportError('分享下載連結', e);
