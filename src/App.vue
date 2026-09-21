@@ -896,7 +896,27 @@
               <van-switch v-model="testModeEnabled" size="18px" />
             </template>
           </van-cell>
+          <!-- 給別人掃的 QR code：指向 GitHub 最新發布頁，兩個平台都有（design.md D1／D2） -->
+          <van-cell title="分享下載連結" label="QR code 給別人掃，下載最新版" is-link @click="showShareDownloadModal = true" />
         </van-cell-group>
+      </div>
+    </van-dialog>
+
+    <van-dialog
+      v-model:show="showShareDownloadModal"
+      title="下載最新版"
+      show-cancel-button
+      confirm-button-text="複製連結"
+      cancel-button-text="關閉"
+      :before-close="onShareDownloadClose"
+      style="max-width: 320px; width: 86%;"
+    >
+      <div style="padding: 16px 20px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+        <qrcode-vue :value="LATEST_RELEASE_URL" :size="180" level="M" />
+        <p style="font-size: 12px; color: #64748b; margin: 0; text-align: center; line-height: 1.6;">
+          用手機相機掃描，開啟 GitHub 最新版本頁面，下載 Android 的 AVD_*.apk 或 Windows 的 AVD_*_x64.msi。
+        </p>
+        <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all; text-align: center;">{{ LATEST_RELEASE_URL }}</p>
       </div>
     </van-dialog>
 
@@ -1515,7 +1535,7 @@ import {
   KEYWORD_MAX_LENGTH,
   type ChannelAnchor
 } from './composables/useChannelMatching';
-import { UpdateService, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
+import { UpdateService, LATEST_RELEASE_URL, type UpdateInfo, type DownloadProgress } from './services/UpdateService';
 import { createStorage } from './composables/useStorage';
 import { LocalStorageAdapter, TauriStoreAdapter, localStorageLegacyFallback } from './composables/storageAdapters';
 import {
@@ -3190,6 +3210,22 @@ const onParsingCancel = () => {
 /** 錯誤日誌：讓失敗訊息在提示消失後仍可回看與複製。 */
 const errorLog = storage.defineSetting<ErrorEntry[]>('avd_error_log', []);
 const showErrorLogModal = ref(false);
+
+// ---- 分享下載連結（auto-update 規格「分享最新版下載連結」）----
+const showShareDownloadModal = ref(false);
+
+/** 「複製連結」不關閉對話框（對方可能還在掃）；「關閉」才關。 */
+const onShareDownloadClose = async (action: string): Promise<boolean> => {
+  if (action !== 'confirm') return true;
+  try {
+    await navigator.clipboard.writeText(LATEST_RELEASE_URL);
+    showToast('已複製下載連結');
+  } catch (e) {
+    reportError('分享下載連結', e);
+    showToast('複製失敗，請直接抄寫下方網址');
+  }
+  return false;
+};
 const displayedErrorLog = computed(() => sortedForDisplay(errorLog.value));
 
 /**

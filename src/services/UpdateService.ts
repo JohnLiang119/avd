@@ -50,6 +50,12 @@ export function compareSemVer(v1: string, v2: string): number {
   return 0;
 }
 
+/**
+ * GitHub 最新發布頁。設定頁的「分享下載連結」QR code 與更新失敗時的「在瀏覽器開啟下載」
+ * 都指向這裡；用 `latest` 而非某一版的附件網址，QR code 才不會在下一版發布後過期。
+ */
+export const LATEST_RELEASE_URL = 'https://github.com/JohnLiang119/avd/releases/latest';
+
 export const UpdateService = {
   /**
    * 檢查 GitHub Releases 是否有新版本
@@ -65,7 +71,7 @@ export const UpdateService = {
       releaseNotes: '',
       downloadUrl: '',
       assetName: '',
-      htmlUrl: 'https://github.com/JohnLiang119/avd/releases'
+      htmlUrl: LATEST_RELEASE_URL
     };
 
     try {
