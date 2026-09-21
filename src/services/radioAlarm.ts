@@ -7,8 +7,8 @@
  * 每次開啟設定介面都經插件回原生端讀，變更時整包寫回。
  *
  * 模型以鬧鐘為主體（design.md D14）：一筆鬧鐘 = 時刻 + 星期 + 頻道 + 時長 + 啟用。
- * 頻道有三種來源：官方 API（bcc）、自訂串流（url）、複製進私有目錄的本地檔案
- * 播放清單（file，design.md D15）。
+ * 頻道有四種來源：官方 API（bcc）、自訂串流（url）、複製進私有目錄的本地檔案
+ * 播放清單（file，design.md D15）、富果 API 股票報價口說（stock，design.md D16）。
  */
 
 import { registerPlugin } from '@capacitor/core';
@@ -43,10 +43,29 @@ export interface RadioFileChannel extends RadioChannelBase {
   files: RadioLocalFile[];
 }
 
-export type RadioChannel = RadioStreamChannel | RadioFileChannel;
+/** 股票報價頻道中的一支股票；name 是加入時查到的名稱，可為空。 */
+export interface RadioStockItem {
+  symbol: string;
+  name: string;
+}
+
+/**
+ * 股票報價頻道：觸發時向富果 API 抓每支股票的報價，文字轉語音念出（design.md D16）。
+ * 金鑰是全域設定（RadioAlarmConfig.fugleApiKey），不在頻道上。
+ */
+export interface RadioStockChannel extends RadioChannelBase {
+  kind: 'stock';
+  stocks: RadioStockItem[];
+}
+
+export type RadioChannel = RadioStreamChannel | RadioFileChannel | RadioStockChannel;
 
 export function isFileChannel(channel: RadioChannel): channel is RadioFileChannel {
   return channel.kind === 'file';
+}
+
+export function isStockChannel(channel: RadioChannel): channel is RadioStockChannel {
+  return channel.kind === 'stock';
 }
 
 export interface RadioAlarm {
@@ -66,6 +85,17 @@ export interface RadioAlarmConfig {
   channels: RadioChannel[];
   /** 應用程式內的音量比例（0–100），在系統音量之下縮放 */
   volumePercent: number;
+  /** 富果 API 金鑰（全域）；空字串代表未設定 */
+  fugleApiKey: string;
+}
+
+/** 插件 lookupStock 的回傳：查不到時 ok=false 且 error 為可顯示的原因。 */
+export interface StockLookup {
+  ok: boolean;
+  symbol: string;
+  name: string;
+  price: number;
+  error: string;
 }
 
 export interface RadioAlarmStatus {
@@ -232,10 +262,24 @@ export function defaultFileChannelName(files: readonly RadioLocalFile[]): string
     : stem;
 }
 
-/** 頻道列上本地檔案頻道的摘要：有幾個檔案。 */
-export function describeChannelFiles(channel: RadioChannel): string {
-  if (!isFileChannel(channel)) return '';
-  return `${channel.files.length} 個檔案`;
+/** 頻道列上的小字摘要：檔案頻道是檔案數、股票頻道是股票數；直播頻道沒有。 */
+export function describeChannelSummary(channel: RadioChannel): string {
+  if (isFileChannel(channel)) return `${channel.files.length} 個檔案`;
+  if (isStockChannel(channel)) return `${channel.stocks.length} 支股票`;
+  return '';
+}
+
+export const DEFAULT_STOCK_CHANNEL_NAME = '股市晨報';
+
+/** 股票代號：1–10 個英數字，一律大寫；不合法回傳 null。與原生端 normalizeStockSymbol 同一套規則。 */
+export function normalizeStockSymbol(raw: string | null | undefined): string | null {
+  const text = String(raw ?? '').trim().toUpperCase();
+  return /^[0-9A-Z]{1,10}$/.test(text) ? text : null;
+}
+
+/** 顯示用：有名稱就「台積電（2330）」，否則只有代號。 */
+export function describeStock(item: RadioStockItem): string {
+  return item.name ? `${item.name}（${item.symbol}）` : item.symbol;
 }
 
 // ---- 顯示用文字 ----
@@ -363,6 +407,18 @@ function normalizeChannel(c: any): RadioChannel | null {
     if (files.length === 0) return null;
     return { id, name: name || defaultFileChannelName(files), kind, source, files };
   }
+  if (kind === 'stock') {
+    // 允許空清單（原生端會念「尚未加入任何股票」）；不合法與重複的代號剔除
+    const seen = new Set<string>();
+    const stocks: RadioStockItem[] = [];
+    for (const raw of Array.isArray(c?.stocks) ? c.stocks : []) {
+      const symbol = normalizeStockSymbol(raw?.symbol);
+      if (!symbol || seen.has(symbol)) continue;
+      seen.add(symbol);
+      stocks.push({ symbol, name: String(raw?.name ?? '').trim() });
+    }
+    return { id, name: name || DEFAULT_STOCK_CHANNEL_NAME, kind, source, stocks };
+  }
   return null;
 }
 
@@ -393,6 +449,7 @@ export function normalizeConfig(raw: any): RadioAlarmConfig {
     volumePercent: raw?.volumePercent === undefined || raw?.volumePercent === null
       ? DEFAULT_VOLUME_PERCENT
       : clampVolume(Number(raw.volumePercent)),
+    fugleApiKey: String(raw?.fugleApiKey ?? '').trim(),
   };
 }
 
@@ -406,11 +463,16 @@ export const RadioAlarmService = {
   async setConfig(config: RadioAlarmConfig): Promise<RadioAlarmConfig> {
     const result = await YoutubeDlPlugin.setRadioAlarmConfig({
       volumePercent: clampVolume(Number(config.volumePercent)),
-      channels: config.channels.map((c) => (
-        isFileChannel(c)
-          ? { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) }
-          : { id: c.id, name: c.name, kind: c.kind, source: c.source }
-      )),
+      fugleApiKey: String(config.fugleApiKey ?? '').trim(),
+      channels: config.channels.map((c) => {
+        if (isFileChannel(c)) {
+          return { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) };
+        }
+        if (isStockChannel(c)) {
+          return { id: c.id, name: c.name, kind: c.kind, source: c.source, stocks: c.stocks.map((st) => ({ symbol: st.symbol, name: st.name })) };
+        }
+        return { id: c.id, name: c.name, kind: c.kind, source: c.source };
+      }),
       alarms: config.alarms.map((a) => ({
         id: a.id,
         time: a.time,
@@ -480,6 +542,18 @@ export const RadioAlarmService = {
   /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */
   async removeChannelFiles(channelId: string): Promise<void> {
     await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
+  },
+
+  /** 以目前設定的富果金鑰查一支股票的名稱與現價（加入股票時確認代號）。查不到不拋，看 ok。 */
+  async lookupStock(symbol: string): Promise<StockLookup> {
+    const r = await YoutubeDlPlugin.lookupStock({ symbol });
+    return {
+      ok: Boolean(r?.ok),
+      symbol: String(r?.symbol ?? symbol),
+      name: String(r?.name ?? ''),
+      price: Number(r?.price ?? 0),
+      error: String(r?.error ?? ''),
+    };
   },
 
   async consumeJournal(): Promise<RadioAlarmJournalEntry> {

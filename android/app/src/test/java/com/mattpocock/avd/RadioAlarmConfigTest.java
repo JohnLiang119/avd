@@ -439,4 +439,59 @@ public class RadioAlarmConfigTest {
         }
         assertEquals("f1", restored.alarms.get(0).channelId);
     }
+
+    // ---- 股票報價頻道（design.md D16）----
+
+    @Test
+    public void stockSymbolsAreNormalized() {
+        assertEquals("2330", RadioAlarmConfig.normalizeStockSymbol(" 2330 "));
+        assertEquals("0050B", RadioAlarmConfig.normalizeStockSymbol("0050b"));
+        assertNull(RadioAlarmConfig.normalizeStockSymbol("23-30"));
+        assertNull(RadioAlarmConfig.normalizeStockSymbol("台積電"));
+        assertNull(RadioAlarmConfig.normalizeStockSymbol(""));
+        assertNull(RadioAlarmConfig.normalizeStockSymbol("12345678901"));
+        assertNull(RadioAlarmConfig.normalizeStockSymbol(null));
+    }
+
+    @Test
+    public void parsesStockChannelAndApiKeyDroppingBadOrDuplicateSymbols() {
+        String json = j("{'schemaVersion':2,'fugleApiKey':' abc123 ',"
+                + "'channels':[{'id':'s1','name':'','kind':'stock','source':'',"
+                + "'stocks':[{'symbol':'2330','name':'台積電'},{'symbol':'2330'},{'symbol':'x!'},{'symbol':'2317','name':'鴻海'}]}],"
+                + "'alarms':[{'id':'a','time':'06:00','channelId':'s1'}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);
+        assertEquals("abc123", config.fugleApiKey);
+
+        RadioAlarmConfig.Channel s1 = config.channelById("s1");
+        assertTrue(s1.isStock());
+        assertFalse(s1.isBuiltIn());
+        assertEquals("沒有名稱時用預設", "股市晨報", s1.name);
+        assertEquals("重複與不合法的代號剔除", 2, s1.stocks.size());
+        assertEquals("2330", s1.stocks.get(0).symbol);
+        assertEquals("台積電", s1.stocks.get(0).name);
+        assertEquals("2317", s1.stocks.get(1).symbol);
+        assertEquals("s1", config.alarms.get(0).channelId);
+    }
+
+    @Test
+    public void emptyStockChannelIsKeptSoItCanSpeakTheProblem() {
+        String json = j("{'schemaVersion':2,'channels':[{'id':'s1','name':'晨報','kind':'stock','stocks':[]}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);
+        assertTrue(config.hasChannel("s1"));
+        assertTrue(config.channelById("s1").stocks.isEmpty());
+    }
+
+    @Test
+    public void stockChannelSurvivesRoundTrip() {
+        String json = j("{'schemaVersion':2,'fugleApiKey':'k','channels':[{'id':'s1','name':'晨報','kind':'stock',"
+                + "'stocks':[{'symbol':'2330','name':'台積電'},{'symbol':'00878','name':'國泰永續高股息'}]}]}");
+        RadioAlarmConfig original = RadioAlarmConfig.fromJson(json, ROOT);
+        RadioAlarmConfig restored = RadioAlarmConfig.fromJson(original.toJson(), ROOT);
+        assertEquals("k", restored.fugleApiKey);
+        RadioAlarmConfig.Channel s1 = restored.channelById("s1");
+        assertEquals(2, s1.stocks.size());
+        assertEquals("00878", s1.stocks.get(1).symbol);
+        assertEquals("國泰永續高股息", s1.stocks.get(1).name);
+        assertTrue("其他種類的 stocks 為空", restored.channelById(NEWS).stocks.isEmpty());
+    }
 }

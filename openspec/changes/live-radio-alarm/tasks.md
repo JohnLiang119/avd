@@ -602,3 +602,28 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 14.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`（說明鬧鐘可選本地 mp3／mp4 播放清單）
 
   功能 commit `2c4cc00`；版本 1.0.105 → 1.0.106（versionCode 143），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+## 15. 股票報價頻道（使用者要求後追加；design.md D16）
+
+第 13 節的歸檔在本節完成後才進行。紅線沿用：合成出的語音檔交給**同一個**播放器，不另開 `speak()` 路徑。
+
+- [x] 15.1 純函式與解析：`FugleQuoteClient.parseQuote`（closePrice → lastPrice → previousClose；change／changePercent 缺時自前收計算；401／404／429 與非 JSON 回應各有可念的原因，不得成為價格）、`StockReportScript.build`／`allFailed`／`describeFailures`／`formatNumber`／`formatDate`；完成方式：JUnit `StockReportScriptTest` 涵蓋文件範例、盤中退回、錯誤回應、無金鑰、部分失敗、全部失敗、空清單，`gradlew :app:testDebugUnitTest` 綠燈
+
+  `FugleQuoteClient`（parseQuote／fetch／fetchAll）與 `StockReportScript` 已加入；`StockReportScriptTest` 9 個全綠（修正一處：`formatNumber` 改用 `BigDecimal.valueOf`，否則 1.005 會四捨五入成 1）。
+- [x] 15.2 模型：`RadioAlarmConfig` 新增 kind `stock`、`StockItem { symbol, name }`、`Channel.stocks`、`normalizeStockSymbol`（1–10 英數字大寫）、全域 `fugleApiKey`；股票清單允許為空、重複與不合法代號剔除；toJson 對稱；完成方式：JUnit 新增 4 個，全綠
+
+  `CHANNEL_KIND_STOCK`、`StockItem`、`Channel.stocks`、`normalizeStockSymbol`、`fugleApiKey` 已加入；`RadioAlarmConfigTest` 新增 4 個（共 34 個全綠）。
+- [x] 15.3 `RadioTts.synthesizeToFile`：初始化 → zh-TW 或任何中文 → `synthesizeToFile` → `onDone` 交檔；初始化失敗、無中文、引擎拒絕、逾時 60 秒四條路互斥收尾並 `shutdown`；`AndroidManifest.xml` 加 `TTS_SERVICE` 的 `<queries>`；完成方式：`compileDebugJavaWithJavac` 通過，**實機驗證併入 15.7**
+
+  `RadioTts` 已加入；Manifest 加 `TTS_SERVICE` 的 `<queries>`；`compileDebugJavaWithJavac` 通過。
+- [x] 15.4 播放服務：`channel.isStock()` 走 `beginStockReport`（背景抓報價 → 組稿 → 主執行緒合成 → `preparePlayer(Resolution{wav, local})`）；全部失敗以 `stockFailureMessage` 在結束或停止時 `recordFailure` 取代「播放完成」；`new ExoPlayer.Builder` 仍只有一處；完成方式：編譯通過，實機見 15.7
+
+  `beginStockReport`／`synthesizeAndPlay` 已加入，合成的 wav 以 `Resolution{local}` 交給既有 `preparePlayer`；`stockFailureMessage` 於結束或停止時改記失敗；`new ExoPlayer.Builder` 仍只有一處。
+- [x] 15.5 插件：`setRadioAlarmConfig`／`configToJs` 帶 `fugleApiKey` 與 `stocks`；新增 `lookupStock({symbol})`（背景查一支，回 ok／name／price／error，不 reject）；完成方式：編譯通過
+
+  `setRadioAlarmConfig`／`configToJs` 帶 `fugleApiKey` 與 `stocks`；`lookupStock` 已加入。
+- [x] 15.6 前端：`RadioStockChannel` 型別、`isStockChannel`、`describeChannelSummary`（取代 describeChannelFiles）、`normalizeStockSymbol`、`describeStock`、`RadioAlarmConfig.fugleApiKey`、`RadioAlarmService.lookupStock`；介面：頻道列「新增股票報價頻道」、明細對話框（名稱、金鑰密碼欄失焦寫回、股票清單可移除、代號輸入＋「加入」先查名稱、移除頻道）；完成方式：vitest 新增 3 個綠燈、`vue-tsc` 與 `npm run build` 通過、無新色碼
+
+  型別、純函式、`lookupStock` 封裝與介面（新增鈕、明細對話框：名稱、金鑰密碼欄、股票清單可移除、代號加入先查名稱）皆已加入；vitest 新增 3 個（共 421 個）；`vue-tsc`、`npm run build` 通過；只用既有色碼。
+- [ ] 15.7 實機驗證【股票報價】：填金鑰、加入 2330 與 2317 看到名稱與現價；設 2 分鐘後鬧鐘、時長 2 分，時間到念出頻道名、日期、兩支報價並循環至 2 分停；加入一個不存在的代號後再觸發，念出其餘並說「另有 1 支無法取得」；清空金鑰觸發，念出「尚未設定富果 API 金鑰」且上次結果顯示失敗；飛航模式觸發念出連不上並記失敗；手動收聽股票頻道走媒體音量；`adb shell dumpsys media.codec` 無影像解碼器
+- [ ] 15.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`

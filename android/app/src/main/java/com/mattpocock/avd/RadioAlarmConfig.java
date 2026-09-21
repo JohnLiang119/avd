@@ -38,6 +38,33 @@ public final class RadioAlarmConfig {
     public static final String CHANNEL_KIND_URL = "url";
     /** 本地檔案頻道：一份複製進私有目錄的有序播放清單（design.md D15）。 */
     public static final String CHANNEL_KIND_FILE = "file";
+    /** 股票報價頻道：觸發時向富果 API 抓多支股票的報價，文字轉語音念出（design.md D16）。 */
+    public static final String CHANNEL_KIND_STOCK = "stock";
+
+    /** 股票報價頻道中的一支股票。name 是使用者加入時查到的名稱，供介面與口說稿失敗時使用。 */
+    public static final class StockItem {
+        public final String symbol;
+        public final String name;
+
+        public StockItem(String symbol, String name) {
+            this.symbol = symbol == null ? "" : symbol.trim().toUpperCase(Locale.US);
+            this.name = name == null ? "" : name.trim();
+        }
+    }
+
+    /** 股票代號：1–10 個英數字（台股四碼數字為主，ETF 可能帶字母，如 00878、0050B）。 */
+    public static String normalizeStockSymbol(String raw) {
+        if (raw == null) return null;
+        String text = raw.trim().toUpperCase(Locale.US);
+        if (text.isEmpty() || text.length() > 10) return null;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            boolean digit = c >= '0' && c <= '9';
+            boolean upper = c >= 'A' && c <= 'Z';
+            if (!digit && !upper) return null;
+        }
+        return text;
+    }
 
     /**
      * 本地檔案頻道中的一個檔案。
@@ -78,18 +105,27 @@ public final class RadioAlarmConfig {
         public final String source;
         /** 本地檔案頻道的有序播放清單；其他種類為空清單。順序即播放順序，MUST NOT 重排。 */
         public final List<LocalFile> files;
+        /** 股票報價頻道的股票清單（念的順序）；其他種類為空清單。允許為空 —— 念「尚未加入任何股票」。 */
+        public final List<StockItem> stocks;
 
         public Channel(String id, String name, String kind, String source) {
-            this(id, name, kind, source, null);
+            this(id, name, kind, source, null, null);
         }
 
         public Channel(String id, String name, String kind, String source, List<LocalFile> files) {
+            this(id, name, kind, source, files, null);
+        }
+
+        public Channel(String id, String name, String kind, String source, List<LocalFile> files,
+                       List<StockItem> stocks) {
             this.id = id;
             this.name = name;
             this.kind = kind;
             this.source = source;
             this.files = Collections.unmodifiableList(
                     files == null ? new ArrayList<LocalFile>() : new ArrayList<LocalFile>(files));
+            this.stocks = Collections.unmodifiableList(
+                    stocks == null ? new ArrayList<StockItem>() : new ArrayList<StockItem>(stocks));
         }
 
         public boolean isBuiltIn() {
@@ -98,6 +134,10 @@ public final class RadioAlarmConfig {
 
         public boolean isLocalFile() {
             return CHANNEL_KIND_FILE.equals(kind);
+        }
+
+        public boolean isStock() {
+            return CHANNEL_KIND_STOCK.equals(kind);
         }
     }
 
@@ -144,11 +184,21 @@ public final class RadioAlarmConfig {
      * 鬧鐘一起改掉，那是替他做了沒要求的決定（見 design.md D11）。
      */
     public final int volumePercent;
+    /**
+     * 富果 API 金鑰（全域，所有股票報價頻道共用）。存在這裡而非前端：鬧鐘觸發時
+     * WebView 沒在跑，原生端要自己拿得到。空字串代表未設定。
+     */
+    public final String fugleApiKey;
 
     public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent) {
+        this(alarms, channels, volumePercent, "");
+    }
+
+    public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent, String fugleApiKey) {
         this.alarms = Collections.unmodifiableList(new ArrayList<Alarm>(alarms));
         this.channels = Collections.unmodifiableList(ensureBuiltIns(channels));
         this.volumePercent = clampVolume(volumePercent);
+        this.fugleApiKey = fugleApiKey == null ? "" : fugleApiKey.trim();
     }
 
     /** 全新安裝的預設值：**沒有任何鬧鐘**、兩個內建頻道、音量 100%。 */
@@ -333,6 +383,7 @@ public final class RadioAlarmConfig {
         }
 
         int volume = clampVolume(root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
+        String fugleApiKey = root.optString("fugleApiKey", "").trim();
 
         List<Channel> channels = parseChannels(root.optJSONArray("channels"), localFileRoot);
         RadioAlarmConfig scaffold = new RadioAlarmConfig(new ArrayList<Alarm>(), channels, volume);
@@ -363,7 +414,7 @@ public final class RadioAlarmConfig {
             }
         }
 
-        return new RadioAlarmConfig(alarms, channels, volume);
+        return new RadioAlarmConfig(alarms, channels, volume, fugleApiKey);
     }
 
     /**
@@ -421,6 +472,7 @@ public final class RadioAlarmConfig {
         try {
             root.put("schemaVersion", SCHEMA_VERSION);
             root.put("volumePercent", volumePercent);
+            root.put("fugleApiKey", fugleApiKey);
 
             JSONArray channelArr = new JSONArray();
             for (Channel c : channels) {
@@ -438,6 +490,16 @@ public final class RadioAlarmConfig {
                         files.put(fileItem);
                     }
                     item.put("files", files);
+                }
+                if (c.isStock()) {
+                    JSONArray stocks = new JSONArray();
+                    for (StockItem st : c.stocks) {
+                        JSONObject stockItem = new JSONObject();
+                        stockItem.put("symbol", st.symbol);
+                        stockItem.put("name", st.name);
+                        stocks.put(stockItem);
+                    }
+                    item.put("stocks", stocks);
                 }
                 channelArr.put(item);
             }
@@ -494,9 +556,34 @@ public final class RadioAlarmConfig {
                 List<LocalFile> files = parseLocalFiles(item.optJSONArray("files"), localFileRoot);
                 if (files.isEmpty()) continue;
                 list.add(new Channel(id, name.isEmpty() ? files.get(0).displayName : name, kind, source, files));
+            } else if (CHANNEL_KIND_STOCK.equals(kind)) {
+                // 股票清單允許為空（觸發時會念「尚未加入任何股票」）；不合法或重複的代號剔除
+                List<StockItem> stocks = parseStocks(item.optJSONArray("stocks"));
+                list.add(new Channel(id, name.isEmpty() ? "股市晨報" : name, kind, source, null, stocks));
             }
         }
         return list;
+    }
+
+    private static List<StockItem> parseStocks(JSONArray arr) {
+        List<StockItem> stocks = new ArrayList<StockItem>();
+        if (arr == null) return stocks;
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject item = arr.optJSONObject(i);
+            if (item == null) continue;
+            String symbol = normalizeStockSymbol(item.optString("symbol", ""));
+            if (symbol == null) continue;
+            boolean dup = false;
+            for (StockItem existing : stocks) {
+                if (existing.symbol.equals(symbol)) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+            stocks.add(new StockItem(symbol, item.optString("name", "")));
+        }
+        return stocks;
     }
 
     private static List<LocalFile> parseLocalFiles(JSONArray arr, String localFileRoot) {

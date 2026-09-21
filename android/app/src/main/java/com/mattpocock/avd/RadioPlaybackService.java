@@ -58,6 +58,9 @@ import java.util.Locale;
  * 來源有直播與本地檔案兩種（design.md D15），差別是**參數**而非分岔：檔案頻道以多個
  * MediaItem 加 REPEAT_MODE_ALL 循環到時長結束、停用影像軌只解音訊、播放器出錯即失敗
  * （本機沒有「斷線重連」可言）；建播放器的地方仍只有一處。
+ *
+ * 股票報價頻道（design.md D16）在播放前多兩步：抓報價、文字轉語音**合成成檔**；
+ * 合成出來的 wav 就當作一個本地檔案交給同一個播放器，之後的路徑與檔案頻道完全相同。
  */
 @OptIn(markerClass = UnstableApi.class)
 public class RadioPlaybackService extends Service {
@@ -133,13 +136,21 @@ public class RadioPlaybackService extends Service {
     private boolean localPlayback = false;
     /** 檔案頻道中被跳過的檔案數；上次結果要載明，使用者才知道少了東西。 */
     private int missingFiles = 0;
+    /**
+     * 股票報價全部取不到：仍會念出原因（鬧鐘要響），但這次的結果要記為失敗，
+     * 而不是 stopAtEnd 的「播放完成」。
+     */
+    private String stockFailureMessage = null;
 
     private final Runnable stopAtEnd = new Runnable() {
         @Override
         public void run() {
             Log.d(TAG, "planned end reached");
             // 只有鬧鐘的結果才記進「上次播放」—— 試播與手動直播不是鬧鐘的成敗
-            if (MODE_ALARM.equals(mode)) {
+            if (stockFailureMessage != null) {
+                // 有響、但念的是「取不到股價」：以失敗記錄，使用者下次開 App 才看得到原因
+                store.recordFailure(System.currentTimeMillis(), stockFailureMessage);
+            } else if (MODE_ALARM.equals(mode)) {
                 store.recordSuccess(System.currentTimeMillis(), "播放完成" + missingFilesSuffix());
             }
             stopEverything();
@@ -169,7 +180,9 @@ public class RadioPlaybackService extends Service {
         String action = intent == null ? null : intent.getAction();
 
         if (ACTION_STOP.equals(action)) {
-            if (MODE_ALARM.equals(mode) && everReady) {
+            if (stockFailureMessage != null && everReady) {
+                store.recordFailure(System.currentTimeMillis(), stockFailureMessage);
+            } else if (MODE_ALARM.equals(mode) && everReady) {
                 store.recordSuccess(System.currentTimeMillis(), "使用者停止播放" + missingFilesSuffix());
             }
             stopEverything();
@@ -216,6 +229,7 @@ public class RadioPlaybackService extends Service {
         everReady = false;
         localPlayback = false;
         missingFiles = 0;
+        stockFailureMessage = null;
 
         startForegroundWithNotification();
         acquireLocks();
@@ -234,6 +248,11 @@ public class RadioPlaybackService extends Service {
         handler.postDelayed(giveUp, Math.max(1000L, deadline - System.currentTimeMillis()));
         handler.postDelayed(stopAtEnd, Math.max(1000L, endAt - System.currentTimeMillis()));
 
+        if (channel.isStock()) {
+            beginStockReport();
+            return;
+        }
+
         // 來源解析會碰網路（直播）或檔案系統（檔案），不可在主執行緒；解析完回到主執行緒建立播放器。
         new Thread(new Runnable() {
             @Override
@@ -247,6 +266,61 @@ public class RadioPlaybackService extends Service {
                 });
             }
         }, "radio-alarm-resolve").start();
+    }
+
+    /**
+     * 股票報價頻道：抓報價（網路，背景執行緒）→ 組稿 → 文字轉語音合成成 wav（引擎回呼）
+     * → 當作本地檔案交給 preparePlayer。三步任一步在 playing 已為 false 時即放棄。
+     */
+    private void beginStockReport() {
+        final RadioAlarmConfig config = store.getConfig();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<FugleQuoteClient.StockQuote> quotes =
+                        FugleQuoteClient.fetchAll(channel.stocks, config.fugleApiKey);
+                final String text = StockReportScript.build(channel.name, quotes);
+                final String failure = StockReportScript.allFailed(quotes)
+                        ? StockReportScript.describeFailures(quotes) : null;
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        synthesizeAndPlay(text, failure);
+                    }
+                });
+            }
+        }, "radio-alarm-stock").start();
+    }
+
+    private void synthesizeAndPlay(String text, String failure) {
+        if (!playing) return;
+        stockFailureMessage = failure;
+        Log.d(TAG, "stock report: " + text);
+
+        File out = new File(new File(getCacheDir(), RadioAlarmConstants.TTS_CACHE_DIR_NAME), "report.wav");
+        RadioTts.synthesizeToFile(this, text, out, new RadioTts.Callback() {
+            @Override
+            public void onDone(final File file) {
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        List<String> sources = new ArrayList<String>();
+                        sources.add(file.getAbsolutePath());
+                        preparePlayer(new RadioStreamResolver.Resolution(sources, true, 0));
+                    }
+                });
+            }
+
+            @Override
+            public void onError(final String message) {
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        fail("文字轉語音失敗：" + message);
+                    }
+                });
+            }
+        });
     }
 
     private void preparePlayer(RadioStreamResolver.Resolution resolution) {

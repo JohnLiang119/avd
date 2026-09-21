@@ -24,8 +24,12 @@ import {
   isAggressiveVendor,
   normalizeConfig,
   isFileChannel,
+  isStockChannel,
   defaultFileChannelName,
-  describeChannelFiles,
+  describeChannelSummary,
+  normalizeStockSymbol,
+  describeStock,
+  DEFAULT_STOCK_CHANNEL_NAME,
   type RadioAlarm,
   type RadioAlarmConfig,
   type RadioAlarmStatus,
@@ -54,6 +58,7 @@ const config = (alarms: RadioAlarm[]): RadioAlarmConfig => ({
   alarms,
   channels: CHANNELS,
   volumePercent: 100,
+  fugleApiKey: '',
 });
 
 const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
@@ -349,10 +354,11 @@ describe('本地檔案頻道', () => {
     expect(defaultFileChannelName([{ path: '/p/001_a', displayName: 'bare' }])).toBe('bare');
   });
 
-  it('頻道列摘要只對 file 頻道說話', () => {
+  it('頻道列摘要：檔案頻道是檔案數、股票頻道是股票數、直播沒有', () => {
     const fileChannel: RadioChannel = { id: 'f1', name: '歌單', kind: 'file', source: '', files };
-    expect(describeChannelFiles(fileChannel)).toBe('2 個檔案');
-    expect(describeChannelFiles(CHANNELS[0])).toBe('');
+    expect(describeChannelSummary(fileChannel)).toBe('2 個檔案');
+    expect(describeChannelSummary({ id: 's1', name: '晨報', kind: 'stock', source: '', stocks: [{ symbol: '2330', name: '台積電' }] })).toBe('1 支股票');
+    expect(describeChannelSummary(CHANNELS[0])).toBe('');
   });
 
   it('既有的純函式對 file 頻道照常運作', () => {
@@ -363,5 +369,45 @@ describe('本地檔案頻道', () => {
     expect(describeAlarmSummary(alarm({ channelId: 'f1', weekdays: 0b0111110 }), all)).toBe('平日 · 歌單');
     expect(describePlaybackState(status({ playing: true, alarmAudioActive: true, playingChannelId: 'f1' }), all))
       .toBe('播放中：歌單（鬧鐘音量）');
+  });
+});
+
+describe('股票報價頻道', () => {
+  it('代號正規化：英數字大寫、1 到 10 碼，其餘拒絕', () => {
+    expect(normalizeStockSymbol(' 2330 ')).toBe('2330');
+    expect(normalizeStockSymbol('0050b')).toBe('0050B');
+    expect(normalizeStockSymbol('台積電')).toBeNull();
+    expect(normalizeStockSymbol('23-30')).toBeNull();
+    expect(normalizeStockSymbol('')).toBeNull();
+    expect(normalizeStockSymbol(undefined)).toBeNull();
+  });
+
+  it('顯示：有名稱就「名稱（代號）」，沒有就只有代號', () => {
+    expect(describeStock({ symbol: '2330', name: '台積電' })).toBe('台積電（2330）');
+    expect(describeStock({ symbol: '2330', name: '' })).toBe('2330');
+  });
+
+  it('normalizeConfig 收下 stock 頻道與金鑰；剔除重複與不合法的代號；允許空清單', () => {
+    const r = normalizeConfig({
+      fugleApiKey: ' key ',
+      channels: [
+        ...CHANNELS,
+        { id: 's1', name: '', kind: 'stock', source: '', stocks: [
+          { symbol: '2330', name: '台積電' }, { symbol: '2330' }, { symbol: 'bad!' }, { symbol: '2317', name: '鴻海' },
+        ] },
+        { id: 's2', name: '空的', kind: 'stock', source: '', stocks: [] },
+      ],
+      alarms: [{ id: 'a', time: '06:00', channelId: 's1' }],
+    });
+    expect(r.fugleApiKey).toBe('key');
+    const s1 = r.channels[2];
+    expect(isStockChannel(s1)).toBe(true);
+    if (isStockChannel(s1)) {
+      expect(s1.name).toBe(DEFAULT_STOCK_CHANNEL_NAME);
+      expect(s1.stocks.map((st) => st.symbol)).toEqual(['2330', '2317']);
+    }
+    expect(r.channels[3].id).toBe('s2');
+    expect(r.alarms[0].channelId).toBe('s1');
+    expect(isFileChannel(s1)).toBe(false);
   });
 });

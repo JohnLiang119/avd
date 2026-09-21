@@ -48,6 +48,9 @@ public final class RadioAlarmConstants {
      */
     public static final String LOCAL_FILES_DIR_NAME = "radio_alarm";
 
+    /** 股票報價頻道合成的語音檔所在的快取子目錄（design.md D16）。每次觸發覆寫同一個檔。 */
+    public static final String TTS_CACHE_DIR_NAME = "radio_alarm_tts";
+
     /**
      * 退回鏈末端的內建串流位址。2026-09-17 自官方端點取得，新聞網以 curl 實測可讀到 ADTS AAC 音訊。
      *

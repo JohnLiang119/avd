@@ -75,6 +75,16 @@
         </receiver>
     </application>
 
+    <!--
+        股票報價頻道以 TextToSpeech 合成語音。Android 11 起套件可見性受限，
+        不宣告這個 query 會找不到任何語音引擎（design.md D16）。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

@@ -733,7 +733,7 @@
                     @click="channel.kind !== 'bcc' && openRadioChannelDetail(channel.id)"
                   >
                     <span style="font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ channel.name }}</span>
-                    <span v-if="isFileChannel(channel)" style="font-size: 11px; color: #94a3b8; flex-shrink: 0;">{{ describeChannelFiles(channel) }}</span>
+                    <span v-if="describeChannelSummary(channel)" style="font-size: 11px; color: #94a3b8; flex-shrink: 0;">{{ describeChannelSummary(channel) }}</span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                     <van-button
@@ -767,6 +767,13 @@
                 :disabled="radioAlarmBusy || radioPickBusy"
                 @click="addRadioFileChannel"
               >從手機選擇 mp3／mp4 新增頻道</van-button>
+              <!-- 股票報價頻道：先建一個空頻道，開明細加股票與金鑰（design.md D16） -->
+              <van-button
+                size="small" block plain
+                style="margin: 0 0 8px; border-color: #e2e8f0; color: #64748b;"
+                :disabled="radioAlarmBusy || radioPickBusy"
+                @click="addRadioStockChannel"
+              >新增股票報價頻道（富果 API，口說）</van-button>
             </div>
           </van-cell-group>
 
@@ -924,12 +931,59 @@
             @keyup.enter="renameRadioChannel(radioChannelDetail.id)"
           />
         </div>
-        <div style="font-size: 12px; color: #64748b; margin: 10px 0 4px;">
-          檔案（{{ radioChannelDetail.files.length }} 個，依播放順序）
-        </div>
-        <ol class="radio-channel-files">
-          <li v-for="file in radioChannelDetail.files" :key="file.path">{{ file.displayName }}</li>
-        </ol>
+        <template v-if="radioFileDetail">
+          <div style="font-size: 12px; color: #64748b; margin: 10px 0 4px;">
+            檔案（{{ radioFileDetail.files.length }} 個，依播放順序）
+          </div>
+          <ol class="radio-channel-files">
+            <li v-for="file in radioFileDetail.files" :key="file.path">{{ file.displayName }}</li>
+          </ol>
+        </template>
+        <template v-if="radioStockDetail">
+          <!--
+            金鑰是全域設定（所有股票頻道共用），放在這裡是因為第一次建股票頻道的人在這裡才會需要它。
+            失焦即寫回原生端；不在畫面上回顯全文。
+          -->
+          <div class="radio-alarm-field" style="margin-top: 8px;">
+            <span class="radio-alarm-label">金鑰</span>
+            <van-field
+              v-model="radioFugleKeyDraft"
+              type="password"
+              placeholder="富果 API 金鑰（developer.fugle.tw 申請）"
+              style="padding: 4px 8px; flex: 1;"
+              @blur="saveFugleApiKey"
+              @keyup.enter="saveFugleApiKey"
+            />
+          </div>
+          <div style="font-size: 12px; color: #64748b; margin: 10px 0 4px;">
+            股票（{{ radioStockDetail.stocks.length }} 支，依念的順序）
+          </div>
+          <ol class="radio-channel-files">
+            <li v-for="item in radioStockDetail.stocks" :key="item.symbol" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+              <span>{{ describeStock(item) }}</span>
+              <van-button size="mini" :style="GLYPH_BUTTON_STYLE" title="移除這支股票" :disabled="radioAlarmBusy" @click="removeStockFromChannel(radioStockDetail.id, item.symbol)">{{ ACTION_GLYPH.remove }}</van-button>
+            </li>
+          </ol>
+          <div style="display: flex; gap: 6px; align-items: center; margin-top: 8px;">
+            <van-field
+              v-model="radioStockSymbolDraft"
+              placeholder="股票代號，如 2330"
+              maxlength="10"
+              style="padding: 4px 8px; flex: 1;"
+              @keyup.enter="addStockToChannel(radioStockDetail.id)"
+            />
+            <van-button
+              size="small" plain
+              style="border-color: #e2e8f0; color: #64748b;"
+              :loading="radioStockLookupBusy"
+              :disabled="radioAlarmBusy || radioStockLookupBusy"
+              @click="addStockToChannel(radioStockDetail.id)"
+            >加入</van-button>
+          </div>
+          <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
+            鬧鐘時間到會抓最新報價，用中文語音念出每支的價格與漲跌。
+          </p>
+        </template>
         <van-button
           size="small" block plain
           style="margin-top: 10px; border-color: #e2e8f0; color: #64748b;"
@@ -1496,12 +1550,16 @@ import { matchPermanentError } from './services/downloadErrors';
 import {
   RadioAlarmService,
   describeAlarmSummary,
-  describeChannelFiles,
+  describeChannelSummary,
   describePlaybackState,
   describeSelfTest,
+  describeStock,
   defaultFileChannelName,
   hasWeekday,
   isFileChannel,
+  isStockChannel,
+  normalizeStockSymbol,
+  DEFAULT_STOCK_CHANNEL_NAME,
   lastFailureText,
   newAlarm,
   permissionWarnings,
@@ -3381,7 +3439,7 @@ const RADIO_WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 /** 介面上的星期順序：週一起算、週日放最後，符合台灣的閱讀習慣 */
 const RADIO_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
-const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100 });
+const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100, fugleApiKey: '' });
 const radioStatus = ref<RadioAlarmStatus | null>(null);
 const radioAlarmBusy = ref(false);
 /** 目前展開的鬧鐘卡片；純介面狀態，不持久化，預設全部收合 */
@@ -3545,18 +3603,97 @@ const radioPickBusy = ref(false);
 /** 明細中的頻道名稱草稿；失焦或 Enter 才寫回 */
 const radioChannelNameDraft = ref('');
 
-/** 明細對話框的頻道；只有本地檔案頻道有明細可看 */
+/** 明細對話框的頻道；本地檔案與股票報價頻道有明細可看，直播頻道沒有 */
 const radioChannelDetail = computed(() => {
   const found = radioAlarm.value.channels.find((c) => c.id === radioChannelDetailId.value);
-  return found && isFileChannel(found) ? found : null;
+  return found && (isFileChannel(found) || isStockChannel(found)) ? found : null;
 });
+const radioFileDetail = computed(() => (radioChannelDetail.value && isFileChannel(radioChannelDetail.value) ? radioChannelDetail.value : null));
+const radioStockDetail = computed(() => (radioChannelDetail.value && isStockChannel(radioChannelDetail.value) ? radioChannelDetail.value : null));
 
 const openRadioChannelDetail = (id: string) => {
   const target = radioAlarm.value.channels.find((c) => c.id === id);
-  if (!target || !isFileChannel(target)) return;
+  if (!target || !(isFileChannel(target) || isStockChannel(target))) return;
   radioChannelDetailId.value = id;
   radioChannelNameDraft.value = target.name;
+  radioFugleKeyDraft.value = radioAlarm.value.fugleApiKey;
+  radioStockSymbolDraft.value = '';
   showRadioChannelDetail.value = true;
+};
+
+// ---- 股票報價頻道（design.md D16）----
+
+const radioFugleKeyDraft = ref('');
+const radioStockSymbolDraft = ref('');
+const radioStockLookupBusy = ref(false);
+
+/** 先建一個空的股票頻道再開明細：股票與金鑰在明細裡加。空頻道觸發時會念「尚未加入任何股票」。 */
+const addRadioStockChannel = async () => {
+  if (isTauri()) return;
+  const id = `stock${Date.now()}`;
+  const channel: RadioChannel = { id, name: DEFAULT_STOCK_CHANNEL_NAME, kind: 'stock', source: '', stocks: [] };
+  await persistRadioAlarm({ ...radioAlarm.value, channels: [...radioAlarm.value.channels, channel] });
+  if (radioAlarm.value.channels.some((c) => c.id === id)) openRadioChannelDetail(id);
+};
+
+const saveFugleApiKey = () => {
+  const key = radioFugleKeyDraft.value.trim();
+  if (key === radioAlarm.value.fugleApiKey) return;
+  void persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: key });
+};
+
+/**
+ * 加入一支股票：先用目前的金鑰查名稱與現價確認代號沒打錯；查不到（沒金鑰、離線、代號錯）
+ * 仍可加入，只是沒有名稱、並以 Toast 說明原因 —— 早上會念出實際的錯誤。
+ */
+const addStockToChannel = async (channelId: string) => {
+  const symbol = normalizeStockSymbol(radioStockSymbolDraft.value);
+  if (!symbol) {
+    showToast('股票代號只能是 1 到 10 個英數字');
+    return;
+  }
+  const target = radioAlarm.value.channels.find((c) => c.id === channelId);
+  if (!target || !isStockChannel(target)) return;
+  if (target.stocks.some((st) => st.symbol === symbol)) {
+    showToast('已經加過這支了');
+    return;
+  }
+
+  // 金鑰若剛輸入還沒失焦，先寫回，否則查詢會用舊金鑰
+  if (radioFugleKeyDraft.value.trim() !== radioAlarm.value.fugleApiKey) {
+    await persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: radioFugleKeyDraft.value.trim() });
+  }
+
+  radioStockLookupBusy.value = true;
+  let name = '';
+  try {
+    const found = await RadioAlarmService.lookupStock(symbol);
+    if (found.ok) {
+      name = found.name;
+      showToast(`${describeStock({ symbol, name })}，目前 ${found.price} 元`);
+    } else {
+      showToast({ message: `查不到 ${symbol}：${found.error}。仍已加入，早上會念出實際狀況。`, duration: 4000 });
+    }
+  } catch (e) {
+    reportError('股票報價頻道', e);
+  } finally {
+    radioStockLookupBusy.value = false;
+  }
+
+  const current = radioAlarm.value.channels.find((c) => c.id === channelId);
+  if (!current || !isStockChannel(current)) return;
+  const channels = radioAlarm.value.channels.map((c) => (
+    c.id === channelId && isStockChannel(c) ? { ...c, stocks: [...c.stocks, { symbol, name }] } : c
+  ));
+  radioStockSymbolDraft.value = '';
+  await persistRadioAlarm({ ...radioAlarm.value, channels });
+};
+
+const removeStockFromChannel = (channelId: string, symbol: string) => {
+  const channels = radioAlarm.value.channels.map((c) => (
+    c.id === channelId && isStockChannel(c) ? { ...c, stocks: c.stocks.filter((st) => st.symbol !== symbol) } : c
+  ));
+  void persistRadioAlarm({ ...radioAlarm.value, channels });
 };
 
 /**

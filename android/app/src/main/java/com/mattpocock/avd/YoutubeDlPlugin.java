@@ -1651,6 +1651,7 @@ public class YoutubeDlPlugin extends Plugin {
             root.put("schemaVersion", RadioAlarmConfig.SCHEMA_VERSION);
             root.put("volumePercent", call.getInt("volumePercent",
                     RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
+            root.put("fugleApiKey", call.getString("fugleApiKey", ""));
             root.put("alarms", copyArray(call.getArray("alarms")));
             root.put("channels", copyArray(call.getArray("channels")));
 
@@ -1950,6 +1951,35 @@ public class YoutubeDlPlugin extends Plugin {
         }, "radio-alarm-copy").start();
     }
 
+    /**
+     * 以目前設定的富果金鑰查一支股票（介面加入股票時取名稱與現價確認代號沒打錯）。
+     * 走與鬧鐘觸發完全相同的查詢與解析；查不到不 reject，把原因放在回傳值讓介面顯示。
+     */
+    @PluginMethod
+    public void lookupStock(final PluginCall call) {
+        final String symbol = RadioAlarmConfig.normalizeStockSymbol(call.getString("symbol"));
+        if (symbol == null) {
+            call.reject("股票代號只能是 1 到 10 個英數字");
+            return;
+        }
+        final String apiKey = new RadioAlarmStore(getContext()).getConfig().fugleApiKey;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                List<RadioAlarmConfig.StockItem> one = new ArrayList<RadioAlarmConfig.StockItem>();
+                one.add(new RadioAlarmConfig.StockItem(symbol, ""));
+                FugleQuoteClient.StockQuote q = FugleQuoteClient.fetchAll(one, apiKey).get(0);
+                JSObject ret = new JSObject();
+                ret.put("ok", q.ok);
+                ret.put("symbol", q.symbol);
+                ret.put("name", q.ok ? q.name : "");
+                ret.put("price", q.ok ? q.price : 0);
+                ret.put("error", q.error);
+                call.resolve(ret);
+            }
+        }, "radio-alarm-lookup").start();
+    }
+
     /** 刪除某個本地檔案頻道的全部副本（頻道被移除時由前端呼叫）。 */
     @PluginMethod
     public void removeRadioAlarmChannelFiles(PluginCall call) {
@@ -2050,6 +2080,7 @@ public class YoutubeDlPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("schemaVersion", RadioAlarmConfig.SCHEMA_VERSION);
         ret.put("volumePercent", config.volumePercent);
+        ret.put("fugleApiKey", config.fugleApiKey);
 
         JSArray channels = new JSArray();
         for (RadioAlarmConfig.Channel c : config.channels) {
@@ -2067,6 +2098,16 @@ public class YoutubeDlPlugin extends Plugin {
                     files.put(fileItem);
                 }
                 item.put("files", files);
+            }
+            if (c.isStock()) {
+                JSArray stocks = new JSArray();
+                for (RadioAlarmConfig.StockItem st : c.stocks) {
+                    JSObject stockItem = new JSObject();
+                    stockItem.put("symbol", st.symbol);
+                    stockItem.put("name", st.name);
+                    stocks.put(stockItem);
+                }
+                item.put("stocks", stocks);
             }
             channels.put(item);
         }
