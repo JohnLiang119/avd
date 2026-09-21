@@ -33,5 +33,7 @@
 - [x] 3.4 規格、design、proposal 同步為改版後的內容；`openspec validate share-latest-apk-qrcode` 通過；delta 規格無 BOM
 
   三份文件已改為 D1／D2 改版後內容；`openspec validate` 通過；delta 規格無 BOM。
-- [ ] 3.5 六項建置驗證通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+- [x] 3.5 六項建置驗證通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
+
+  功能 commit `78b4dac`；版本 1.0.107 → 1.0.108（versionCode 145），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 - [ ] 3.6 實機驗證（取代 2.1）：Android 開對話框後 QR code 內容為 `.../releases/download/v<最新版>/AVD_<最新版>.apk`，另一支手機掃描後直接開始下載；飛航模式下開啟則顯示發布頁網址與說明；Windows 端不見此列
