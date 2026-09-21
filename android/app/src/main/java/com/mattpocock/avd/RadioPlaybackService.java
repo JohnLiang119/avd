@@ -283,21 +283,25 @@ public class RadioPlaybackService extends Service {
                 final String failure = StockReportScript.allFailed(quotes)
                         ? StockReportScript.describeFailures(quotes) : null;
 
-                // 句間停頓用靜音檔實作（引擎對句號的停頓不可控）；秒數是頻道的設定。在這條
-                // 背景執行緒先寫好，合成完直接夾進播放清單。
+                // 停頓用靜音檔實作（引擎對句號的停頓不可控）；兩個秒數都是頻道的設定：
+                // 股票之間一個、念完最後一支回到第一支前一個。在這條背景執行緒先寫好，
+                // 合成完直接夾進播放清單。
                 final File ttsDir = new File(getCacheDir(), RadioAlarmConstants.TTS_CACHE_DIR_NAME);
                 File silenceFile = null;
+                File roundSilenceFile = null;
                 String silenceError = null;
-                if (channel.pauseSeconds > 0) {
-                    try {
-                        silenceFile = SilenceWav.write(
-                                new File(ttsDir, "pause_" + Math.round(channel.pauseSeconds * 10) + ".wav"),
-                                channel.pauseSeconds);
-                    } catch (Exception e) {
-                        silenceError = e.getMessage();
-                    }
+                try {
+                    silenceFile = SilenceWav.write(
+                            new File(ttsDir, "pause_" + Math.round(channel.pauseSeconds * 10) + ".wav"),
+                            channel.pauseSeconds);
+                    roundSilenceFile = SilenceWav.write(
+                            new File(ttsDir, "pause_" + Math.round(channel.roundPauseSeconds * 10) + ".wav"),
+                            channel.roundPauseSeconds);
+                } catch (Exception e) {
+                    silenceError = e.getMessage();
                 }
                 final File silence = silenceFile;
+                final File roundSilence = roundSilenceFile;
                 final String silenceFailure = silenceError;
 
                 handler.post(new Runnable() {
@@ -307,7 +311,7 @@ public class RadioPlaybackService extends Service {
                             fail("無法建立停頓用的靜音檔：" + silenceFailure);
                             return;
                         }
-                        synthesizeAndPlay(sentences, ttsDir, silence, failure);
+                        synthesizeAndPlay(sentences, ttsDir, silence, roundSilence, failure);
                     }
                 });
             }
@@ -315,10 +319,12 @@ public class RadioPlaybackService extends Service {
     }
 
     /**
-     * 合成每一句，再把「句、停頓、句、停頓…」串成播放清單。最後一句後面也接一次停頓，
-     * 循環回第一句時就是同樣長度的一次停頓，不多也不少（使用者：循環之間不多停）。
+     * 合成每一句，再把「句、停頓、句、停頓…、最後一句、下一輪停頓」串成播放清單。
+     * 兩種停頓各自可調（使用者要求）：股票之間用 silence，最後一支之後用 roundSilence，
+     * 循環回第一支時聽到的就是「下一輪停頓」。
      */
-    private void synthesizeAndPlay(final List<String> sentences, File ttsDir, final File silence, String failure) {
+    private void synthesizeAndPlay(final List<String> sentences, File ttsDir, final File silence,
+                                   final File roundSilence, String failure) {
         if (!playing) return;
         stockFailureMessage = failure;
         Log.d(TAG, "stock report: " + sentences);
@@ -330,9 +336,10 @@ public class RadioPlaybackService extends Service {
                     @Override
                     public void run() {
                         List<String> sources = new ArrayList<String>();
-                        for (File f : files) {
-                            sources.add(f.getAbsolutePath());
-                            if (silence != null) sources.add(silence.getAbsolutePath());
+                        for (int i = 0; i < files.size(); i++) {
+                            sources.add(files.get(i).getAbsolutePath());
+                            File gap = (i == files.size() - 1) ? roundSilence : silence;
+                            if (gap != null) sources.add(gap.getAbsolutePath());
                         }
                         preparePlayer(new RadioStreamResolver.Resolution(sources, true, 0));
                     }

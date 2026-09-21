@@ -613,7 +613,7 @@ design.md 新增 D14、改寫 D4／D9。
 
   **使用者以自己的金鑰實機測過後改版**：口說稿改為極簡「名稱 價格。」每支一句、循環；不念頻道名、日期、漲跌、結尾；取不到的那支在原位念「名稱 無法取得」。`buildSentences` 回傳一句一個元素。測試同步。
 
-  **句間停頓可調**：新增 `SilenceWav`（純 Java 寫 16 kHz 單聲道 PCM 靜音檔）、`Channel.pauseSeconds`（整數秒 1–600、預設 1，`clampPauseSeconds`；原為 0–10 一位小數，依使用者要求放寬上限、改整數並不允許 0）；`RadioTts.synthesizeAll` 一句一檔；服務把「句、靜音、句、靜音…」串成播放清單，最後一句後也接靜音使循環之間只有同樣一次停頓。前端 `pauseSeconds` 型別、`clampPauseSeconds`、明細對話框 stepper（0.5 秒一格）。JUnit 加 2 個、vitest 加 1 個。
+  **句間停頓可調**：新增 `SilenceWav`（純 Java 寫 16 kHz 單聲道 PCM 靜音檔）、`Channel.pauseSeconds`（整數秒 1–600、預設 1，`clampPauseSeconds`；原為 0–10 一位小數，依使用者要求放寬上限、改整數並不允許 0）與 `roundPauseSeconds`（下一輪停頓，缺欄位沿用 pauseSeconds）；`RadioTts.synthesizeAll` 一句一檔；服務把「句、靜音、句、靜音…」串成播放清單，最後一句後也接靜音使循環之間只有同樣一次停頓。前端 `pauseSeconds` 型別、`clampPauseSeconds`、明細對話框 stepper（0.5 秒一格）。JUnit 加 2 個、vitest 加 1 個。
 - [x] 15.2 模型：`RadioAlarmConfig` 新增 kind `stock`、`StockItem { symbol, name }`、`Channel.stocks`、`normalizeStockSymbol`（1–10 英數字大寫）、全域 `fugleApiKey`；股票清單允許為空、重複與不合法代號剔除；toJson 對稱；完成方式：JUnit 新增 4 個，全綠
 
   `CHANNEL_KIND_STOCK`、`StockItem`、`Channel.stocks`、`normalizeStockSymbol`、`fugleApiKey` 已加入；`RadioAlarmConfigTest` 新增 4 個（共 34 個全綠）。

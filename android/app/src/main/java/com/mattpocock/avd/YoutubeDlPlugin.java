@@ -2164,6 +2164,7 @@ public class YoutubeDlPlugin extends Plugin {
                 }
                 item.put("stocks", stocks);
                 item.put("pauseSeconds", c.pauseSeconds);
+                item.put("roundPauseSeconds", c.roundPauseSeconds);
             }
             channels.put(item);
         }

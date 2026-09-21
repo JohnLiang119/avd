@@ -493,6 +493,23 @@ public class RadioAlarmConfigTest {
     }
 
     @Test
+    public void roundPauseDefaultsToStockPauseAndRoundTrips() {
+        String legacy = j("{'schemaVersion':2,'channels':[{'id':'s1','kind':'stock','stocks':[],'pauseSeconds':5}]}");
+        RadioAlarmConfig.Channel s1 = RadioAlarmConfig.fromJson(legacy, ROOT).channelById("s1");
+        assertEquals("舊版沒有下一輪欄位：沿用股票間停頓，行為不變", 5.0, s1.roundPauseSeconds, 0.0001);
+
+        String both = j("{'schemaVersion':2,'channels':[{'id':'s1','kind':'stock','stocks':[],'pauseSeconds':2,'roundPauseSeconds':30}]}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(both, ROOT);
+        assertEquals(2.0, config.channelById("s1").pauseSeconds, 0.0001);
+        assertEquals(30.0, config.channelById("s1").roundPauseSeconds, 0.0001);
+        RadioAlarmConfig.Channel back = RadioAlarmConfig.fromJson(config.toJson(), ROOT).channelById("s1");
+        assertEquals(30.0, back.roundPauseSeconds, 0.0001);
+
+        String zero = j("{'schemaVersion':2,'channels':[{'id':'s1','kind':'stock','stocks':[],'roundPauseSeconds':0}]}");
+        assertEquals("下一輪也不允許 0", 1.0, RadioAlarmConfig.fromJson(zero, ROOT).channelById("s1").roundPauseSeconds, 0.0001);
+    }
+
+    @Test
     public void emptyStockChannelIsKeptSoItCanSpeakTheProblem() {
         String json = j("{'schemaVersion':2,'channels':[{'id':'s1','name':'晨報','kind':'stock','stocks':[]}]}");
         RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);

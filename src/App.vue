@@ -981,7 +981,7 @@
             >加入</van-button>
           </div>
           <div class="radio-alarm-field" style="margin-top: 10px;">
-            <span class="radio-alarm-label">停頓</span>
+            <span class="radio-alarm-label">股票間</span>
             <van-stepper
               :model-value="radioStockDetail.pauseSeconds"
               :min="1"
@@ -991,12 +991,27 @@
               input-width="56px"
               button-size="26px"
               :disabled="radioAlarmBusy"
-              @change="(v: number | string) => onStockPauseChange(radioStockDetail!.id, v)"
+              @change="(v: number | string) => onStockPauseChange(radioStockDetail!.id, 'pauseSeconds', v)"
+            />
+            <span style="font-size: 12px; color: #64748b;">秒</span>
+          </div>
+          <div class="radio-alarm-field" style="margin-top: 6px;">
+            <span class="radio-alarm-label">下一輪</span>
+            <van-stepper
+              :model-value="radioStockDetail.roundPauseSeconds"
+              :min="1"
+              :max="600"
+              :step="1"
+              integer
+              input-width="56px"
+              button-size="26px"
+              :disabled="radioAlarmBusy"
+              @change="(v: number | string) => onStockPauseChange(radioStockDetail!.id, 'roundPauseSeconds', v)"
             />
             <span style="font-size: 12px; color: #64748b;">秒</span>
           </div>
           <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
-            鬧鐘時間到會抓最新報價，逐支念「名稱 價格」，句間停頓上面那個秒數，循環到時長結束。
+            鬧鐘時間到會抓最新報價，逐支念「名稱 價格」；股票之間停「股票間」秒數，念完最後一支停「下一輪」秒數再從頭念，直到時長結束。
           </p>
         </template>
         <van-button
@@ -3660,7 +3675,7 @@ const radioStockLookupBusy = ref(false);
 const addRadioStockChannel = async () => {
   if (isTauri()) return;
   const id = `stock${Date.now()}`;
-  const channel: RadioChannel = { id, name: DEFAULT_STOCK_CHANNEL_NAME, kind: 'stock', source: '', stocks: [], pauseSeconds: DEFAULT_STOCK_PAUSE_SECONDS };
+  const channel: RadioChannel = { id, name: DEFAULT_STOCK_CHANNEL_NAME, kind: 'stock', source: '', stocks: [], pauseSeconds: DEFAULT_STOCK_PAUSE_SECONDS, roundPauseSeconds: DEFAULT_STOCK_PAUSE_SECONDS };
   await persistRadioAlarm({ ...radioAlarm.value, channels: [...radioAlarm.value.channels, channel] });
   if (radioAlarm.value.channels.some((c) => c.id === id)) openRadioChannelDetail(id);
 };
@@ -3769,13 +3784,13 @@ const onRadioStockPick = (action: { symbol: string; name: string }) => {
   void appendStockToChannel(channelId, picked.symbol, picked.name);
 };
 
-/** 句間停頓：用 @change（放開才觸發），避免 stepper 長按時連發寫入 */
-const onStockPauseChange = (channelId: string, value: number | string) => {
-  const pauseSeconds = clampPauseSeconds(Number(value));
+/** 兩種停頓（股票間、下一輪）：用 @change（放開才觸發），避免 stepper 長按時連發寫入 */
+const onStockPauseChange = (channelId: string, field: 'pauseSeconds' | 'roundPauseSeconds', value: number | string) => {
+  const seconds = clampPauseSeconds(Number(value));
   const target = radioAlarm.value.channels.find((c) => c.id === channelId);
-  if (!target || !isStockChannel(target) || target.pauseSeconds === pauseSeconds) return;
+  if (!target || !isStockChannel(target) || target[field] === seconds) return;
   const channels = radioAlarm.value.channels.map((c) => (
-    c.id === channelId && isStockChannel(c) ? { ...c, pauseSeconds } : c
+    c.id === channelId && isStockChannel(c) ? { ...c, [field]: seconds } : c
   ));
   void persistRadioAlarm({ ...radioAlarm.value, channels });
 };

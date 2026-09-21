@@ -358,7 +358,7 @@ describe('本地檔案頻道', () => {
   it('頻道列摘要：檔案頻道是檔案數、股票頻道是股票數、直播沒有', () => {
     const fileChannel: RadioChannel = { id: 'f1', name: '歌單', kind: 'file', source: '', files };
     expect(describeChannelSummary(fileChannel)).toBe('2 個檔案');
-    expect(describeChannelSummary({ id: 's1', name: '晨報', kind: 'stock', source: '', stocks: [{ symbol: '2330', name: '台積電' }], pauseSeconds: 1 })).toBe('1 支股票');
+    expect(describeChannelSummary({ id: 's1', name: '晨報', kind: 'stock', source: '', stocks: [{ symbol: '2330', name: '台積電' }], pauseSeconds: 1, roundPauseSeconds: 1 })).toBe('1 支股票');
     expect(describeChannelSummary(CHANNELS[0])).toBe('');
   });
 
@@ -393,6 +393,16 @@ describe('股票報價頻道', () => {
     expect(clampPauseSeconds(2.2)).toBe(2);
     const r = normalizeConfig({ channels: [{ id: 's', kind: 'stock', stocks: [], pauseSeconds: 3 }] });
     expect(isStockChannel(r.channels[0]) && r.channels[0].pauseSeconds).toBe(3);
+  });
+
+  it('下一輪停頓：缺欄位時沿用股票間停頓（舊資料行為不變），有給就各自獨立', () => {
+    const legacy = normalizeConfig({ channels: [{ id: 's', kind: 'stock', stocks: [], pauseSeconds: 5 }] });
+    expect(isStockChannel(legacy.channels[0]) && legacy.channels[0].roundPauseSeconds).toBe(5);
+    const both = normalizeConfig({ channels: [{ id: 's', kind: 'stock', stocks: [], pauseSeconds: 2, roundPauseSeconds: 30 }] });
+    expect(isStockChannel(both.channels[0]) && both.channels[0].pauseSeconds).toBe(2);
+    expect(isStockChannel(both.channels[0]) && both.channels[0].roundPauseSeconds).toBe(30);
+    const zero = normalizeConfig({ channels: [{ id: 's', kind: 'stock', stocks: [], roundPauseSeconds: 0 }] });
+    expect(isStockChannel(zero.channels[0]) && zero.channels[0].roundPauseSeconds).toBe(1);
   });
 
   it('顯示：有名稱就「名稱（代號）」，沒有就只有代號', () => {

@@ -56,8 +56,10 @@ export interface RadioStockItem {
 export interface RadioStockChannel extends RadioChannelBase {
   kind: 'stock';
   stocks: RadioStockItem[];
-  /** 句與句之間的停頓（整數秒，1–600）；以靜音檔實作，循環之間也是同樣一次 */
+  /** 股票與股票之間的停頓（整數秒，1–600）；以靜音檔實作 */
   pauseSeconds: number;
+  /** 念完最後一支、回到第一支之前的停頓（整數秒，1–600） */
+  roundPauseSeconds: number;
 }
 
 export type RadioChannel = RadioStreamChannel | RadioFileChannel | RadioStockChannel;
@@ -436,9 +438,12 @@ function normalizeChannel(c: any): RadioChannel | null {
       seen.add(symbol);
       stocks.push({ symbol, name: String(raw?.name ?? '').trim() });
     }
+    const pauseSeconds = clampPauseSeconds(Number(c?.pauseSeconds ?? DEFAULT_STOCK_PAUSE_SECONDS));
     return {
       id, name: name || DEFAULT_STOCK_CHANNEL_NAME, kind, source, stocks,
-      pauseSeconds: clampPauseSeconds(Number(c?.pauseSeconds ?? DEFAULT_STOCK_PAUSE_SECONDS)),
+      pauseSeconds,
+      // 舊資料沒有「下一輪」欄位時沿用股票間停頓，行為不變
+      roundPauseSeconds: clampPauseSeconds(Number(c?.roundPauseSeconds ?? pauseSeconds)),
     };
   }
   return null;
@@ -491,7 +496,7 @@ export const RadioAlarmService = {
           return { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) };
         }
         if (isStockChannel(c)) {
-          return { id: c.id, name: c.name, kind: c.kind, source: c.source, stocks: c.stocks.map((st) => ({ symbol: st.symbol, name: st.name })), pauseSeconds: clampPauseSeconds(c.pauseSeconds) };
+          return { id: c.id, name: c.name, kind: c.kind, source: c.source, stocks: c.stocks.map((st) => ({ symbol: st.symbol, name: st.name })), pauseSeconds: clampPauseSeconds(c.pauseSeconds), roundPauseSeconds: clampPauseSeconds(c.roundPauseSeconds) };
         }
         return { id: c.id, name: c.name, kind: c.kind, source: c.source };
       }),
