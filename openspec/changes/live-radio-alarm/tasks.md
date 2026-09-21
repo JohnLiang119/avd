@@ -590,6 +590,10 @@ design.md 新增 D14、改寫 D4／D9。
   複製期間 `loading` 顯示「正在複製檔案…」。`addRadioFileChannel` 寫回失敗時呼叫 `removeChannelFiles` 清副本；
   `removeRadioChannel` 正在播該頻道先停、寫回成功後刪副本。新增 CSS 只用既有中性色
   （`#0f172a`／`#64748b`／`#94a3b8`／`#e2e8f0`）。`npx vue-tsc --noEmit` 與 `npm run build` 通過。
+
+  **實機回報「檔名太長把清單撐爆」後改版**：預設名稱只取第一個檔名的前段（去副檔名、最多 16 字），
+  不再附「等 N 個檔案」；列上只有短標題、檔案數與 `›`，檔案明細、改名、移除改為點進對話框
+  （清單 `max-height: 40vh` 可捲動）；鬧鐘卡片的頻道單選標籤加省略。vitest 改 2 個、加 1 個。
 - [x] 14.6 規格與文件同步：`specs/live-radio-alarm/spec.md` 的「頻道」需求與新增的「本地檔案頻道的播放」需求（本節依據）已寫入；design.md D15 已寫入；proposal.md 的「What Changes」補一條本地檔案頻道、「Impact」補插件方法與私有目錄；完成方式：`openspec validate live-radio-alarm` 通過，三份 delta 皆無 BOM
 
   規格「頻道」需求與「本地檔案頻道的播放」需求、design.md D15、proposal.md（What Changes 補本地檔案頻道、

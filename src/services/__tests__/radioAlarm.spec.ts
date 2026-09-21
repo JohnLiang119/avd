@@ -321,7 +321,7 @@ describe('插件回傳的收斂', () => {
     expect(isFileChannel(f1)).toBe(true);
     if (isFileChannel(f1)) {
       expect(f1.files.map((f) => f.displayName)).toEqual(['a.mp3', 'b.mp4']);
-      expect(f1.name).toBe('a.mp3 等 2 個檔案');
+      expect(f1.name).toBe('a');
     }
     expect(r.alarms[0].channelId).toBe('f1');
     expect(r.alarms[1].channelId).toBe('bcc-news');
@@ -334,10 +334,19 @@ describe('本地檔案頻道', () => {
     { path: '/p/002_news.mp4', displayName: 'news.mp4' },
   ];
 
-  it('預設名稱：單檔用檔名，多檔加「等 N 個檔案」，空清單不留空字串', () => {
-    expect(defaultFileChannelName([files[0]])).toBe('morning.mp3');
-    expect(defaultFileChannelName(files)).toBe('morning.mp3 等 2 個檔案');
+  it('預設名稱：只取第一個檔名的前段當標題，去副檔名、不附檔案數，空清單不留空字串', () => {
+    expect(defaultFileChannelName([files[0]])).toBe('morning');
+    expect(defaultFileChannelName(files)).toBe('morning');
     expect(defaultFileChannelName([])).toBe('本地檔案');
+  });
+
+  it('預設名稱：整句影片標題只留前 16 字加「…」；沒有副檔名的檔名照用', () => {
+    const long = [{ path: '/p/001_x.mp4', displayName: '【中廣新聞網】0921 早安新聞 第一節 完整版 高畫質.mp4' }];
+    const title = defaultFileChannelName(long);
+    expect(Array.from(title).length).toBe(17);
+    expect(title.endsWith('…')).toBe(true);
+    expect(title.startsWith('【中廣新聞網】0921 早安')).toBe(true);
+    expect(defaultFileChannelName([{ path: '/p/001_a', displayName: 'bare' }])).toBe('bare');
   });
 
   it('頻道列摘要只對 file 頻道說話', () => {

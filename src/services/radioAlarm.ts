@@ -214,14 +214,22 @@ export function defaultChannelId(channels: readonly RadioChannel[]): string {
   return channels.find((c) => c.kind === 'bcc')?.id ?? channels[0]?.id ?? '';
 }
 
+/** 頻道標題的長度上限（字元）。下載的檔名常是整句影片標題，只取前段當標題。 */
+export const CHANNEL_TITLE_MAX_CHARS = 16;
+
 /**
- * 新建本地檔案頻道的預設名稱：第一個檔案的顯示名稱，多檔時加「等 N 個檔案」。
+ * 新建本地檔案頻道的預設名稱：**第一個檔案檔名的前段**，去掉副檔名、超過上限截斷加「…」。
+ * 不附「等 N 個檔案」—— 檔案數量在頻道列另有一格顯示，明細點進去看。
  * 使用者可再改名；空清單回傳固定字樣而非空字串，介面不該出現沒有名字的列。
  */
 export function defaultFileChannelName(files: readonly RadioLocalFile[]): string {
   const first = (files[0]?.displayName ?? '').trim();
   if (!first) return '本地檔案';
-  return files.length > 1 ? `${first} 等 ${files.length} 個檔案` : first;
+  const stem = first.replace(/\.[A-Za-z0-9]{1,5}$/, '').trim() || first;
+  const chars = Array.from(stem);
+  return chars.length > CHANNEL_TITLE_MAX_CHARS
+    ? `${chars.slice(0, CHANNEL_TITLE_MAX_CHARS).join('')}…`
+    : stem;
 }
 
 /** 頻道列上本地檔案頻道的摘要：有幾個檔案。 */

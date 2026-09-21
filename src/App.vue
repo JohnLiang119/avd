@@ -660,6 +660,7 @@
                         v-for="channel in radioAlarm.channels"
                         :key="channel.id"
                         :name="channel.id"
+                        class="radio-channel-option"
                         checked-color="#0f172a"
                         style="font-size: 13px;"
                       >{{ channel.name }}</van-radio>
@@ -720,15 +721,16 @@
                 直播鍵跟著頻道走，不依賴任何鬧鐘 —— 「現在想聽」與「明天要被叫醒」是兩件事。
                 播放中同一個位置換成停止（visualLanguage 的 stop），其他頻道維持播放。
 
-                本地檔案頻道（design.md D15）可展開：檔案清單（順序即播放順序）、名稱、移除。
-                內建頻道沒有可調的東西，不給展開。
+                本地檔案頻道（design.md D15）的列上只有短標題與檔案數；檔案明細、改名、移除
+                **點進**對話框才看得到 —— 下載的檔名常是整句影片標題，攤在列上會把清單撐爆。
+                內建頻道沒有可調的東西，不給點進。
               -->
               <div v-for="channel in radioAlarm.channels" :key="channel.id" class="radio-channel-item">
                 <div class="radio-channel-row">
                   <div
                     style="min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 6px;"
                     :style="channel.kind !== 'bcc' ? 'cursor: pointer;' : ''"
-                    @click="channel.kind !== 'bcc' && toggleRadioChannelExpanded(channel.id)"
+                    @click="channel.kind !== 'bcc' && openRadioChannelDetail(channel.id)"
                   >
                     <span style="font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ channel.name }}</span>
                     <span v-if="isFileChannel(channel)" style="font-size: 11px; color: #94a3b8; flex-shrink: 0;">{{ describeChannelFiles(channel) }}</span>
@@ -744,32 +746,10 @@
                       v-if="channel.kind !== 'bcc'"
                       type="button"
                       class="radio-alarm-chevron"
-                      :title="radioChannelExpandedId === channel.id ? '收合' : '展開設定'"
-                      @click="toggleRadioChannelExpanded(channel.id)"
-                    >{{ radioChannelExpandedId === channel.id ? '▲' : '▼' }}</button>
+                      title="檔案明細與設定"
+                      @click="openRadioChannelDetail(channel.id)"
+                    >›</button>
                   </div>
-                </div>
-                <div v-if="radioChannelExpandedId === channel.id && isFileChannel(channel)" class="radio-channel-body">
-                  <ol class="radio-channel-files">
-                    <li v-for="file in channel.files" :key="file.path">{{ file.displayName }}</li>
-                  </ol>
-                  <div class="radio-alarm-field">
-                    <span class="radio-alarm-label">名稱</span>
-                    <van-field
-                      v-model="radioChannelNameDraft"
-                      placeholder="頻道名稱"
-                      maxlength="40"
-                      style="padding: 4px 8px; flex: 1;"
-                      @blur="renameRadioChannel(channel.id)"
-                      @keyup.enter="renameRadioChannel(channel.id)"
-                    />
-                  </div>
-                  <van-button
-                    size="small" block plain
-                    style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
-                    :disabled="radioAlarmBusy"
-                    @click="removeRadioChannel(channel.id)"
-                  >移除這個頻道</van-button>
                 </div>
               </div>
               <div v-if="radioPlayingLabel" style="font-size: 11px; color: #64748b; padding: 4px 0 8px;">
@@ -921,6 +901,41 @@
           {{ shareDownloadHint }}
         </p>
         <p style="font-size: 11px; color: #94a3b8; margin: 0; word-break: break-all; text-align: center;">{{ shareDownloadUrl }}</p>
+      </div>
+    </van-dialog>
+
+    <!-- 本地檔案頻道的明細：名稱、檔案清單（依播放順序）、移除。從頻道列點進來（design.md D15） -->
+    <van-dialog
+      v-model:show="showRadioChannelDetail"
+      :title="radioChannelDetail?.name || '頻道'"
+      confirm-button-text="關閉"
+      :close-on-click-overlay="true"
+      style="max-width: 360px; width: 88%;"
+    >
+      <div v-if="radioChannelDetail" style="padding: 12px 16px 4px;">
+        <div class="radio-alarm-field">
+          <span class="radio-alarm-label">名稱</span>
+          <van-field
+            v-model="radioChannelNameDraft"
+            placeholder="頻道名稱"
+            maxlength="40"
+            style="padding: 4px 8px; flex: 1;"
+            @blur="renameRadioChannel(radioChannelDetail.id)"
+            @keyup.enter="renameRadioChannel(radioChannelDetail.id)"
+          />
+        </div>
+        <div style="font-size: 12px; color: #64748b; margin: 10px 0 4px;">
+          檔案（{{ radioChannelDetail.files.length }} 個，依播放順序）
+        </div>
+        <ol class="radio-channel-files">
+          <li v-for="file in radioChannelDetail.files" :key="file.path">{{ file.displayName }}</li>
+        </ol>
+        <van-button
+          size="small" block plain
+          style="margin-top: 10px; border-color: #e2e8f0; color: #64748b;"
+          :disabled="radioAlarmBusy"
+          @click="removeRadioChannel(radioChannelDetail.id)"
+        >移除這個頻道</van-button>
       </div>
     </van-dialog>
 
@@ -3522,20 +3537,26 @@ const removeRadioAlarm = (id: string) => {
 
 // ---- 本地檔案頻道（design.md D15）----
 
-/** 目前展開的頻道；純介面狀態，預設全部收合 */
-const radioChannelExpandedId = ref<string | null>(null);
+/** 明細對話框正在看的頻道 id；純介面狀態 */
+const radioChannelDetailId = ref<string | null>(null);
+const showRadioChannelDetail = ref(false);
 /** 選檔與複製進行中：複製影片檔可能要幾十秒，按鈕要看得出在忙 */
 const radioPickBusy = ref(false);
-/** 展開的頻道名稱草稿；失焦或 Enter 才寫回 */
+/** 明細中的頻道名稱草稿；失焦或 Enter 才寫回 */
 const radioChannelNameDraft = ref('');
 
-const toggleRadioChannelExpanded = (id: string) => {
-  if (radioChannelExpandedId.value === id) {
-    radioChannelExpandedId.value = null;
-    return;
-  }
-  radioChannelExpandedId.value = id;
-  radioChannelNameDraft.value = radioAlarm.value.channels.find((c) => c.id === id)?.name ?? '';
+/** 明細對話框的頻道；只有本地檔案頻道有明細可看 */
+const radioChannelDetail = computed(() => {
+  const found = radioAlarm.value.channels.find((c) => c.id === radioChannelDetailId.value);
+  return found && isFileChannel(found) ? found : null;
+});
+
+const openRadioChannelDetail = (id: string) => {
+  const target = radioAlarm.value.channels.find((c) => c.id === id);
+  if (!target || !isFileChannel(target)) return;
+  radioChannelDetailId.value = id;
+  radioChannelNameDraft.value = target.name;
+  showRadioChannelDetail.value = true;
 };
 
 /**
@@ -3565,7 +3586,7 @@ const addRadioFileChannel = async () => {
       showToast('新增頻道失敗，已清除複製的檔案');
       return;
     }
-    toggleRadioChannelExpanded(picked.channelId);
+    openRadioChannelDetail(picked.channelId);
   } catch (e) {
     // 原生端 reject 的訊息已含原因（如空間不足），直接給使用者看
     reportError('廣播鬧鐘', e);
@@ -3590,7 +3611,10 @@ const renameRadioChannel = (id: string) => {
 const removeRadioChannel = async (id: string) => {
   const target = radioAlarm.value.channels.find((c) => c.id === id);
   if (!target || target.kind === 'bcc') return;
-  if (radioChannelExpandedId.value === id) radioChannelExpandedId.value = null;
+  if (radioChannelDetailId.value === id) {
+    showRadioChannelDetail.value = false;
+    radioChannelDetailId.value = null;
+  }
   if (radioStatus.value?.playingChannelId === id) {
     await RadioAlarmService.stop().catch(() => {});
   }
@@ -5288,15 +5312,22 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   gap: 8px;
   padding: 6px 0;
 }
-.radio-channel-body {
-  padding: 0 0 10px 4px;
-}
 .radio-channel-files {
-  margin: 0 0 8px;
+  margin: 0;
   padding-left: 20px;
   font-size: 12px;
   color: #64748b;
   line-height: 1.7;
+  max-height: 40vh;
+  overflow-y: auto;
+  word-break: break-all;
+}
+/* 鬧鐘卡片裡的頻道單選：長名稱截斷，不讓一個頻道把整列撐開 */
+.radio-channel-option .van-radio__label {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .radio-advanced-toggle {
   display: block;
