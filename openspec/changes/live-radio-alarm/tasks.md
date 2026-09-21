@@ -633,3 +633,5 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 15.8 六項建置驗證全數通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
 
   功能 commit `d79d3f5`；版本 1.0.109 → 1.0.110（versionCode 147），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+  口說稿極簡與停頓可調：功能 commit `03b99d7`；版本 1.0.110 → 1.0.111（versionCode 148），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
