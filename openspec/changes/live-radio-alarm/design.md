@@ -300,7 +300,8 @@ D14 已把頻道做成鬧鐘的屬性，`Channel.kind` 目前有 `bcc`（向官�
 - **金鑰是全域設定** `RadioAlarmConfig.fugleApiKey`：存原生端（觸發時 WebView 沒在跑），所有股票頻道共用；介面放在股票頻道明細裡（第一次建股票頻道的人在這裡才需要它），密碼欄不回顯。沒金鑰不發請求，直接以「尚未設定金鑰」失敗並念出。
 - **加入股票時先查一次**（插件 `lookupStock`，與觸發同一套查詢與解析）取名稱與現價，讓使用者確認代號沒打錯；查不到仍可加入（沒名稱），早上會念出實際狀況。
 - **也可以打名稱**（使用者要求）：富果沒有「以名稱查一支」的端點，但 `intraday/tickers` 一次回傳整個交易所的代號與名稱；抓上市＋上櫃的一般股票（約三千筆）快取一天（`RadioAlarmStore`），之後在本機比對（`FugleTickerSearch.search`：名稱完全相同 → 開頭 → 包含 → 代號開頭，純函式）。剛好一筆直接加入，多筆以 action sheet 挑，沒有就提示。輸入是英數字就走代號路徑，否則走名稱搜尋。
-- **中文語音**：依序試 `zh-TW`、任何中文；都沒有即 `fail("裝置沒有中文語音…")`，走失敗通知。Android 11 起需在 Manifest 宣告 `TTS_SERVICE` 的 `<queries>`，否則 `TextToSpeech` 找不到引擎 —— 這一條漏了功能會靜默失敗。
+- **中文語音**：依序試 `zh-TW`、任何中文；都沒有即 `fail("裝置沒有中文語音…")`，走失敗通知。
+- **聲音與語速可選**（使用者要求）：`TextToSpeech.getVoices()` 列出引擎裡語言為 zh／cmn／yue 的聲音（zh-TW 先、離線先、品質高先），存 `Voice.getName()` 於全域設定 `ttsVoice`，合成時 `setVoice`；找不到（換手機、引擎更新）就保留 `setLanguage` 的預設聲音並記錄 —— 鬧鐘照響。語速 `ttsSpeechRate` 0.5–2.0 一位小數，`setSpeechRate`。全域而非逐頻道：聲音是「這支手機有哪些」的事。引擎的聲音名稱（如 `cmn-tw-x-ctc-local`）沒人看得懂，介面顯示「國語（台灣）· 聲音 A · 需網路」。試聽用頻道既有的播放鍵，不另做。Android 11 起需在 Manifest 宣告 `TTS_SERVICE` 的 `<queries>`，否則 `TextToSpeech` 找不到引擎 —— 這一條漏了功能會靜默失敗。
 - **富果 API 端點與欄位**（2026-09-21 依官方文件確認）：`name`、`closePrice`、`lastPrice`、`previousClose`、`change`、`changePercent`、`date`、`isClose`。價格取 closePrice → lastPrice → previousClose 第一個大於 0 者；`change`／`changePercent` 缺時自前收計算。錯誤回應（401／404／429）各有可念的原因，不會被念成「0 元」。
 - **替代案：直接 `TextToSpeech.speak()` 用 STREAM_ALARM** —— 少一步寫檔，但停止、時長、音量比例、音訊焦點、通知都要另寫一份，且無法循環；不採。
 - **替代案：金鑰逐頻道** —— 同一個人只會有一把金鑰，逐頻道只是多打幾次；不採。

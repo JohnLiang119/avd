@@ -56,6 +56,11 @@ public final class RadioAlarmConstants {
      * 語音引擎對句號的停頓不可控，故以靜音檔實作（見 SilenceWav）。
      */
     public static final double DEFAULT_STOCK_PAUSE_SECONDS = 1.0;
+
+    /** 股票報價的語速（TextToSpeech.setSpeechRate 的倍率）：預設與允許範圍。 */
+    public static final double DEFAULT_TTS_SPEECH_RATE = 1.0;
+    public static final double MIN_TTS_SPEECH_RATE = 0.5;
+    public static final double MAX_TTS_SPEECH_RATE = 2.0;
     public static final double MIN_STOCK_PAUSE_SECONDS = 1.0;
     public static final double MAX_STOCK_PAUSE_SECONDS = 600.0;
 

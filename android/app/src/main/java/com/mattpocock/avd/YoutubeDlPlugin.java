@@ -1652,6 +1652,8 @@ public class YoutubeDlPlugin extends Plugin {
             root.put("volumePercent", call.getInt("volumePercent",
                     RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
             root.put("fugleApiKey", call.getString("fugleApiKey", ""));
+            root.put("ttsVoice", call.getString("ttsVoice", ""));
+            root.put("ttsSpeechRate", call.getDouble("ttsSpeechRate", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE));
             root.put("alarms", copyArray(call.getArray("alarms")));
             root.put("channels", copyArray(call.getArray("channels")));
 
@@ -2035,6 +2037,29 @@ public class YoutubeDlPlugin extends Plugin {
         }, "radio-alarm-search").start();
     }
 
+    /** 列出裝置文字轉語音引擎裡的中文聲音，供股票頻道選擇。 */
+    @PluginMethod
+    public void listTtsVoices(final PluginCall call) {
+        RadioTts.listChineseVoices(getContext(), new RadioTts.VoicesCallback() {
+            @Override
+            public void onResult(List<RadioTts.VoiceInfo> voices, String error) {
+                JSObject ret = new JSObject();
+                JSArray arr = new JSArray();
+                for (RadioTts.VoiceInfo v : voices) {
+                    JSObject item = new JSObject();
+                    item.put("name", v.name);
+                    item.put("locale", v.locale);
+                    item.put("quality", v.quality);
+                    item.put("network", v.network);
+                    arr.put(item);
+                }
+                ret.put("voices", arr);
+                ret.put("error", error == null ? "" : error);
+                call.resolve(ret);
+            }
+        });
+    }
+
     /** 刪除某個本地檔案頻道的全部副本（頻道被移除時由前端呼叫）。 */
     @PluginMethod
     public void removeRadioAlarmChannelFiles(PluginCall call) {
@@ -2136,6 +2161,8 @@ public class YoutubeDlPlugin extends Plugin {
         ret.put("schemaVersion", RadioAlarmConfig.SCHEMA_VERSION);
         ret.put("volumePercent", config.volumePercent);
         ret.put("fugleApiKey", config.fugleApiKey);
+        ret.put("ttsVoice", config.ttsVoice);
+        ret.put("ttsSpeechRate", config.ttsSpeechRate);
 
         JSArray channels = new JSArray();
         for (RadioAlarmConfig.Channel c : config.channels) {

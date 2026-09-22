@@ -91,6 +91,48 @@ export interface RadioAlarmConfig {
   volumePercent: number;
   /** 富果 API 金鑰（全域）；空字串代表未設定 */
   fugleApiKey: string;
+  /** 文字轉語音的聲音名稱（全域）；空字串代表引擎的中文預設聲音 */
+  ttsVoice: string;
+  /** 語速倍率（全域，0.5–2.0，一位小數，預設 1.0） */
+  ttsSpeechRate: number;
+}
+
+/** 引擎裡一個可選的中文聲音。 */
+export interface TtsVoice {
+  name: string;
+  locale: string;
+  quality: number;
+  network: boolean;
+}
+
+export const DEFAULT_TTS_SPEECH_RATE = 1;
+export const MIN_TTS_SPEECH_RATE = 0.5;
+export const MAX_TTS_SPEECH_RATE = 2;
+
+export function clampSpeechRate(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TTS_SPEECH_RATE;
+  const clamped = Math.min(MAX_TTS_SPEECH_RATE, Math.max(MIN_TTS_SPEECH_RATE, value));
+  return Math.round(clamped * 10) / 10;
+}
+
+/**
+ * 聲音的顯示名稱。引擎給的名字像 `cmn-tw-x-ctc-local`，直接顯示沒人看得懂；
+ * 改為「國語（台灣）· 聲音 A · 離線」：區域用中文、聲音以字母編號、需網路者標明。
+ * index 由呼叫端依同區域的順序給。
+ */
+export function describeTtsVoice(voice: TtsVoice, index: number): string {
+  const region = describeVoiceLocale(voice.locale);
+  const letter = String.fromCharCode(65 + (index % 26));
+  return `${region} · 聲音 ${letter}${voice.network ? ' · 需網路' : ''}`;
+}
+
+export function describeVoiceLocale(locale: string): string {
+  const tag = (locale || '').toUpperCase();
+  if (tag.includes('TW')) return '國語（台灣）';
+  if (tag.includes('HK') || tag.startsWith('YUE')) return '粵語（香港）';
+  if (tag.includes('CN') || tag.includes('HANS')) return '普通話（中國）';
+  if (tag.includes('SG')) return '華語（新加坡）';
+  return `中文（${locale || '未知'}）`;
 }
 
 /** 插件 searchStocks 的回傳：以名稱或代號片段找到的候選；抓不到清單時 ok=false。 */
@@ -477,6 +519,8 @@ export function normalizeConfig(raw: any): RadioAlarmConfig {
       ? DEFAULT_VOLUME_PERCENT
       : clampVolume(Number(raw.volumePercent)),
     fugleApiKey: String(raw?.fugleApiKey ?? '').trim(),
+    ttsVoice: String(raw?.ttsVoice ?? '').trim(),
+    ttsSpeechRate: clampSpeechRate(Number(raw?.ttsSpeechRate ?? DEFAULT_TTS_SPEECH_RATE)),
   };
 }
 
@@ -491,6 +535,8 @@ export const RadioAlarmService = {
     const result = await YoutubeDlPlugin.setRadioAlarmConfig({
       volumePercent: clampVolume(Number(config.volumePercent)),
       fugleApiKey: String(config.fugleApiKey ?? '').trim(),
+      ttsVoice: String(config.ttsVoice ?? '').trim(),
+      ttsSpeechRate: clampSpeechRate(Number(config.ttsSpeechRate)),
       channels: config.channels.map((c) => {
         if (isFileChannel(c)) {
           return { id: c.id, name: c.name, kind: c.kind, source: c.source, files: c.files.map((f) => ({ path: f.path, displayName: f.displayName })) };
@@ -569,6 +615,22 @@ export const RadioAlarmService = {
   /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */
   async removeChannelFiles(channelId: string): Promise<void> {
     await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
+  },
+
+  /** 列出裝置文字轉語音引擎裡的中文聲音。沒有引擎時 voices 為空且 error 有原因。 */
+  async listTtsVoices(): Promise<{ voices: TtsVoice[]; error: string }> {
+    const r = await YoutubeDlPlugin.listTtsVoices();
+    const voices: TtsVoice[] = Array.isArray(r?.voices)
+      ? r.voices
+          .map((v: any) => ({
+            name: String(v?.name ?? ''),
+            locale: String(v?.locale ?? ''),
+            quality: Number(v?.quality ?? 0),
+            network: Boolean(v?.network),
+          }))
+          .filter((v: TtsVoice) => v.name !== '')
+      : [];
+    return { voices, error: String(r?.error ?? '') };
   },
 
   /** 以名稱或代號片段找候選股票（富果股票清單，快取一天）。抓不到清單不拋，看 ok。 */

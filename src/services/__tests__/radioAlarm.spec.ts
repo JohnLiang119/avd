@@ -30,6 +30,9 @@ import {
   normalizeStockSymbol,
   describeStock,
   clampPauseSeconds,
+  clampSpeechRate,
+  describeTtsVoice,
+  describeVoiceLocale,
   DEFAULT_STOCK_CHANNEL_NAME,
   type RadioAlarm,
   type RadioAlarmConfig,
@@ -60,6 +63,8 @@ const config = (alarms: RadioAlarm[]): RadioAlarmConfig => ({
   channels: CHANNELS,
   volumePercent: 100,
   fugleApiKey: '',
+  ttsVoice: '',
+  ttsSpeechRate: 1,
 });
 
 const status = (over: Partial<RadioAlarmStatus> = {}): RadioAlarmStatus => ({
@@ -433,5 +438,27 @@ describe('股票報價頻道', () => {
     expect(r.channels[3].id).toBe('s2');
     expect(r.alarms[0].channelId).toBe('s1');
     expect(isFileChannel(s1)).toBe(false);
+  });
+});
+
+describe('文字轉語音的聲音與語速', () => {
+  it('語速夾在 0.5 到 2、一位小數；缺欄位用 1', () => {
+    expect(clampSpeechRate(Number.NaN)).toBe(1);
+    expect(clampSpeechRate(0.1)).toBe(0.5);
+    expect(clampSpeechRate(9)).toBe(2);
+    expect(clampSpeechRate(1.26)).toBe(1.3);
+    const r = normalizeConfig({ ttsVoice: ' cmn-tw-x-ctc-local ', ttsSpeechRate: 1.4 });
+    expect(r.ttsVoice).toBe('cmn-tw-x-ctc-local');
+    expect(r.ttsSpeechRate).toBe(1.4);
+    expect(normalizeConfig({}).ttsVoice).toBe('');
+    expect(normalizeConfig({}).ttsSpeechRate).toBe(1);
+  });
+
+  it('聲音的顯示名稱：區域中文化、字母編號、需網路標明', () => {
+    expect(describeVoiceLocale('cmn-TW')).toBe('國語（台灣）');
+    expect(describeVoiceLocale('zh-CN')).toBe('普通話（中國）');
+    expect(describeVoiceLocale('yue-HK')).toBe('粵語（香港）');
+    expect(describeTtsVoice({ name: 'x', locale: 'cmn-TW', quality: 400, network: false }, 0)).toBe('國語（台灣） · 聲音 A');
+    expect(describeTtsVoice({ name: 'y', locale: 'cmn-TW', quality: 400, network: true }, 1)).toBe('國語（台灣） · 聲音 B · 需網路');
   });
 });

@@ -6,12 +6,16 @@ import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 import android.util.Log;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 文字轉語音：把**多句**中文各自合成成音檔，而不是直接朗讀。
@@ -49,6 +53,15 @@ public final class RadioTts {
      */
     public static void synthesizeAll(Context context, final List<String> sentences, final File dir,
                                      final Callback callback) {
+        synthesizeAll(context, sentences, dir, "", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE, callback);
+    }
+
+    /**
+     * @param voiceName  要用的聲音（Voice.getName()）；空字串或引擎中沒有這個聲音時用中文預設聲音
+     * @param speechRate 語速倍率（0.5–2.0）
+     */
+    public static void synthesizeAll(Context context, final List<String> sentences, final File dir,
+                                     final String voiceName, final double speechRate, final Callback callback) {
         if (sentences == null || sentences.isEmpty()) {
             callback.onError("沒有要念的內容");
             return;
@@ -90,7 +103,8 @@ public final class RadioTts {
                                 "裝置沒有中文語音，請在系統設定安裝文字轉語音的中文語音包");
                         return;
                     }
-                    tts.setSpeechRate(0.95f);
+                    tts.setSpeechRate((float) RadioAlarmConfig.clampSpeechRate(speechRate));
+                    applyVoice(tts, voiceName);
 
                     if (!dir.exists() && !dir.mkdirs()) {
                         failOnce(finished, main, timeout, tts, callback, "無法建立音檔資料夾");
@@ -138,6 +152,100 @@ public final class RadioTts {
             });
         } catch (Exception e) {
             failOnce(finished, main, timeout, holder[0], callback, "建立文字轉語音引擎失敗：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 指定聲音；找不到就保留 setLanguage 選出的預設聲音並記錄 —— 使用者換了手機或
+     * 引擎更新後聲音消失，鬧鐘仍要響，只是換回預設聲音。
+     */
+    private static void applyVoice(TextToSpeech tts, String voiceName) {
+        if (voiceName == null || voiceName.trim().isEmpty()) return;
+        try {
+            Set<Voice> voices = tts.getVoices();
+            if (voices == null) return;
+            for (Voice v : voices) {
+                if (voiceName.equals(v.getName())) {
+                    int r = tts.setVoice(v);
+                    if (r != TextToSpeech.SUCCESS) Log.w(TAG, "setVoice failed: " + r);
+                    return;
+                }
+            }
+            Log.w(TAG, "voice not found, using default: " + voiceName);
+        } catch (Exception e) {
+            Log.w(TAG, "applyVoice failed", e);
+        }
+    }
+
+    /** 引擎中一個可選的中文聲音，供介面列出。 */
+    public static final class VoiceInfo {
+        public final String name;
+        public final String locale;
+        public final int quality;
+        public final boolean network;
+
+        VoiceInfo(String name, String locale, int quality, boolean network) {
+            this.name = name;
+            this.locale = locale;
+            this.quality = quality;
+            this.network = network;
+        }
+    }
+
+    public interface VoicesCallback {
+        void onResult(List<VoiceInfo> voices, String error);
+    }
+
+    /**
+     * 列出引擎裡的中文聲音：先 zh-TW，再其他中文；同區域內品質高者先。
+     * 不需網路的聲音在鬧鐘情境較可靠，但仍列出需網路者讓使用者自己選。
+     */
+    public static void listChineseVoices(Context context, final VoicesCallback callback) {
+        final TextToSpeech[] holder = new TextToSpeech[1];
+        try {
+            holder[0] = new TextToSpeech(context.getApplicationContext(), new TextToSpeech.OnInitListener() {
+                @Override
+                public void onInit(int status) {
+                    TextToSpeech tts = holder[0];
+                    List<VoiceInfo> result = new ArrayList<VoiceInfo>();
+                    String error = null;
+                    if (status != TextToSpeech.SUCCESS || tts == null) {
+                        error = "裝置沒有可用的文字轉語音引擎";
+                    } else {
+                        try {
+                            Set<Voice> voices = tts.getVoices();
+                            if (voices != null) {
+                                for (Voice v : voices) {
+                                    Locale l = v.getLocale();
+                                    if (l == null) continue;
+                                    String lang = l.getLanguage();
+                                    if (!"zh".equals(lang) && !"cmn".equals(lang) && !"yue".equals(lang)) continue;
+                                    result.add(new VoiceInfo(v.getName(), l.toLanguageTag(), v.getQuality(),
+                                            v.isNetworkConnectionRequired()));
+                                }
+                            }
+                        } catch (Exception e) {
+                            error = "無法列出聲音：" + e.getMessage();
+                        }
+                        Collections.sort(result, new Comparator<VoiceInfo>() {
+                            @Override
+                            public int compare(VoiceInfo a, VoiceInfo b) {
+                                boolean aTw = a.locale.toUpperCase(Locale.US).contains("TW");
+                                boolean bTw = b.locale.toUpperCase(Locale.US).contains("TW");
+                                if (aTw != bTw) return aTw ? -1 : 1;
+                                if (a.network != b.network) return a.network ? 1 : -1;
+                                if (a.quality != b.quality) return b.quality - a.quality;
+                                return a.name.compareTo(b.name);
+                            }
+                        });
+                    }
+                    shutdown(tts);
+                    callback.onResult(result, error);
+                }
+            });
+        } catch (Exception e) {
+            shutdown(holder[0]);
+            callback.onResult(new ArrayList<VoiceInfo>(), "建立文字轉語音引擎失敗：" + e.getMessage());
         }
     }
 

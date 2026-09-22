@@ -1010,6 +1010,32 @@
             />
             <span style="font-size: 12px; color: #64748b;">秒</span>
           </div>
+          <!-- 聲音與語速是全域設定（這支手機上有哪些聲音，不隨頻道而異），放在這裡是因為只有股票頻道用得到 -->
+          <div class="radio-alarm-field" style="margin-top: 6px;">
+            <span class="radio-alarm-label">聲音</span>
+            <van-button
+              size="small" plain
+              style="flex: 1; border-color: #e2e8f0; color: #0f172a; justify-content: space-between;"
+              :loading="radioVoicesBusy"
+              :disabled="radioAlarmBusy || radioVoicesBusy"
+              @click="openRadioVoicePicker"
+            >{{ radioCurrentVoiceLabel }}</van-button>
+          </div>
+          <div class="radio-alarm-field" style="margin-top: 6px;">
+            <span class="radio-alarm-label">語速</span>
+            <van-stepper
+              :model-value="radioAlarm.ttsSpeechRate"
+              :min="0.5"
+              :max="2"
+              :step="0.1"
+              :decimal-length="1"
+              input-width="56px"
+              button-size="26px"
+              :disabled="radioAlarmBusy"
+              @change="onTtsSpeechRateChange"
+            />
+            <span style="font-size: 12px; color: #64748b;">倍</span>
+          </div>
           <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
             鬧鐘時間到會抓最新報價，逐支念「名稱 價格」；股票之間停「股票間」秒數，念完最後一支停「下一輪」秒數再從頭念，直到時長結束。
           </p>
@@ -1531,6 +1557,18 @@
       @confirm="onBatchModalConfirm"
       @cancel="onBatchModalCancel"
     />
+    <!-- 選擇文字轉語音的聲音（引擎裡的中文聲音；第一項為引擎預設） -->
+    <van-action-sheet
+      v-model:show="showRadioVoicePicker"
+      :actions="radioVoiceActions"
+      cancel-text="取消"
+      title="選擇聲音"
+      :description="radioVoiceError || '選好後按頻道的播放鍵可立刻試聽'"
+      close-on-click-action
+      @select="onRadioVoicePick"
+      style="max-width: 400px; margin: 0 auto; left: 0; right: 0;"
+    />
+
     <!-- 以名稱搜尋股票命中多筆時挑一筆 -->
     <van-action-sheet
       v-model:show="showRadioStockPicker"
@@ -1601,6 +1639,8 @@ import {
   isStockChannel,
   normalizeStockSymbol,
   clampPauseSeconds,
+  clampSpeechRate,
+  describeTtsVoice,
   DEFAULT_STOCK_CHANNEL_NAME,
   DEFAULT_STOCK_PAUSE_SECONDS,
   lastFailureText,
@@ -1616,6 +1656,7 @@ import {
   type RadioAlarmStatus,
   type RadioChannel,
   type RadioStockItem,
+  type TtsVoice,
 } from './services/radioAlarm';
 import {
   nextQuotaResetTime,
@@ -3483,7 +3524,7 @@ const RADIO_WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 /** 介面上的星期順序：週一起算、週日放最後，符合台灣的閱讀習慣 */
 const RADIO_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
-const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100, fugleApiKey: '' });
+const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100, fugleApiKey: '', ttsVoice: '', ttsSpeechRate: 1 });
 const radioStatus = ref<RadioAlarmStatus | null>(null);
 const radioAlarmBusy = ref(false);
 /** 目前展開的鬧鐘卡片；純介面狀態，不持久化，預設全部收合 */
@@ -3663,6 +3704,10 @@ const openRadioChannelDetail = (id: string) => {
   radioFugleKeyDraft.value = radioAlarm.value.fugleApiKey;
   radioStockSymbolDraft.value = '';
   showRadioChannelDetail.value = true;
+  // 股票頻道：背景先抓聲音清單，按鈕上才能顯示目前聲音的名稱而非只是「已選定」
+  if (isStockChannel(target) && radioVoices.value.length === 0 && !radioVoicesBusy.value) {
+    RadioAlarmService.listTtsVoices().then((r) => { radioVoices.value = r.voices; }).catch(() => {});
+  }
 };
 
 // ---- 股票報價頻道（design.md D16）----
@@ -3774,6 +3819,68 @@ const addStockToChannel = async (channelId: string) => {
   } finally {
     radioStockLookupBusy.value = false;
   }
+};
+
+// ---- 文字轉語音的聲音與語速（全域）----
+
+const radioVoices = ref<TtsVoice[]>([]);
+const radioVoicesBusy = ref(false);
+const radioVoiceError = ref('');
+const showRadioVoicePicker = ref(false);
+
+/** 同區域內依順序給字母編號，讓「聲音 A／B／C」在清單與按鈕上一致 */
+const radioVoiceLabels = computed(() => {
+  const counter = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const v of radioVoices.value) {
+    const n = counter.get(v.locale) ?? 0;
+    counter.set(v.locale, n + 1);
+    labels.set(v.name, describeTtsVoice(v, n));
+  }
+  return labels;
+});
+
+const radioCurrentVoiceLabel = computed(() => {
+  const name = radioAlarm.value.ttsVoice;
+  if (!name) return '系統預設';
+  return radioVoiceLabels.value.get(name) ?? '已選定（點開查看）';
+});
+
+const radioVoiceActions = computed(() => [
+  { name: '系統預設', voice: '', color: radioAlarm.value.ttsVoice === '' ? '#0f172a' : undefined },
+  ...radioVoices.value.map((v) => ({
+    name: radioVoiceLabels.value.get(v.name) ?? v.name,
+    subname: v.name,
+    voice: v.name,
+    color: radioAlarm.value.ttsVoice === v.name ? '#0f172a' : undefined,
+  })),
+]);
+
+const openRadioVoicePicker = async () => {
+  if (isTauri()) return;
+  radioVoicesBusy.value = true;
+  try {
+    const r = await RadioAlarmService.listTtsVoices();
+    radioVoices.value = r.voices;
+    radioVoiceError.value = r.error || (r.voices.length === 0 ? '引擎裡沒有中文聲音，請到系統設定安裝' : '');
+    showRadioVoicePicker.value = true;
+  } catch (e) {
+    reportError('股票報價頻道', e);
+  } finally {
+    radioVoicesBusy.value = false;
+  }
+};
+
+const onRadioVoicePick = (action: { voice: string }) => {
+  showRadioVoicePicker.value = false;
+  if (action.voice === radioAlarm.value.ttsVoice) return;
+  void persistRadioAlarm({ ...radioAlarm.value, ttsVoice: action.voice });
+};
+
+const onTtsSpeechRateChange = (value: number | string) => {
+  const rate = clampSpeechRate(Number(value));
+  if (rate === radioAlarm.value.ttsSpeechRate) return;
+  void persistRadioAlarm({ ...radioAlarm.value, ttsSpeechRate: rate });
 };
 
 const onRadioStockPick = (action: { symbol: string; name: string }) => {

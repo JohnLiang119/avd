@@ -474,6 +474,26 @@ public class RadioAlarmConfigTest {
     }
 
     @Test
+    public void ttsVoiceAndRateAreGlobalAndRoundTripped() {
+        assertEquals(1.0, RadioAlarmConfig.clampSpeechRate(Double.NaN), 0.0001);
+        assertEquals(0.5, RadioAlarmConfig.clampSpeechRate(0.1), 0.0001);
+        assertEquals(2.0, RadioAlarmConfig.clampSpeechRate(9), 0.0001);
+        assertEquals(1.3, RadioAlarmConfig.clampSpeechRate(1.26), 0.0001);
+
+        String json = j("{'schemaVersion':2,'ttsVoice':'cmn-tw-x-ctc-local','ttsSpeechRate':1.4}");
+        RadioAlarmConfig config = RadioAlarmConfig.fromJson(json, ROOT);
+        assertEquals("cmn-tw-x-ctc-local", config.ttsVoice);
+        assertEquals(1.4, config.ttsSpeechRate, 0.0001);
+        RadioAlarmConfig back = RadioAlarmConfig.fromJson(config.toJson(), ROOT);
+        assertEquals("cmn-tw-x-ctc-local", back.ttsVoice);
+        assertEquals(1.4, back.ttsSpeechRate, 0.0001);
+
+        RadioAlarmConfig missing = RadioAlarmConfig.fromJson(j("{'schemaVersion':2}"), ROOT);
+        assertEquals("缺欄位：預設聲音、語速 1.0", "", missing.ttsVoice);
+        assertEquals(1.0, missing.ttsSpeechRate, 0.0001);
+    }
+
+    @Test
     public void stockPauseIsClampedAndRoundTripped() {
         assertEquals(1.0, RadioAlarmConfig.clampPauseSeconds(Double.NaN), 0.0001);
         assertEquals("不允許 0：兩句會黏在一起", 1.0, RadioAlarmConfig.clampPauseSeconds(0), 0.0001);

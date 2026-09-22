@@ -197,16 +197,38 @@ public final class RadioAlarmConfig {
      * WebView 沒在跑，原生端要自己拿得到。空字串代表未設定。
      */
     public final String fugleApiKey;
+    /**
+     * 文字轉語音的聲音（Voice.getName()）；空字串代表用引擎對中文的預設聲音。
+     * 全域設定：聲音是「這支手機上有哪些」的事，不隨頻道而異。
+     */
+    public final String ttsVoice;
+    /** 文字轉語音的語速倍率（0.5–2.0，一位小數，預設 1.0）。全域。 */
+    public final double ttsSpeechRate;
 
     public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent) {
-        this(alarms, channels, volumePercent, "");
+        this(alarms, channels, volumePercent, "", "", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE);
     }
 
     public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent, String fugleApiKey) {
+        this(alarms, channels, volumePercent, fugleApiKey, "", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE);
+    }
+
+    public RadioAlarmConfig(List<Alarm> alarms, List<Channel> channels, int volumePercent, String fugleApiKey,
+                            String ttsVoice, double ttsSpeechRate) {
         this.alarms = Collections.unmodifiableList(new ArrayList<Alarm>(alarms));
         this.channels = Collections.unmodifiableList(ensureBuiltIns(channels));
         this.volumePercent = clampVolume(volumePercent);
         this.fugleApiKey = fugleApiKey == null ? "" : fugleApiKey.trim();
+        this.ttsVoice = ttsVoice == null ? "" : ttsVoice.trim();
+        this.ttsSpeechRate = clampSpeechRate(ttsSpeechRate);
+    }
+
+    /** 語速夾在 0.5–2.0、一位小數；NaN 回預設。 */
+    public static double clampSpeechRate(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) return RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE;
+        double clamped = Math.max(RadioAlarmConstants.MIN_TTS_SPEECH_RATE,
+                Math.min(RadioAlarmConstants.MAX_TTS_SPEECH_RATE, value));
+        return Math.round(clamped * 10) / 10.0;
     }
 
     /** 全新安裝的預設值：**沒有任何鬧鐘**、兩個內建頻道、音量 100%。 */
@@ -403,6 +425,8 @@ public final class RadioAlarmConfig {
 
         int volume = clampVolume(root.optInt("volumePercent", RadioAlarmConstants.DEFAULT_VOLUME_PERCENT));
         String fugleApiKey = root.optString("fugleApiKey", "").trim();
+        String ttsVoice = root.optString("ttsVoice", "").trim();
+        double ttsSpeechRate = root.optDouble("ttsSpeechRate", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE);
 
         List<Channel> channels = parseChannels(root.optJSONArray("channels"), localFileRoot);
         RadioAlarmConfig scaffold = new RadioAlarmConfig(new ArrayList<Alarm>(), channels, volume);
@@ -433,7 +457,7 @@ public final class RadioAlarmConfig {
             }
         }
 
-        return new RadioAlarmConfig(alarms, channels, volume, fugleApiKey);
+        return new RadioAlarmConfig(alarms, channels, volume, fugleApiKey, ttsVoice, ttsSpeechRate);
     }
 
     /**
@@ -492,6 +516,8 @@ public final class RadioAlarmConfig {
             root.put("schemaVersion", SCHEMA_VERSION);
             root.put("volumePercent", volumePercent);
             root.put("fugleApiKey", fugleApiKey);
+            root.put("ttsVoice", ttsVoice);
+            root.put("ttsSpeechRate", ttsSpeechRate);
 
             JSONArray channelArr = new JSONArray();
             for (Channel c : channels) {

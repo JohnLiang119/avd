@@ -329,7 +329,8 @@ public class RadioPlaybackService extends Service {
         stockFailureMessage = failure;
         Log.d(TAG, "stock report: " + sentences);
 
-        RadioTts.synthesizeAll(this, sentences, ttsDir, new RadioTts.Callback() {
+        RadioAlarmConfig cfg = store.getConfig();
+        RadioTts.synthesizeAll(this, sentences, ttsDir, cfg.ttsVoice, cfg.ttsSpeechRate, new RadioTts.Callback() {
             @Override
             public void onDone(final List<File> files) {
                 handler.post(new Runnable() {
