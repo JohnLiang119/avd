@@ -2037,6 +2037,29 @@ public class YoutubeDlPlugin extends Plugin {
         }, "radio-alarm-search").start();
     }
 
+    /** 以指定聲音與語速試聽一句範例（媒體音量）。voice 為空即引擎預設。 */
+    @PluginMethod
+    public void previewTtsVoice(final PluginCall call) {
+        String voice = call.getString("voice", "");
+        double rate = call.getDouble("rate", RadioAlarmConstants.DEFAULT_TTS_SPEECH_RATE);
+        RadioTts.preview(getContext(), voice == null ? "" : voice, rate, new RadioTts.PreviewCallback() {
+            @Override
+            public void onResult(String error) {
+                if (error == null) {
+                    call.resolve();
+                } else {
+                    call.reject(error);
+                }
+            }
+        });
+    }
+
+    @PluginMethod
+    public void stopTtsPreview(PluginCall call) {
+        RadioTts.stopPreview();
+        call.resolve();
+    }
+
     /** 列出裝置文字轉語音引擎裡的中文聲音，供股票頻道選擇。 */
     @PluginMethod
     public void listTtsVoices(final PluginCall call) {

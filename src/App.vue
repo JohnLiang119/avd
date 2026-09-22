@@ -1557,17 +1557,42 @@
       @confirm="onBatchModalConfirm"
       @cancel="onBatchModalCancel"
     />
-    <!-- 選擇文字轉語音的聲音（引擎裡的中文聲音；第一項為引擎預設） -->
-    <van-action-sheet
+    <!--
+      選擇文字轉語音的聲音：每一列可直接試聽（▸ 念一句範例，媒體音量），點列名選定。
+      第一項為引擎預設。用對話框而非 action sheet，因為每列要有自己的試聽鍵。
+    -->
+    <van-dialog
       v-model:show="showRadioVoicePicker"
-      :actions="radioVoiceActions"
-      cancel-text="取消"
       title="選擇聲音"
-      :description="radioVoiceError || '選好後按頻道的播放鍵可立刻試聽'"
-      close-on-click-action
-      @select="onRadioVoicePick"
-      style="max-width: 400px; margin: 0 auto; left: 0; right: 0;"
-    />
+      confirm-button-text="關閉"
+      :close-on-click-overlay="true"
+      style="max-width: 360px; width: 88%;"
+      @closed="onRadioVoicePickerClosed"
+    >
+      <div style="padding: 8px 12px 4px;">
+        <div v-if="radioVoiceError" style="font-size: 12px; color: #64748b; padding: 4px 4px 8px;">{{ radioVoiceError }}</div>
+        <div class="radio-voice-list">
+          <div
+            v-for="option in radioVoiceActions"
+            :key="option.voice"
+            class="radio-voice-row"
+            :class="{ 'radio-voice-row--on': option.voice === radioAlarm.ttsVoice }"
+            @click="onRadioVoicePick(option)"
+          >
+            <span style="flex: 1; min-width: 0; font-size: 14px; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {{ option.voice === radioAlarm.ttsVoice ? '● ' : '' }}{{ option.name }}
+            </span>
+            <van-button
+              size="mini"
+              :title="radioPreviewingVoice === option.voice ? '停止試聽' : '試聽'"
+              :style="GLYPH_BUTTON_STYLE"
+              @click.stop="onRadioVoicePreview(option.voice)"
+            >{{ radioPreviewingVoice === option.voice ? ACTION_GLYPH.stop : ACTION_GLYPH.play }}</van-button>
+          </div>
+        </div>
+        <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 4px;">按 ▸ 用目前語速念一句範例；點名稱選定。</p>
+      </div>
+    </van-dialog>
 
     <!-- 以名稱搜尋股票命中多筆時挑一筆 -->
     <van-action-sheet
@@ -3877,6 +3902,37 @@ const onRadioVoicePick = (action: { voice: string }) => {
   void persistRadioAlarm({ ...radioAlarm.value, ttsVoice: action.voice });
 };
 
+/** 正在試聽的聲音名稱；空字串代表試聽「系統預設」，null 代表沒在試聽 */
+const radioPreviewingVoice = ref<string | null>(null);
+let radioPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 按一次念一句範例；再按同一個就停。試聽走媒體音量，靜音時不會出聲。 */
+const onRadioVoicePreview = async (voice: string) => {
+  if (radioPreviewTimer !== null) { clearTimeout(radioPreviewTimer); radioPreviewTimer = null; }
+  if (radioPreviewingVoice.value === voice) {
+    radioPreviewingVoice.value = null;
+    await RadioAlarmService.stopTtsPreview().catch(() => {});
+    return;
+  }
+  radioPreviewingVoice.value = voice;
+  try {
+    await RadioAlarmService.previewTtsVoice(voice, radioAlarm.value.ttsSpeechRate);
+    // 引擎不回報念完；一句範例約 6 秒，按語速換算後把按鈕還原
+    radioPreviewTimer = setTimeout(() => { radioPreviewingVoice.value = null; }, Math.round(6000 / radioAlarm.value.ttsSpeechRate) + 1000);
+  } catch (e) {
+    radioPreviewingVoice.value = null;
+    showToast(String((e as { message?: string })?.message ?? e));
+  }
+};
+
+const onRadioVoicePickerClosed = () => {
+  if (radioPreviewTimer !== null) { clearTimeout(radioPreviewTimer); radioPreviewTimer = null; }
+  if (radioPreviewingVoice.value !== null) {
+    radioPreviewingVoice.value = null;
+    void RadioAlarmService.stopTtsPreview().catch(() => {});
+  }
+};
+
 const onTtsSpeechRateChange = (value: number | string) => {
   const rate = clampSpeechRate(Number(value));
   if (rate === radioAlarm.value.ttsSpeechRate) return;
@@ -5661,6 +5717,24 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   align-items: center;
   gap: 8px;
   padding: 6px 0;
+}
+.radio-voice-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.radio-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+}
+.radio-voice-row:last-of-type {
+  border-bottom: none;
+}
+.radio-voice-row--on {
+  background: #f8fafc;
 }
 .radio-channel-files {
   margin: 0;

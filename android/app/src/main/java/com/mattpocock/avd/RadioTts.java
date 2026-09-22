@@ -1,6 +1,7 @@
 package com.mattpocock.avd;
 
 import android.content.Context;
+import android.media.AudioAttributes;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -246,6 +247,70 @@ public final class RadioTts {
         } catch (Exception e) {
             shutdown(holder[0]);
             callback.onResult(new ArrayList<VoiceInfo>(), "建立文字轉語音引擎失敗：" + e.getMessage());
+        }
+    }
+
+    // ---- 試聽 ----
+    //
+    // 試聽是「選聲音時馬上聽一句」，不是鬧鐘播放，所以直接 speak() 走媒體音量即可，
+    // 不進 ExoPlayer 的單一播放路徑（那條紅線管的是鬧鐘會不會響，試聽與它無關）。
+
+    /** 目前正在試聽的引擎；再按一次或按停止就把它關掉，不讓兩句疊在一起。 */
+    private static TextToSpeech previewTts;
+
+    public static final String PREVIEW_TEXT = "南亞 236.5 跌0.5。台化 89 漲1。";
+
+    public interface PreviewCallback {
+        void onResult(String error);
+    }
+
+    /** 以指定聲音與語速念一段範例。同一時間只有一個試聽；先停掉上一個。 */
+    public static synchronized void preview(Context context, final String voiceName, final double speechRate,
+                                            final PreviewCallback callback) {
+        stopPreview();
+        final TextToSpeech[] holder = new TextToSpeech[1];
+        try {
+            holder[0] = new TextToSpeech(context.getApplicationContext(), new TextToSpeech.OnInitListener() {
+                @Override
+                public void onInit(int status) {
+                    TextToSpeech tts = holder[0];
+                    if (status != TextToSpeech.SUCCESS || tts == null) {
+                        shutdown(tts);
+                        callback.onResult("裝置沒有可用的文字轉語音引擎");
+                        return;
+                    }
+                    int lang = tts.setLanguage(Locale.TAIWAN);
+                    if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        lang = tts.setLanguage(Locale.CHINESE);
+                    }
+                    if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        shutdown(tts);
+                        callback.onResult("裝置沒有中文語音");
+                        return;
+                    }
+                    tts.setSpeechRate((float) RadioAlarmConfig.clampSpeechRate(speechRate));
+                    applyVoice(tts, voiceName);
+                    tts.setAudioAttributes(new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build());
+                    synchronized (RadioTts.class) {
+                        previewTts = tts;
+                    }
+                    int r = tts.speak(PREVIEW_TEXT, TextToSpeech.QUEUE_FLUSH, null, "avd-preview");
+                    callback.onResult(r == TextToSpeech.SUCCESS ? null : "引擎拒絕朗讀（回傳 " + r + "）");
+                }
+            });
+        } catch (Exception e) {
+            shutdown(holder[0]);
+            callback.onResult("建立文字轉語音引擎失敗：" + e.getMessage());
+        }
+    }
+
+    public static synchronized void stopPreview() {
+        if (previewTts != null) {
+            shutdown(previewTts);
+            previewTts = null;
         }
     }
 

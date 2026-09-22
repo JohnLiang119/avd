@@ -617,6 +617,15 @@ export const RadioAlarmService = {
     await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
   },
 
+  /** 以指定聲音與語速念一句範例（媒體音量）；失敗會拋出含原因的錯誤。 */
+  async previewTtsVoice(voice: string, rate: number): Promise<void> {
+    await YoutubeDlPlugin.previewTtsVoice({ voice, rate: clampSpeechRate(rate) });
+  },
+
+  async stopTtsPreview(): Promise<void> {
+    await YoutubeDlPlugin.stopTtsPreview();
+  },
+
   /** 列出裝置文字轉語音引擎裡的中文聲音。沒有引擎時 voices 為空且 error 有原因。 */
   async listTtsVoices(): Promise<{ voices: TtsVoice[]; error: string }> {
     const r = await YoutubeDlPlugin.listTtsVoices();
