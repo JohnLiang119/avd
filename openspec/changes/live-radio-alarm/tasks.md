@@ -651,3 +651,5 @@ design.md 新增 D14、改寫 D4／D9。
   停頓分兩個（股票間、下一輪）：功能 commit `b4b2e4a`；版本 1.0.115 → 1.0.116（versionCode 153），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 
   價格後加漲跌金額：功能 commit `a27af97`；版本 1.0.116 → 1.0.117（versionCode 154），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+  聲音與語速可選：功能 commit `b5d4ceb`；版本 1.0.117 → 1.0.118（versionCode 155），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
