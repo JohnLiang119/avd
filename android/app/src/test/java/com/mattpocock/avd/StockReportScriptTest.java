@@ -123,8 +123,11 @@ public class StockReportScriptTest {
         quotes.add(FugleQuoteClient.parseQuote("1326", "", ok(j(
                 "{'name':'台化','previousClose':90,'closePrice':89,'change':-1,'changePercent':-1.11,'date':'2026-09-19','isClose':true}"))));
 
-        assertEquals(Arrays.asList("南亞 213。", "台化 89。"), StockReportScript.buildSentences(quotes));
-        assertEquals("南亞 213。台化 89。", StockReportScript.build(quotes));
+        assertEquals(Arrays.asList("南亞 213 漲3。", "台化 89 跌1。"), StockReportScript.buildSentences(quotes));
+        assertEquals("南亞 213 漲3。台化 89 跌1。", StockReportScript.build(quotes));
+        assertEquals("平盤", StockReportScript.describeChange(0));
+        assertEquals("跌0.5", StockReportScript.describeChange(-0.5));
+        assertEquals("漲12.5", StockReportScript.describeChange(12.5));
         assertFalse(StockReportScript.allFailed(quotes));
     }
 
@@ -134,7 +137,7 @@ public class StockReportScriptTest {
         quotes.add(FugleQuoteClient.parseQuote("2330", "", ok(TSMC_JSON)));
         quotes.add(FugleQuoteClient.parseQuote("9999", "", new FugleQuoteClient.Response(404, "{}")));
 
-        assertEquals(Arrays.asList("台積電 1000。", "9999 無法取得。"), StockReportScript.buildSentences(quotes));
+        assertEquals(Arrays.asList("台積電 1000 漲10。", "9999 無法取得。"), StockReportScript.buildSentences(quotes));
         assertFalse("有一支成功就不算全部失敗", StockReportScript.allFailed(quotes));
     }
 

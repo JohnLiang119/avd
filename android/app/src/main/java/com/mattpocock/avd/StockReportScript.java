@@ -9,7 +9,7 @@ import java.util.List;
  * 把多支股票的報價組成**要念出來**的句子。
  *
  * 純函式、不匯入 Android API，JUnit 釘住。**極簡**（使用者實機聽過第一版後要求）：
- * 每支只念「名稱 價格」，不念頻道名、日期、漲跌與漲跌幅 —— 那些在第一版裡讓一輪
+ * 每支只念「名稱 價格 漲跌金額」（如「南亞 236.5 跌0.5」），不念頻道名、日期與漲跌幅 —— 那些在第一版裡讓一輪
  * 變得又長又多停頓；要看細節打開 App 就好，鬧鐘要的是一聽就知道的兩個字加一個數字。
  *
  * 回傳的是**一句一個元素的清單**，不是一段文字：句與句之間的停頓由播放端插入
@@ -25,7 +25,7 @@ public final class StockReportScript {
     public static final String EMPTY_CHANNEL_TEXT = "尚未加入任何股票。";
 
     /**
-     * 組稿：依清單順序，每支一句「名稱 價格。」；取不到的那支念「名稱 無法取得。」，
+     * 組稿：依清單順序，每支一句「名稱 價格 漲N／跌N／平盤。」；取不到的那支念「名稱 無法取得。」，
      * 位置不變（聽的人才知道少的是哪一支）。全部失敗時念「無法取得股價。」再逐一念原因。
      *
      * @param quotes 逐支查詢結果（含失敗的）
@@ -57,9 +57,15 @@ public final class StockReportScript {
         }
 
         for (FugleQuoteClient.StockQuote q : quotes) {
-            sentences.add(q.name + " " + (q.ok ? formatNumber(q.price) : "無法取得") + "。");
+            sentences.add(q.name + " " + (q.ok ? formatNumber(q.price) + " " + describeChange(q.change) : "無法取得") + "。");
         }
         return sentences;
+    }
+
+    /** 漲跌的念法：「漲0.5」「跌0.5」「平盤」（使用者要求價格後面接漲跌金額）。 */
+    public static String describeChange(double change) {
+        if (Double.isNaN(change) || Math.abs(change) < 0.0001) return "平盤";
+        return (change > 0 ? "漲" : "跌") + formatNumber(Math.abs(change));
     }
 
     /** 整段文字（供紀錄與測試閱讀）；播放端請用 {@link #buildSentences}。 */
