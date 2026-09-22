@@ -653,3 +653,5 @@ design.md 新增 D14、改寫 D4／D9。
   價格後加漲跌金額：功能 commit `a27af97`；版本 1.0.116 → 1.0.117（versionCode 154），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 
   聲音與語速可選：功能 commit `b5d4ceb`；版本 1.0.117 → 1.0.118（versionCode 155），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+  聲音可試聽：功能 commit `73edee4`；版本 1.0.118 → 1.0.119（versionCode 156），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
