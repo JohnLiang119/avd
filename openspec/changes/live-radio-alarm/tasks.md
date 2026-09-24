@@ -655,3 +655,12 @@ design.md 新增 D14、改寫 D4／D9。
   聲音與語速可選：功能 commit `b5d4ceb`；版本 1.0.117 → 1.0.118（versionCode 155），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 
   聲音可試聽：功能 commit `73edee4`；版本 1.0.118 → 1.0.119（versionCode 156），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+## 16. 鬧鐘改走媒體音量（使用者要求；design.md D17）
+
+- [x] 16.1 `RadioPlaybackService`：三種模式一律 `C.USAGE_MEDIA`、音訊焦點 `STREAM_MUSIC`；類別與常數註解同步
+- [x] 16.2 `MainActivity`：播放期間音量鍵改為 `STREAM_MUSIC`（原為鬧鐘／試播時 `STREAM_ALARM`）
+- [x] 16.3 前端：狀態字括號改為「媒體音量」、設定頁說明改為「鬧鐘與直播皆走媒體音量（靜音、勿擾時不會響）。」；vitest 期望值同步
+- [x] 16.4 規格、proposal、design 同步（鬧鐘語意 → 媒體語意）
+- [ ] 16.5 實機驗證：鬧鐘觸發時音量面板顯示媒體音量、調整媒體音量即改變播放音量；鬧鐘音量設為 0 仍會響；靜音／勿擾下不出聲
+- [ ] 16.6 建置驗證通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`

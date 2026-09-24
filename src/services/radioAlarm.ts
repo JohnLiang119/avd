@@ -367,8 +367,7 @@ export function newAlarm(channels: readonly RadioChannel[]): RadioAlarm {
 /**
  * 播放中的狀態字；沒在播放時回傳空字串。
  *
- * 手動直播與鬧鐘要分得出來，因為**兩者的音量來源不同** —— 使用者若看到「直播中」
- * 卻去調鬧鐘音量，會發現怎麼調都沒反應。
+ * 手動直播與鬧鐘要分得出來（前者不受總開關約束）；音量來源兩者相同，皆為媒體音量。
  */
 export function describePlaybackState(
   status: RadioAlarmStatus | null,
@@ -377,7 +376,7 @@ export function describePlaybackState(
   if (!status || !status.playing) return '';
   const name = channelName(channels, status.playingChannelId);
   return status.alarmAudioActive
-    ? `播放中：${name}（鬧鐘音量）`
+    ? `播放中：${name}（媒體音量）`
     : `直播中：${name}（媒體音量）`;
 }
 

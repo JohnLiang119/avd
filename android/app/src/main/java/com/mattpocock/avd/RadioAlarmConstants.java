@@ -111,7 +111,7 @@ public final class RadioAlarmConstants {
     /**
      * 應用程式內音量比例的預設值與允許範圍（%）。
      *
-     * 這是**在系統鬧鐘音量之下**的縮放，預設 100% 即「完全照系統鬧鐘音量」——
+     * 這是**在系統媒體音量之下**的縮放，預設 100% 即「完全照系統媒體音量」——
      * 不加這個設定時的行為，故升級的使用者聽到的音量不會改變。
      */
     public static final int DEFAULT_VOLUME_PERCENT = 100;

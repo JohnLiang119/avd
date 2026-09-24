@@ -796,7 +796,7 @@
                 @change="onRadioVolumeChange"
               />
               <p style="font-size: 11px; color: #94a3b8; margin: 8px 0 0;">
-                鬧鐘走鬧鐘音量（靜音、勿擾仍會響），直播走媒體音量。
+                鬧鐘與直播皆走媒體音量（靜音、勿擾時不會響）。
               </p>
             </div>
           </van-cell-group>

@@ -46,14 +46,13 @@ import java.util.Locale;
  *
  * <pre>
  *   模式    音訊語意        失敗的處理
- *   alarm   鬧鐘音量        發通知 + 留給錯誤紀錄
- *   test    鬧鐘音量        只留紀錄（使用者正看著畫面）
+ *   alarm   媒體音量        發通知 + 留給錯誤紀錄
+ *   test    媒體音量        只留紀錄（使用者正看著畫面）
  *   live    媒體音量        只留紀錄
  * </pre>
  *
- * 鬧鐘與試播採 USAGE_ALARM：走系統鬧鐘音量，勿擾或靜音時仍會出聲（見 design.md D3）。
- * 手動直播採 USAGE_MEDIA —— 鬧鐘能蓋過靜音是因為使用者要求被叫醒，手動按播放
- * 並沒有這個要求（見 design.md D12）。
+ * 三種模式一律採 USAGE_MEDIA：走系統媒體音量（使用者要求，見 design.md D17）。
+ * 代價是靜音或勿擾模式下鬧鐘不會出聲 —— 這是使用者接受的取捨。
  *
  * 來源有直播與本地檔案兩種（design.md D15），差別是**參數**而非分岔：檔案頻道以多個
  * MediaItem 加 REPEAT_MODE_ALL 循環到時長結束、停用影像軌只解音訊、播放器出錯即失敗
@@ -80,18 +79,16 @@ public class RadioPlaybackService extends Service {
     /** 本次播放屬於哪一種：{@link #MODE_ALARM}、{@link #MODE_TEST} 或 {@link #MODE_LIVE}。 */
     public static final String EXTRA_MODE = "mode";
 
-    /** 鬧鐘觸發。走鬧鐘音量，失敗要發通知並留給錯誤紀錄。 */
+    /** 鬧鐘觸發。走媒體音量，失敗要發通知並留給錯誤紀錄。 */
     public static final String MODE_ALARM = "alarm";
     /**
-     * 試播。**刻意與鬧鐘完全相同的音訊語意** —— 它的用途就是驗證早上會不會響，
-     * 換成媒體音量就驗不到真正要驗的東西。差別只有長度與「不發失敗通知」
-     * （使用者正看著畫面）。
+     * 試播。**刻意與鬧鐘完全相同的音訊語意** —— 它的用途就是驗證早上會不會響。
+     * 差別只有長度與「不發失敗通知」（使用者正看著畫面）。
      */
     public static final String MODE_TEST = "test";
     /**
-     * 手動直播（「我現在就想聽」）。走**媒體音量**：鬧鐘之所以能蓋過靜音與勿擾，
-     * 是因為使用者要求被叫醒；手動按下播放並沒有這個要求，在會議中蓋過靜音
-     * 放出聲音是錯的。
+     * 手動直播（「我現在就想聽」）。與鬧鐘同樣走媒體音量，差別只在不受總開關約束、
+     * 失敗不發通知。
      */
     public static final String MODE_LIVE = "live";
 
@@ -110,8 +107,8 @@ public class RadioPlaybackService extends Service {
     }
 
     /**
-     * 目前播放中的是否為鬧鐘語意（鬧鐘或試播）。
-     * {@link MainActivity} 據此決定音量鍵要調哪一條串流。
+     * 目前播放中的是否為鬧鐘或試播（而非手動直播）。
+     * 介面據此把狀態字寫成「播放中」或「直播中」；音量來源兩者相同，皆為媒體音量。
      */
     public static boolean isAlarmAudioActive() {
         return playing && !MODE_LIVE.equals(activeMode);
@@ -241,7 +238,7 @@ public class RadioPlaybackService extends Service {
 
     private void beginPlayback() {
         playing = true;
-        // 讓開著的畫面把音量鍵切到鬧鐘音量上（見 design.md D11）
+        // 讓開著的畫面把音量鍵固定在媒體音量上（見 design.md D11、D17）
         MainActivity.notifyPlaybackStateChanged();
 
         long deadline = scheduledAt + RadioAlarmConstants.FAILURE_WINDOW_MS;
@@ -380,7 +377,7 @@ public class RadioPlaybackService extends Service {
             player = new ExoPlayer.Builder(this).build();
             player.setAudioAttributes(
                     new AudioAttributes.Builder()
-                            .setUsage(MODE_LIVE.equals(mode) ? C.USAGE_MEDIA : C.USAGE_ALARM)
+                            .setUsage(C.USAGE_MEDIA)
                             .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                             .build(),
                     false);
@@ -451,8 +448,8 @@ public class RadioPlaybackService extends Service {
     /**
      * 套用設定中的音量比例。
      *
-     * 這是**在系統鬧鐘音量之下**的縮放（`Player.setVolume`），不動裝置的鬧鐘音量設定 ——
-     * 改後者會連使用者真正的鬧鐘一起改掉（見 design.md D11）。
+     * 這是**在系統媒體音量之下**的縮放（`Player.setVolume`），不動裝置的音量設定 ——
+     * 改後者會連使用者其他 App 的音量一起改掉（見 design.md D11）。
      */
     private void applyVolume() {
         if (player == null) return;
@@ -503,7 +500,7 @@ public class RadioPlaybackService extends Service {
 
     private void stopEverything() {
         playing = false;
-        // 還原音量鍵原本的行為，否則 App 平常的音量鍵會一直停在鬧鐘音量上
+        // 還原音量鍵原本的行為
         MainActivity.notifyPlaybackStateChanged();
         handler.removeCallbacks(stopAtEnd);
         handler.removeCallbacks(giveUp);
@@ -552,7 +549,7 @@ public class RadioPlaybackService extends Service {
         };
         try {
             audioManager.requestAudioFocus(focusListener,
-                    MODE_LIVE.equals(mode) ? AudioManager.STREAM_MUSIC : AudioManager.STREAM_ALARM,
+                    AudioManager.STREAM_MUSIC,
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
         } catch (Exception e) {
             Log.e(TAG, "failed to request audio focus", e);

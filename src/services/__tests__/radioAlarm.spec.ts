@@ -189,11 +189,11 @@ describe('播放中的狀態字', () => {
     expect(describePlaybackState(status(), CHANNELS)).toBe('');
   });
 
-  it('分得出直播與鬧鐘，並帶出頻道 —— 兩者的音量來源不同', () => {
+  it('分得出直播與鬧鐘，並帶出頻道 —— 兩者皆為媒體音量', () => {
     expect(describePlaybackState(status({ playing: true, alarmAudioActive: false, playingChannelId: 'bcc-pop' }), CHANNELS))
       .toBe('直播中：中廣流行網（媒體音量）');
     expect(describePlaybackState(status({ playing: true, alarmAudioActive: true, playingChannelId: 'bcc-news' }), CHANNELS))
-      .toBe('播放中：中廣新聞網（鬧鐘音量）');
+      .toBe('播放中：中廣新聞網（媒體音量）');
   });
 });
 
@@ -374,7 +374,7 @@ describe('本地檔案頻道', () => {
     expect(defaultChannelId(all)).toBe('bcc-news');
     expect(describeAlarmSummary(alarm({ channelId: 'f1', weekdays: 0b0111110 }), all)).toBe('平日 · 歌單');
     expect(describePlaybackState(status({ playing: true, alarmAudioActive: true, playingChannelId: 'f1' }), all))
-      .toBe('播放中：歌單（鬧鐘音量）');
+      .toBe('播放中：歌單（媒體音量）');
   });
 });
 

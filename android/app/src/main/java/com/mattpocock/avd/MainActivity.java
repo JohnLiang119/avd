@@ -55,15 +55,13 @@ public class MainActivity extends BridgeActivity {
     /**
      * 決定音量鍵調整的是哪一條串流。
      *
-     * 早報鬧鐘播放中時切到鬧鐘音量：使用者被吵醒後打開 App 想調小聲，按的音量鍵
-     * 若還停在預設的媒體音量上，怎麼按都不會變 —— 而此時他正想關掉聲音。
+     * 早報鬧鐘播放中時固定為媒體音量：鬧鐘、試播、直播一律走媒體音量（design.md D17），
+     * 播放期間明確指定，避免音量鍵在播放剛開始時落到鈴聲音量上。
      * 播放結束即還原，否則 App 平常的音量鍵行為會一直被改著。
      */
     private void applyVolumeControlStream() {
-        // 只有鬧鐘語意的播放（鬧鐘、試播）才把音量鍵切到鬧鐘音量。
-        // 手動直播走的是媒體音量，那正是音量鍵的預設對象，不需要也不該改。
-        setVolumeControlStream(RadioPlaybackService.isAlarmAudioActive()
-                ? AudioManager.STREAM_ALARM
+        setVolumeControlStream(RadioPlaybackService.isPlaying()
+                ? AudioManager.STREAM_MUSIC
                 : AudioManager.USE_DEFAULT_STREAM_TYPE);
     }
 
