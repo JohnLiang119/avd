@@ -21,6 +21,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(YoutubeDlPlugin.class);
+        registerPlugin(NfcPlugin.class);
         super.onCreate(savedInstanceState);
         handleIntent(getIntent());
     }

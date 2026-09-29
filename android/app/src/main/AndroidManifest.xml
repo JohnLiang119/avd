@@ -87,6 +87,11 @@
 
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!--
+        NFC 讀卡機（design.md D7）。同一份 APK 也裝在沒有 NFC 的 Android TV，
+        必須明示非必要，否則安裝器會依 NFC 權限推斷需要硬體而拒裝。
+    -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -107,4 +112,8 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- NFC 讀卡機：兩者皆為普通權限，安裝即授予，無執行期請求（design.md D7）。 -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

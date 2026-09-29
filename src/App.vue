@@ -860,6 +860,19 @@
           </div>
         </template>
 
+        <!--
+          NFC 讀卡機：僅 Android 提供（design.md D4）。讀卡只在彈窗開著時進行，
+          進入點的 label 寫明要先開啟；「請將卡片靠近」只在彈窗內、且只在能讀卡時顯示。
+        -->
+        <template v-if="!isTauri()">
+          <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+            NFC 讀卡機
+          </p>
+          <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
+            <van-cell title="NFC 讀卡機" label="開啟後將門禁卡靠近手機背面，顯示卡號" is-link @click="showNfcReader = true" />
+          </van-cell-group>
+        </template>
+
         <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
           診斷
         </p>
@@ -1057,6 +1070,55 @@
         @confirm="onRadioTimeConfirm"
         @cancel="showRadioTimePicker = false"
       />
+    </van-popup>
+
+    <!--
+      NFC 讀卡機（design.md D4）：三種狀態互斥 —— 不支援／已關閉／可讀卡，
+      無法讀卡時不出現「請將卡片靠近」。Reader Mode 由 watch(showNfcReader) 開關。
+    -->
+    <van-popup v-model:show="showNfcReader" position="bottom" round closeable :style="{ maxHeight: '85vh' }">
+      <div style="padding: 20px 16px 24px;">
+        <div style="font-size: 16px; font-weight: bold; color: #0f172a; margin-bottom: 12px;">NFC 讀卡機</div>
+
+        <div v-if="!nfcStatus.supported" style="font-size: 14px; color: #64748b; padding: 12px 0;">
+          此裝置不支援 NFC
+        </div>
+        <div v-else-if="!nfcStatus.enabled" style="padding: 4px 0;">
+          <div style="font-size: 14px; color: #64748b; margin-bottom: 10px;">NFC 已關閉，請先在系統設定開啟。</div>
+          <van-button size="small" type="primary" @click="openNfcSettings">前往設定</van-button>
+        </div>
+        <div v-else style="font-size: 14px; color: #64748b; padding: 4px 0;">
+          請將卡片靠近手機背面
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">僅支援 13.56 MHz 卡片（Mifare、DESFire 等）；125 kHz 低頻卡讀不到</div>
+        </div>
+
+        <div v-if="nfcCurrentUid" style="margin-top: 16px; padding: 14px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">卡號（UID，Hex 正序）</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 28px; font-weight: bold; letter-spacing: 2px; color: #0f172a; word-break: break-all;">
+              {{ nfcCurrentUid }}
+            </div>
+            <van-button size="small" type="primary" plain @click="copyNfcUid">複製</van-button>
+          </div>
+          <div v-if="nfcLengthHint" style="font-size: 11px; color: #64748b; margin-top: 8px; line-height: 1.5;">{{ nfcLengthHint }}</div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 18px;">
+          <span style="font-size: 13px; color: #64748b; font-weight: bold;">歷史（最近 {{ NFC_HISTORY_MAX }} 筆）</span>
+          <van-button v-if="nfcHistory.length" size="mini" plain type="danger" @click="clearNfcHistory">清除歷史</van-button>
+        </div>
+        <div v-if="!nfcHistory.length" style="font-size: 12px; color: #94a3b8; margin-top: 8px;">尚無紀錄</div>
+        <div v-else style="margin-top: 8px; max-height: 36vh; overflow-y: auto;">
+          <div
+            v-for="entry in nfcHistory"
+            :key="entry.uid + '-' + entry.at"
+            style="display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px;"
+          >
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #0f172a;">{{ entry.uid }}</span>
+            <span style="color: #64748b; font-size: 12px;">{{ formatPublishTime(entry.at) }}</span>
+          </div>
+        </div>
+      </div>
     </van-popup>
 
     <van-dialog
@@ -1640,6 +1702,12 @@ import {
   SINGLE_SEQUENCE, PARSE_TIMEOUT_MS, PARSE_CANCELLED, PARSE_BATCH_SIZE, type ParseProgress
 } from './services/parseScope';
 import { buildTaskDisplayTitle } from './services/displayFormat';
+import {
+  NFC_HISTORY_MAX, appendNfcHistory, sanitizeNfcHistory, describeUidLength,
+  getNfcStatus, startNfcScan, stopNfcScan, openNfcSettings as openNfcSystemSettings, onNfcTag, onNfcState,
+  type NfcHistoryEntry, type NfcStatus,
+} from './services/nfcReader';
+import type { PluginListenerHandle } from '@capacitor/core';
 import {
   appendErrorEntry, formatErrorLog, sortedForDisplay, decideJournalTransition, type ErrorEntry,
 } from './composables/useErrorLog';
@@ -2240,6 +2308,11 @@ const monitorConfig = storage.defineSetting<ChannelMonitorConfig>('avd_monitor_c
 // 而非保證，日後若有人把設定納入備份或雲端同步就會順帶外洩，且不會有任何
 // 測試失敗來提醒。獨立鍵讓「不得匯出」成為結構性事實。
 const youtubeApiKey = storage.defineSetting('avd_youtube_api_key', '');
+
+/** NFC 讀卡機的歷史紀錄；還原時濾掉壞資料並截斷至 50 筆（design.md D6） */
+const nfcHistory = storage.defineSetting<NfcHistoryEntry[]>('avd_nfc_history', [], {
+  deserialize: (raw) => sanitizeNfcHistory(raw),
+});
 
 // 本輪 API 通道的狀態，供檢查結果回饋使用（每輪開始時重設）。
 // 名稱刻意是「耗盡」而非「降級」—— 已無備援可降級，配額耗盡即完全停擺。
@@ -3547,6 +3620,104 @@ const testModeEnabled = storage.defineSetting('avd_test_mode_enabled', false);
 
 const RADIO_WEEKDAY_LABEL = ['日', '一', '二', '三', '四', '五', '六'];
 /** 介面上的星期順序：週一起算、週日放最後，符合台灣的閱讀習慣 */
+// ---- NFC 讀卡機（design.md D3／D4／D6）----
+//
+// Reader Mode 的開關跟著彈窗走：開就啟用、關就停用；原生端在 App 回到前景時
+// 依「前端是否仍要求感應」自行復原，前端不必重送。
+
+const showNfcReader = ref(false);
+const nfcStatus = ref<NfcStatus>({ supported: false, enabled: false });
+/** 目前顯示的卡號；純瞬時狀態，清除歷史不影響它（規格「清除歷史」的 MAY） */
+const nfcCurrentUid = ref('');
+const nfcCurrentLength = ref(0);
+const nfcLengthHint = computed(() => describeUidLength(nfcCurrentLength.value));
+let nfcTagHandle: PluginListenerHandle | null = null;
+let nfcStateHandle: PluginListenerHandle | null = null;
+
+const removeNfcListeners = async () => {
+  const handles = [nfcTagHandle, nfcStateHandle];
+  nfcTagHandle = null;
+  nfcStateHandle = null;
+  for (const handle of handles) {
+    try {
+      await handle?.remove();
+    } catch (e) {
+      console.warn('[NFC] remove listener failed', e);
+    }
+  }
+};
+
+const beginNfcReading = async () => {
+  try {
+    nfcStatus.value = await getNfcStatus();
+    await removeNfcListeners();
+    nfcTagHandle = await onNfcTag((event) => {
+      if (!event.uidHex) return;
+      nfcCurrentUid.value = event.uidHex;
+      nfcCurrentLength.value = event.uidLength;
+      nfcHistory.value = appendNfcHistory(nfcHistory.value, event.uidHex, Date.now());
+    });
+    nfcStateHandle = await onNfcState((status) => {
+      nfcStatus.value = status;
+    });
+    // 有硬體就要求感應：NFC 目前關閉也照送，使用者去設定開啟後回來，原生端會在 resume 時啟用。
+    if (nfcStatus.value.supported) {
+      await startNfcScan();
+    }
+  } catch (e) {
+    console.error('[NFC] start failed', e);
+    showToast('無法啟動 NFC 讀卡');
+  }
+};
+
+const endNfcReading = async () => {
+  await removeNfcListeners();
+  try {
+    await stopNfcScan();
+  } catch (e) {
+    console.warn('[NFC] stop failed', e);
+  }
+};
+
+watch(showNfcReader, (open) => {
+  if (isTauri()) return;
+  if (open) {
+    beginNfcReading();
+  } else {
+    endNfcReading();
+  }
+});
+
+onUnmounted(() => {
+  if (showNfcReader.value && !isTauri()) {
+    endNfcReading();
+  }
+});
+
+const copyNfcUid = async () => {
+  if (!nfcCurrentUid.value) return;
+  try {
+    await navigator.clipboard.writeText(nfcCurrentUid.value);
+    showToast('已複製');
+  } catch (e) {
+    console.error('[NFC] copy failed', e);
+    showToast('複製失敗');
+  }
+};
+
+const openNfcSettings = async () => {
+  try {
+    await openNfcSystemSettings();
+  } catch (e) {
+    console.warn('[NFC] open settings failed', e);
+    showToast('此裝置沒有 NFC 設定頁');
+  }
+};
+
+const clearNfcHistory = () => {
+  nfcHistory.value = [];
+};
+
 const RADIO_WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 const radioAlarm = ref<RadioAlarmConfig>({ schemaVersion: 2, alarms: [], channels: [], volumePercent: 100, fugleApiKey: '', ttsVoice: '', ttsSpeechRate: 1 });
