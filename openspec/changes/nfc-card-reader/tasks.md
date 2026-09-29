@@ -41,6 +41,8 @@
 
 ## 5. 進版與提交
 
-- [ ] 5.1 功能 commit（繁體中文訊息，commit 訊息檔無 BOM）；完成方式：`git log -1` 訊息正確，diff 不含進版檔案
-- [ ] 5.2 依工作區規範同步七處版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`Cargo.lock` 以 `cargo update --workspace --offline`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`），並把 `avd_s/publish_all.ps1` 的 `$Message` 預設值改為描述本次改動且版號正確的文字；完成方式：`grep` 七處版號一致，`publish_all.ps1` 的版號與 `package.json` 相同
-- [ ] 5.3 進版 commit（獨立於 5.1）；完成方式：`git log -2` 為「功能」與「進版」兩筆，並告知使用者可手動執行 `all.ps1` 與發布腳本
+- [x] 5.1 功能 commit（繁體中文訊息，commit 訊息檔無 BOM）；完成方式：`git log -1` 訊息正確，diff 不含進版檔案
+- [x] 5.2 依工作區規範同步七處版號（`package.json`、`package-lock.json` 兩處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`Cargo.lock` 以 `cargo update --workspace --offline`、`android/app/build.gradle` 的 `versionName` 與 `versionCode`），並把 `avd_s/publish_all.ps1` 的 `$Message` 預設值改為描述本次改動且版號正確的文字；完成方式：`grep` 七處版號一致，`publish_all.ps1` 的版號與 `package.json` 相同
+- [x] 5.3 進版 commit（獨立於 5.1）；完成方式：`git log -2` 為「功能」與「進版」兩筆，並告知使用者可手動執行 `all.ps1` 與發布腳本
+
+  功能 commit 與進版 commit（v1.0.121、versionCode 158）各自獨立；`avd_s/publish_all.ps1` 的預設說明已同步並於工作區根倉庫另行提交。`all.ps1` 與發布腳本由使用者手動執行。
