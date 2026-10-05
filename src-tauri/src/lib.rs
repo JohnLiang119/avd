@@ -21,18 +21,42 @@ fn stop_win_local_server() {
     server::stop_server();
 }
 
+/// 下載 Windows 更新檔（MSI）。
+///
+/// 必須是 async：Tauri 2 的同步 command 會在主執行緒執行，63MB 的下載會把
+/// 整個視窗卡成「沒有回應」，進度事件也送不進 WebView（畫面停在 1%）。
+/// 這裡只把阻塞式的 ureq 下載丟到 blocking thread pool，主執行緒保持回應。
 #[tauri::command]
-fn download_win_update_file(
+async fn download_win_update_file(
+    app: tauri::AppHandle,
+    url: String,
+    file_path: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        download_win_update_file_blocking(app, url, file_path)
+    })
+    .await
+    .map_err(|e| format!("下載工作執行失敗: {}", e))?
+}
+
+fn download_win_update_file_blocking(
     app: tauri::AppHandle,
     url: String,
     file_path: String,
 ) -> Result<String, String> {
     use std::fs::File;
     use std::io::{Read, Write};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
     use tauri::Emitter;
 
-    let response = ureq::get(&url)
+    // 連線 15 秒、單次讀取 30 秒無資料即視為失敗，避免網路中斷時永遠掛著
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(15))
+        .timeout_read(Duration::from_secs(30))
+        .build();
+
+    let response = agent
+        .get(&url)
         .set(
             "User-Agent",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AVD-Updater",
@@ -124,7 +148,14 @@ const NETWORK_PROBE_URL: &str = "https://www.gstatic.com/generate_204";
 /// 任何失敗（連線層、逾時、非 204 狀態碼）一律回傳 false，不視為例外——
 /// 呼叫端（`useNetworkStatus`）依此區分 online 與 degraded，此處不代為判斷。
 #[tauri::command]
-fn probe_internet_connectivity(timeout_ms: u64) -> bool {
+async fn probe_internet_connectivity(timeout_ms: u64) -> bool {
+    // 同步 command 會在主執行緒執行，網路探測最長可阻塞 timeout_ms，故移到 blocking thread
+    tauri::async_runtime::spawn_blocking(move || probe_internet_connectivity_blocking(timeout_ms))
+        .await
+        .unwrap_or(false)
+}
+
+fn probe_internet_connectivity_blocking(timeout_ms: u64) -> bool {
     use std::time::Duration;
 
     let timeout = Duration::from_millis(timeout_ms.max(1));
@@ -176,7 +207,18 @@ fn is_timeout_transport_message(message: &str) -> bool {
 }
 
 #[tauri::command]
-fn fetch_http_text(
+async fn fetch_http_text(
+    url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<String, String> {
+    // 同步 command 會在主執行緒執行，每次 HTTP 請求最長阻塞 10 秒、
+    // 頻道追蹤批次呼叫時畫面會一卡一卡，故移到 blocking thread
+    tauri::async_runtime::spawn_blocking(move || fetch_http_text_blocking(url, headers))
+        .await
+        .map_err(|e| format!("NETWORK_ERROR: 請求工作執行失敗: {}", e))?
+}
+
+fn fetch_http_text_blocking(
     url: String,
     headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<String, String> {
