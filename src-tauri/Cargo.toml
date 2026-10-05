@@ -33,3 +33,4 @@ local-ip-address = "0.6"
 urlencoding = "2.1"
 ureq = "2.10"
 tauri-plugin-store = "2"
+tokio = { version = "1", features = ["time"] }

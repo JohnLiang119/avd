@@ -30,6 +30,12 @@ import {
   type ApiErrorKind,
   type ChannelTrackingBlocked,
 } from './youtubeDataApi';
+import { parseAttemptTimestamp, shouldAttemptYtDlpUpdate, todayKey } from './ytDlpUpdatePolicy';
+
+/** 上次 yt-dlp 成功更新的日期鍵（YYYY-MM-DD），設定頁也會讀來顯示 */
+export const YT_DLP_LAST_UPDATE_CHECK_KEY = 'yt_dlp_last_update_check';
+/** 上次嘗試自動更新 yt-dlp 的時間（epoch ms），用於失敗後冷卻 */
+export const YT_DLP_LAST_UPDATE_ATTEMPT_KEY = 'yt_dlp_last_update_attempt';
 
 // 改用 t (標準繁體) 轉 cn，避開台灣標準對「么」的強制校正
 const _t2cn = OpenCC.Converter({ from: 't', to: 'cn' });
@@ -702,16 +708,24 @@ export const DownloadService = {
 
 
     try {
-      // 每日自動更新檢查
-      const today = new Date().toISOString().split('T')[0];
-      const lastCheck = localStorage.getItem('yt_dlp_last_update_check');
-      if (today !== lastCheck) {
+      // 每日自動更新檢查。
+      // Rust 端 update_yt_dlp 有逾時保護（GitHub 連不上時會中止），
+      // 這裡再加「失敗後冷卻 1 小時」避免每次下載都先等一次逾時。
+      const now = Date.now();
+      const shouldUpdate = shouldAttemptYtDlpUpdate({
+        now,
+        lastSuccessDate: localStorage.getItem(YT_DLP_LAST_UPDATE_CHECK_KEY),
+        lastAttemptAt: parseAttemptTimestamp(localStorage.getItem(YT_DLP_LAST_UPDATE_ATTEMPT_KEY)),
+      });
+      if (shouldUpdate) {
         emitEvent('downloadProgress', { line: '檢查並更新核心引擎 (每日首次)...' });
+        localStorage.setItem(YT_DLP_LAST_UPDATE_ATTEMPT_KEY, String(now));
         try {
           await this.updateYtDlp();
-          localStorage.setItem('yt_dlp_last_update_check', today);
+          localStorage.setItem(YT_DLP_LAST_UPDATE_CHECK_KEY, todayKey(now));
         } catch (updateErr) {
           console.warn('yt-dlp auto update failed, continuing with current version', updateErr);
+          emitEvent('downloadProgress', { line: '核心引擎更新失敗或逾時，改用現有版本繼續下載...' });
         }
       }
 

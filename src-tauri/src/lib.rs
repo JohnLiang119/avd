@@ -265,20 +265,55 @@ fn fetch_http_text(
     Ok(text)
 }
 
+/// yt-dlp 自我更新的逾時上限。
+/// 更新需連到 GitHub 下載約 17MB 的新版執行檔，公司網路或 GitHub 被擋時
+/// 會無限等待，前端下載流程就會卡在「檢查並更新核心引擎」永遠不動；
+/// 超過此秒數即強制終止子程序、回傳錯誤，讓下載以現有版本繼續。
+const YT_DLP_UPDATE_TIMEOUT_SECS: u64 = 90;
+
 #[tauri::command]
 async fn update_yt_dlp(app: tauri::AppHandle) -> Result<String, String> {
+    use std::time::Duration;
+    use tauri_plugin_shell::process::CommandEvent;
     use tauri_plugin_shell::ShellExt;
+
     let sidecar_command = app.shell().sidecar("yt-dlp").map_err(|e| e.to_string())?;
-    let output = sidecar_command
+    let (mut rx, child) = sidecar_command
         .args(["--update-to", "nightly"])
-        .output()
-        .await
+        .spawn()
         .map_err(|e| e.to_string())?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+
+    // 收集子程序輸出直到結束；整段包在 timeout 內，逾時就 kill 掉子程序。
+    let collect = async {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut code: Option<i32> = None;
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) => stdout.extend(line),
+                CommandEvent::Stderr(line) => stderr.extend(line),
+                CommandEvent::Error(e) => stderr.extend(e.into_bytes()),
+                CommandEvent::Terminated(payload) => {
+                    code = payload.code;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        (code, stdout, stderr)
+    };
+
+    match tokio::time::timeout(Duration::from_secs(YT_DLP_UPDATE_TIMEOUT_SECS), collect).await {
+        Ok((Some(0), stdout, _)) => Ok(String::from_utf8_lossy(&stdout).into_owned()),
+        Ok((_, _, stderr)) => Err(String::from_utf8_lossy(&stderr).into_owned()),
+        Err(_) => {
+            // 不理會 kill 失敗（子程序可能恰好剛結束）
+            let _ = child.kill();
+            Err(format!(
+                "核心引擎更新逾時（超過 {} 秒），已中止更新",
+                YT_DLP_UPDATE_TIMEOUT_SECS
+            ))
+        }
     }
 }
 
