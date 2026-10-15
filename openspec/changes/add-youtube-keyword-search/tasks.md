@@ -29,7 +29,7 @@
 
 ## 6. 搜尋明細「只列中文」過濾（後續擴充）
 
-- [ ] 6.1 新增 `src/services/textLang.ts`：純函式 `looksChinese(text)`（含中日韓表意文字且不含日文假名／韓文諺文），附 `src/services/__tests__/textLang.spec.ts`（中文、繁簡、中英混排、純英文、含假名日文、純漢字日文誤判容忍、韓文、空字串）。驗證：`npm test` 通過。
-- [ ] 6.2 `PlaylistItem` 增加可選欄位 `channel`：桌面端 `processEntries` 與 Android 端 `processEntriesHelper` 自 entry 的 `channel`／`uploader` 補值。驗證：`npx vue-tsc --noEmit` 與 `gradlew :app:compileDebugJavaWithJavac` 通過。
-- [ ] 6.3 `YouTubeBatchModal.vue` 新增 `showLangFilter` prop 與預設關閉的「只列中文」開關：開啟時清單、計數、全選／全不選、確認下載皆只作用於顯示中的項目（顯示 ∩ 勾選）；全部被濾除時顯示提示文字；`App.vue` 以 `parsedSourceIsSearch` 傳入。驗證：`npm run build` 通過，桌面端手動開關過濾後確認下載只含顯示中的勾選項目。
-- [ ] 6.4 全套建置驗證後進版（7 處版號＋`publish_all.ps1` `$Message`），功能與進版各自一個 commit。驗證：grep 新版號一致、防呆比對可通過。
+- [x] 6.1 新增 `src/services/textLang.ts`：純函式 `looksChinese(text)`（含中日韓表意文字且不含日文假名／韓文諺文），附 `src/services/__tests__/textLang.spec.ts`（中文、繁簡、中英混排、純英文、含假名日文、純漢字日文誤判容忍、韓文、空字串）。驗證：`npm test` 通過。
+- [x] 6.2 `PlaylistItem` 增加可選欄位 `channel`：桌面端 `processEntries` 與 Android 端 `processEntriesHelper` 自 entry 的 `channel`／`uploader` 補值。驗證：`npx vue-tsc --noEmit` 與 `gradlew :app:compileDebugJavaWithJavac` 通過。
+- [x] 6.3 `YouTubeBatchModal.vue` 新增 `showLangFilter` prop 與預設關閉的「只列中文」開關：開啟時清單、計數、全選／全不選、確認下載皆只作用於顯示中的項目（顯示 ∩ 勾選）；全部被濾除時顯示提示文字；`App.vue` 以 `parsedSourceIsSearch` 傳入。驗證：`npm run build` 通過，桌面端手動開關過濾後確認下載只含顯示中的勾選項目。
+- [x] 6.4 全套建置驗證後進版（7 處版號＋`publish_all.ps1` `$Message`），功能與進版各自一個 commit。驗證：grep 新版號一致、防呆比對可通過。
