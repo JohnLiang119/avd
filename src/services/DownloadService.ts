@@ -7,7 +7,7 @@ import { readTextFile, writeTextFile, rename, remove, exists, stat } from '@taur
 import * as OpenCC from 'opencc-js';
 import { PARSE_CANCELLED, buildPlaylistRangeArgs } from './parseScope';
 import { formatPublishTime } from './displayFormat';
-import { resolveSourceProfile } from './sourceProfiles';
+import { resolveSourceProfile, isSearchSource, isSearchVideoEntry } from './sourceProfiles';
 import {
   chunkUrls, parseEnrichNdjson, withinBudget,
   ENRICH_CHUNK_SIZE, ENRICH_THROTTLE_MS, ENRICH_BUDGET_MS,
@@ -575,11 +575,17 @@ export const DownloadService = {
       // 各分頁本批的回傳筆數，僅記錄頂層的子清單（分頁），不含更深的巢狀。
       const sequenceReturns: Record<string, number> = {};
 
+      // 搜尋來源只留單支影片：命中的頻道／播放清單直接丟棄、不展開 ——
+      // 誤入下方的子清單展開會把整個頻道灌進搜尋明細（見 design D5）。
+      // Android 端 YoutubeDlPlugin.processEntriesHelper 以同一規則過濾，兩端須同步。
+      const searchSource = isSearchSource(url);
+
       const processEntries = async (entriesData: any[], isTopLevel = false): Promise<PlaylistItem[]> => {
         const result: PlaylistItem[] = [];
 
         for (let index = 0; index < entriesData.length; index++) {
           const entry = entriesData[index];
+          if (searchSource && !isSearchVideoEntry(entry)) continue;
           const entryUrl = entry.url || entry.webpage_url || '';
           const entryId = entry.id || '';
           const ieKey = entry.ie_key || '';

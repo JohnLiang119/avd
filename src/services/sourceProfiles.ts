@@ -59,12 +59,52 @@ export interface SourceProfile {
    * 與來源本身的能力無關。
    */
   supportsChannelTracking: boolean;
+  /**
+   * 解析成功後是否記錄續抓進度。省略視為 `true`。
+   *
+   * 搜尋結果不是穩定序列 —— 同一關鍵字兩次搜尋的排序與內容都可能不同，
+   * 以筆數範圍續抓必然錯位，記了進度反而觸發「繼續上次進度」的錯誤詢問。
+   */
+  tracksParseProgress?: boolean;
   /** 由解析結果組出項目網址；未提供則直接採用 entry 自帶的網址 */
   buildItemUrl?(videoId: string, entry: any, sourceUrl: string): string;
 }
 
 /** 去除查詢字串後的網址，作為無專屬規則時的進度鍵。 */
 const stripQuery = (url: string) => url.split('?')[0];
+
+// ---- YouTube 關鍵字搜尋 ----
+
+/**
+ * 單次搜尋的結果上限，內嵌於 `ytsearchN:` 虛擬網址。
+ *
+ * 不沿用 PARSE_BATCH_SIZE（200）：搜尋每頁約 20 筆，200 筆要十輪請求，
+ * 而搜尋情境使用者只看前面的結果。
+ */
+export const SEARCH_RESULT_LIMIT = 50;
+
+/** 由關鍵字組出 yt-dlp 的搜尋虛擬網址。冒號後全部視為查詢字串，僅需 trim。 */
+export function buildYouTubeSearchUrl(keyword: string): string {
+  return `ytsearch${SEARCH_RESULT_LIMIT}:${(keyword || '').trim()}`;
+}
+
+/** 此「網址」是否為搜尋虛擬網址。 */
+export function isSearchSource(url: string): boolean {
+  return /^ytsearch\d*:/.test(url || '');
+}
+
+/**
+ * 搜尋結果的 entry 是否為單支影片。
+ *
+ * 白名單判準：flat 模式下影片 entry 的 `ie_key` 固定為 `Youtube`；
+ * 頻道（`YoutubeTab`）與播放清單（`YoutubePlaylist`）都不是。實測搜尋
+ * 「某歌手」第一筆常是其頻道，誤入子清單展開會把整個頻道灌進明細。
+ * 用白名單而非黑名單：未來混入新型別時，預設行為是「不顯示」而非「誤展開」。
+ * Android 端 YoutubeDlPlugin.processEntriesHelper 以同一規則過濾，兩端須同步。
+ */
+export function isSearchVideoEntry(entry: any): boolean {
+  return entry?.ie_key === 'Youtube';
+}
 
 /** 自網址擷取第一個符合的擷取群組。 */
 const capture = (url: string, re: RegExp): string => (url.match(re) || [])[1] || '';
@@ -101,6 +141,23 @@ function buildTikTokVideoUrl(videoId: string, entry: any, sourceUrl: string): st
  * 此順序依賴以測試釘住。
  */
 export const SOURCE_PROFILES: SourceProfile[] = [
+  {
+    id: 'youtube-search',
+    label: 'YouTube 搜尋',
+    kind: 'collection',
+    // 必須排在所有網址型來源之前：關鍵字可能含其他來源的網址片段
+    // （如搜尋「tiktok.com/@xxx」），後面的 includes 比對會誤命中。
+    match: isSearchSource,
+    progressKey: url => `yt:search:${(url || '').replace(/^ytsearch\d*:/, '')}`,
+    // 搜尋有自己的確認對話框（App 端），不走事前確認旗標
+    needsPreParseConfirm: false,
+    // 影片 entry 帶標題與片長，足供勾選；不為 50 筆啟動逐筆補齊
+    flatMetadata: 'full',
+    expandsToSequences: false,
+    supportsChannelTracking: false,
+    // 搜尋結果非穩定序列，不記錄續抓進度（見介面註解）
+    tracksParseProgress: false,
+  },
   {
     id: 'tiktok-user',
     label: 'TikTok 創作者頁',

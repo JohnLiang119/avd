@@ -452,8 +452,16 @@ public class YoutubeDlPlugin extends Plugin {
     private void processEntriesHelper(String originalUrl, org.json.JSONArray entries,
             com.getcapacitor.JSArray itemsArr, String processId, java.util.List<String> rangeArgs,
             boolean isTopLevel, org.json.JSONObject sequenceReturns) throws Exception {
+        // 搜尋來源（ytsearchN: 虛擬網址）只留單支影片：flat 模式下影片 entry 的
+        // ie_key 固定為 "Youtube"，命中的頻道（YoutubeTab）／播放清單直接丟棄、
+        // 不展開 —— 誤入下方的子清單展開會把整個頻道灌進搜尋明細。
+        // 桌面端 sourceProfiles.ts 的 isSearchVideoEntry 為同一規則，兩端須同步。
+        boolean isSearchSource = originalUrl != null && originalUrl.startsWith("ytsearch");
         for (int i = 0; i < entries.length(); i++) {
             org.json.JSONObject entry = entries.getJSONObject(i);
+            if (isSearchSource && !"Youtube".equals(entry.optString("ie_key", ""))) {
+                continue;
+            }
             String rawItemTitle = entry.optString("title", entry.optString("fulltitle", "影片 " + (i + 1)));
             String itemTitle = rawItemTitle;
             String videoId = entry.optString("id", entry.optString("url", String.valueOf(i)));

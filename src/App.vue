@@ -57,7 +57,7 @@
             <van-field
               v-model="url"
               name="url"
-              placeholder="請輸入 YouTube 影片網址"
+              placeholder="輸入影音網址，或關鍵字搜尋 YouTube"
               :rules="[]"
               clearable
             />
@@ -1716,7 +1716,7 @@ import { isDeviceOfflineError, describeEarlyStop, shouldBackoff, describeRateLim
 import {
   UI_COLOR, GLYPH_BUTTON_STYLE, GLYPH_BUTTON_DANGER_STYLE, ACTION_GLYPH,
 } from './services/visualLanguage';
-import { resolveSourceProfile } from './services/sourceProfiles';
+import { resolveSourceProfile, buildYouTubeSearchUrl } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
 import { matchPermanentError } from './services/downloadErrors';
 import {
@@ -4415,6 +4415,8 @@ const showPlaylistModal = ref(false);
 const parsedChannelTitle = ref('');
 const parsedPlaylistTitle = ref('');
 const parsedPlaylistItems = ref<PlaylistItem[]>([]);
+/** 本次勾選明細是否來自關鍵字搜尋：是則子任務的頻道前綴留空，由下載回報的實際頻道名補上。 */
+const parsedSourceIsSearch = ref(false);
 
 /**
  * 補齊可被取消：對話框關閉（略過或確認）皆停止背景行程 ——
@@ -4450,7 +4452,9 @@ const onBatchModalConfirm = (selectedItems: PlaylistItem[]) => {
       title: finalTitle || item.title,
       rawTitle: raw || item.title,
       publishTimeStr: pubTime,
-      channelPrefix: parsedChannelTitle.value,
+      // 搜尋結果橫跨多個頻道，統一前綴「YouTube 搜尋」會汙染檔名 ——
+      // 留空讓下載完成回報的實際頻道名經既有補值機制填入。
+      channelPrefix: parsedSourceIsSearch.value ? '' : parsedChannelTitle.value,
       status: 'pending',
       progress: 0,
       eta: '',
@@ -4657,9 +4661,29 @@ const getStatusText = (status: string) => {
 };
 
 const addTask = async (urlToAdd: string) => {
+  // 非網址文字視為 YouTube 搜尋關鍵字，但必須先徵詢確認 ——
+  // 打錯的網址（漏掉協定前綴）才有機會在這裡被使用者認出並取消。
+  let searchKeyword = '';
   if (!urlToAdd.startsWith('http://') && !urlToAdd.startsWith('https://')) {
-    showToast('請輸入正確的影音網址');
-    return;
+    const keyword = urlToAdd.trim();
+    if (!keyword) {
+      showToast('請輸入正確的影音網址');
+      return;
+    }
+    try {
+      await showConfirmDialog({
+        title: 'YouTube 搜尋',
+        message: `要用 YouTube 搜尋「${keyword}」嗎？`,
+        confirmButtonText: '搜尋',
+        cancelButtonText: '取消',
+        confirmButtonColor: '#1989fa'
+      });
+    } catch {
+      // 取消：不執行任何動作，保留輸入框內容供修正
+      return;
+    }
+    searchKeyword = keyword;
+    urlToAdd = buildYouTubeSearchUrl(keyword);
   }
 
   // 來源的一切判斷（是否多片、要不要事前確認、能否追蹤、進度鍵、
@@ -4740,6 +4764,9 @@ const addTask = async (urlToAdd: string) => {
   }
 
   const isPlaylistUrl = sourceProfile.kind === 'collection';
+
+  // 搜尋來源的分流：提示文案、群組標題、無結果訊息都與一般清單不同。
+  const isSearchParse = sourceProfile.id === 'youtube-search';
 
   // 高成本的創作者頁面解析須先徵詢確認。
   // 刻意不併入 isStrictChannelUrl：那條路徑會連帶詢問「加入自動追蹤」，
@@ -4831,7 +4858,7 @@ const addTask = async (urlToAdd: string) => {
       DownloadService.cancelParsePlaylist().catch(e => console.warn('取消解析失敗', e));
     };
 
-    openParsingModal('正在解析播放清單資訊...', () => {
+    openParsingModal(isSearchParse ? '正在搜尋 YouTube...' : '正在解析播放清單資訊...', () => {
       if (!parseSettled) {
         parseSettled = true;
         parseCancelled = true;
@@ -4864,25 +4891,33 @@ const addTask = async (urlToAdd: string) => {
 
       // 只有解析成功才推進進度；失敗、逾時、取消都不動，使用者可原地重試。
       // 推進量取實際回傳筆數（未勾選的也算看過了）。
-      if (res.sequenceReturns) {
-        // 多序列：逐序列推進，未回傳的序列不動（例如已抓完者本就不再請求）。
-        parseProgress.value = applySequenceResults(
-          parseProgress.value, progressKey, pending, res.sequenceReturns
-        );
-      } else {
-        parseProgress.value = {
-          ...parseProgress.value,
-          [progressKey]: advanceParseProgress(fetchedBefore, res.items?.length || 0)
-        };
+      // 不記進度的來源（搜尋）跳過：結果非穩定序列，記了只會觸發錯誤的續抓詢問。
+      if (sourceProfile.tracksParseProgress !== false) {
+        if (res.sequenceReturns) {
+          // 多序列：逐序列推進，未回傳的序列不動（例如已抓完者本就不再請求）。
+          parseProgress.value = applySequenceResults(
+            parseProgress.value, progressKey, pending, res.sequenceReturns
+          );
+        } else {
+          parseProgress.value = {
+            ...parseProgress.value,
+            [progressKey]: advanceParseProgress(fetchedBefore, res.items?.length || 0)
+          };
+        }
       }
 
       if (!res.items || res.items.length === 0) {
-        showToast(fetchedBefore > 0 ? '已無更多影片可抓取' : '此播放清單無可下載的影片');
+        showToast(isSearchParse
+          ? '找不到相關影片'
+          : (fetchedBefore > 0 ? '已無更多影片可抓取' : '此播放清單無可下載的影片'));
         return;
       }
 
-      parsedChannelTitle.value = res.channelTitle;
-      parsedPlaylistTitle.value = res.playlistTitle;
+      // 搜尋結果橫跨多個頻道，群組固定為「YouTube 搜尋 / <關鍵字>」；
+      // yt-dlp 頂層 title 實測就是關鍵字，但不依賴它。
+      parsedChannelTitle.value = isSearchParse ? 'YouTube 搜尋' : res.channelTitle;
+      parsedPlaylistTitle.value = isSearchParse ? searchKeyword : res.playlistTitle;
+      parsedSourceIsSearch.value = isSearchParse;
 
       // 收集目前已被加入/下載過的網址
       const existingUrls = new Set<string>();

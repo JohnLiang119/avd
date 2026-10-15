@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resolveSourceProfile, SOURCE_PROFILES, FALLBACK_PROFILE } from '../sourceProfiles';
+import {
+  resolveSourceProfile, SOURCE_PROFILES, FALLBACK_PROFILE,
+  SEARCH_RESULT_LIMIT, buildYouTubeSearchUrl, isSearchSource, isSearchVideoEntry,
+} from '../sourceProfiles';
 import { parseProgressKey } from '../parseScope';
 
 const id = (url: string) => resolveSourceProfile(url).id;
@@ -171,5 +174,56 @@ describe('能力宣告', () => {
   it('每筆 profile 的 id 唯一', () => {
     const ids = SOURCE_PROFILES.map(p => p.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('YouTube 關鍵字搜尋來源', () => {
+  it('ytsearch 虛擬網址命中 youtube-search 且為集合', () => {
+    expect(id('ytsearch50:周杰倫')).toBe('youtube-search');
+    expect(kind('ytsearch50:周杰倫')).toBe('collection');
+    // 不帶數字的變體也屬搜尋
+    expect(id('ytsearch:abc')).toBe('youtube-search');
+  });
+
+  it('搜尋不記錄續抓進度', () => {
+    expect(resolveSourceProfile('ytsearch50:abc').tracksParseProgress).toBe(false);
+    // 其餘來源省略此欄位，省略視為 true —— 斷言它們都不是 false
+    for (const p of SOURCE_PROFILES.filter(p => p.id !== 'youtube-search')) {
+      expect(p.tracksParseProgress).not.toBe(false);
+    }
+  });
+
+  it('搜尋排在所有網址型來源之前 —— 關鍵字可能含其他來源的網址片段', () => {
+    expect(SOURCE_PROFILES[0].id).toBe('youtube-search');
+    // 搜尋「tiktok.com/@xxx」不得被 TikTok 的 includes 比對搶走
+    expect(id('ytsearch50:tiktok.com/@someone')).toBe('youtube-search');
+    // 關鍵字含 list= 也不得被當成 YouTube 播放清單
+    expect(id('ytsearch50:?list=PLabc')).toBe('youtube-search');
+  });
+
+  it('buildYouTubeSearchUrl 去除前後空白並內嵌結果上限', () => {
+    expect(buildYouTubeSearchUrl('  周杰倫  ')).toBe(`ytsearch${SEARCH_RESULT_LIMIT}:周杰倫`);
+    // 關鍵字含冒號：冒號後全部仍屬查詢字串，不需跳脫
+    expect(buildYouTubeSearchUrl('Re: Zero')).toBe(`ytsearch${SEARCH_RESULT_LIMIT}:Re: Zero`);
+  });
+
+  it('isSearchSource 只認 ytsearch 前綴', () => {
+    expect(isSearchSource('ytsearch50:abc')).toBe(true);
+    expect(isSearchSource('https://www.youtube.com/watch?v=x')).toBe(false);
+    expect(isSearchSource('')).toBe(false);
+  });
+
+  it('搜尋進度鍵為 yt:search:<關鍵字>（雖不記進度，鍵仍須穩定）', () => {
+    expect(resolveSourceProfile('ytsearch50:周杰倫').progressKey('ytsearch50:周杰倫'))
+      .toBe('yt:search:周杰倫');
+  });
+
+  it('isSearchVideoEntry 白名單：只留單支影片', () => {
+    // 實測 flat 模式的三種 entry 型別
+    expect(isSearchVideoEntry({ ie_key: 'Youtube', id: 'aGsrg1NO1cM' })).toBe(true);
+    expect(isSearchVideoEntry({ ie_key: 'YoutubeTab', id: 'UC8CU5nVhCQIdAGrFFp4loOQ' })).toBe(false);
+    expect(isSearchVideoEntry({ ie_key: 'YoutubePlaylist', id: 'PLabc' })).toBe(false);
+    expect(isSearchVideoEntry(undefined)).toBe(false);
+    expect(isSearchVideoEntry({})).toBe(false);
   });
 });
