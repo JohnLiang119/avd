@@ -25,4 +25,4 @@
 
 - [x] 5.1 全套建置驗證：`npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過。
 - [ ] 5.2 桌面端端到端驗證：關鍵字搜尋 → 勾選 2 部 → 批次下載成功且去重正常；漏打協定的網址（如 `www.youtube.com/...`）會進搜尋確認框且可取消；既有網址輸入路徑（單片、播放清單、頻道）行為不變。
-- [ ] 5.3 功能 commit 後進版：7 處版號同步（`package.json`、`package-lock.json` 2 處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 以 `cargo update --workspace --offline` 同步、`android/app/build.gradle` 的 `versionName` 與 `versionCode`），並把 `avd_s/publish_all.ps1` 的 `$Message` 預設值更新為本次改動描述與新版號；功能與進版各自一個 commit。驗證：grep 新版號於上述各處一致，`publish_all.ps1` 的版號防呆比對可通過。
+- [x] 5.3 功能 commit 後進版：7 處版號同步（`package.json`、`package-lock.json` 2 處、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 以 `cargo update --workspace --offline` 同步、`android/app/build.gradle` 的 `versionName` 與 `versionCode`），並把 `avd_s/publish_all.ps1` 的 `$Message` 預設值更新為本次改動描述與新版號；功能與進版各自一個 commit。驗證：grep 新版號於上述各處一致，`publish_all.ps1` 的版號防呆比對可通過。
