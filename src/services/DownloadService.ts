@@ -316,6 +316,8 @@ export interface PlaylistItem {
   url: string;
   title: string;
   durationStr?: string;
+  /** 影片所屬頻道名，供「只列中文」啟發式判斷補強英文標題的情形；不保證有值。 */
+  channel?: string;
 }
 
 export interface PlaylistResult {
@@ -677,7 +679,8 @@ export const DownloadService = {
             id: String(videoId),
             url: itemUrl,
             title: finalItemTitle,
-            durationStr
+            durationStr,
+            channel: String(entry.channel || entry.uploader || '')
           });
         }
         return result;

@@ -544,6 +544,8 @@ public class YoutubeDlPlugin extends Plugin {
             itemObj.put("url", itemUrl);
             itemObj.put("title", itemTitle);
             itemObj.put("durationStr", durationStr);
+            // 頻道名供前端「只列中文」啟發式判斷補強英文標題的情形
+            itemObj.put("channel", entry.optString("channel", entry.optString("uploader", "")));
             itemsArr.put(itemObj);
         }
     }

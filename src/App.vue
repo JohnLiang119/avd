@@ -1616,6 +1616,7 @@
       :channel-title="parsedChannelTitle"
       :playlist-title="parsedPlaylistTitle"
       :items="parsedPlaylistItems"
+      :show-lang-filter="parsedSourceIsSearch"
       @confirm="onBatchModalConfirm"
       @cancel="onBatchModalCancel"
     />
