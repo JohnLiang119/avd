@@ -34,16 +34,41 @@ export const LIVE_RELATED_ERRORS = [
 ] as const;
 
 /**
- * 判定一則錯誤訊息是否為確定性錯誤，以及是否與直播相關。
+ * YouTube 依 IP 信譽做的 bot 驗證（「Sign in to confirm you’re not a bot」）。
  *
- * `liveRelated` 為真時，呼叫端應給予專屬訊息，而非顯示暗示問題為
- * 暫時性的「已自動重試 N 次」。
+ * 2026-10-28 以 adb 實測：同一份 yt-dlp、同樣的 player client，手機走 4G
+ * （行動網路共用 IP）對剛上架的影片 6/6 次被擋，切到 WiFi 立即成功。
+ * 此錯誤綁定網路 IP，與 App 或 yt-dlp 版本無關，在同一網路下重試必然再被擋，
+ * 而且每次重試都會多打一輪 player API，只會讓共用 IP 更快被標記。
+ *
+ * YouTube 文案使用彎引號（’），比對前由 `normalizeQuotes` 統一為直引號。
  */
-export const matchPermanentError = (msg: string): { permanent: boolean; liveRelated: boolean } => {
-  const lower = (msg || '').toLowerCase();
+export const BOT_CHECK_ERRORS = [
+  "sign in to confirm you're not a bot",
+] as const;
+
+/** 命中 bot 驗證時呈現給使用者的訊息，取代 yt-dlp 的英文 cookies 指引 */
+export const BOT_CHECK_USER_MESSAGE =
+  'YouTube 要求登入驗證（判定為機器人），通常是行動網路共用 IP 所致，請改用 WiFi 或稍後再試';
+
+/** 把 YouTube 文案的彎引號統一為直引號，讓清單只需維護一種寫法 */
+const normalizeQuotes = (s: string): string => s.replace(/[‘’]/g, "'");
+
+/**
+ * 判定一則錯誤訊息是否為確定性錯誤，以及是否與直播相關或為 bot 驗證。
+ *
+ * `liveRelated` 或 `botCheck` 為真時，呼叫端應給予專屬訊息，而非顯示暗示
+ * 問題為暫時性的「已自動重試 N 次」。
+ */
+export const matchPermanentError = (
+  msg: string,
+): { permanent: boolean; liveRelated: boolean; botCheck: boolean } => {
+  const lower = normalizeQuotes((msg || '').toLowerCase());
+  const botCheck = BOT_CHECK_ERRORS.some(k => lower.includes(k));
   return {
-    permanent: PERMANENT_DOWNLOAD_ERRORS.some(k => lower.includes(k)),
+    permanent: botCheck || PERMANENT_DOWNLOAD_ERRORS.some(k => lower.includes(k)),
     liveRelated: LIVE_RELATED_ERRORS.some(k => lower.includes(k)),
+    botCheck,
   };
 };
 

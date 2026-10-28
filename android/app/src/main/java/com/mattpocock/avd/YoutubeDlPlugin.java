@@ -974,7 +974,13 @@ public class YoutubeDlPlugin extends Plugin {
                             notifyListeners("downloadProgress", titleObj);
                         }
                     } catch (Exception e) {
-                        // 解析失敗不中斷下載，欄位留空由後續流程補齊
+                        // YouTube 的 bot 驗證綁定網路 IP，正式下載必然再被擋，
+                        // 多打一輪 player API 只會讓共用 IP 更快被標記：直接以原訊息結束，
+                        // 交由前端判定為確定性錯誤（見 fix-bot-check-no-retry）。
+                        if (isBotCheckError(e)) {
+                            throw e;
+                        }
+                        // 其他解析失敗不中斷下載，欄位留空由後續流程補齊
                         Log.w(TAG, "Could not fetch video metadata", e);
                     }
                 }
@@ -1229,6 +1235,20 @@ public class YoutubeDlPlugin extends Plugin {
                 getContext().startService(stopIntent);
             }
         }).start();
+    }
+
+    /**
+     * 判斷例外是否為 YouTube 的 bot 驗證（「Sign in to confirm you’re not a bot」）。
+     * 比對規則與前端 downloadErrors.ts 的 BOT_CHECK_ERRORS 一致：
+     * 不分大小寫，並把 YouTube 文案的彎引號（’ ‘）統一為直引號後再比對。
+     */
+    private static boolean isBotCheckError(Throwable e) {
+        String msg = e == null ? null : e.getMessage();
+        if (msg == null) return false;
+        String normalized = msg.toLowerCase(java.util.Locale.ROOT)
+                .replace('’', '\'')
+                .replace('‘', '\'');
+        return normalized.contains("sign in to confirm you're not a bot");
     }
 
     private java.util.Map<String, CronetDownloader> activeDownloaders = new java.util.concurrent.ConcurrentHashMap<>();

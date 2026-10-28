@@ -1719,7 +1719,7 @@ import {
 } from './services/visualLanguage';
 import { resolveSourceProfile, buildYouTubeSearchUrl } from './services/sourceProfiles';
 import { mergeEnriched, type EnrichedItem } from './services/enrichment';
-import { matchPermanentError } from './services/downloadErrors';
+import { matchPermanentError, BOT_CHECK_USER_MESSAGE } from './services/downloadErrors';
 import {
   RadioAlarmService,
   describeAlarmSummary,
@@ -5113,12 +5113,16 @@ const processQueue = async () => {
 
       // 確定性錯誤重試必然再次失敗，立即結束並如實說明原因，
       // 不再顯示暗示問題可能是暫時性的「已自動重試 N 次」。
-      const { permanent, liveRelated } = matchPermanentError(errorMsgStr);
+      const { permanent, liveRelated, botCheck } = matchPermanentError(errorMsgStr);
       if (permanent) {
         nextTask.status = 'error';
+        // bot 驗證綁定網路 IP（行動網路共用 IP 常中），yt-dlp 的英文 cookies 指引
+        // 對手機使用者毫無幫助，改給可行動的提示（見 fix-bot-check-no-retry）。
         nextTask.errorMsg = liveRelated
           ? '此影片為直播或尚未開播，暫時無法下載'
-          : errorMsgStr;
+          : botCheck
+            ? BOT_CHECK_USER_MESSAGE
+            : errorMsgStr;
         nextTask.line = nextTask.errorMsg;
         break;
       }
