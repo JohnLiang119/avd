@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title></title><script>
+/*
+ * avd：在隱藏 WebView 內執行 YouTube 的 BotGuard 以鑄造 PO Token。
+ * 流程對應 bgutils-js（MIT, LuanRT）的 BotGuardClient / WebPoMinter，與 NewPipe 的 po_token.html 同架構。
+ * 本頁不自行發網路請求（Java 端設 blockNetworkLoads），由 PoTokenWebView.java 依序呼叫：
+ *   applyHomepageChallenge → (Java 下載直譯器) → runBotGuard → (Java 呼叫 GenerateIT) → setIntegrityToken → mintPoToken
+ * 所有結果經 PoTokenBridge 回到 Java。
+ */
+var webPoSignalOutput = null;
+var vmFunctions = null;
+var mintCallback = null;
+
+function bridge() { return window.PoTokenBridge; }
+function errStr(e) { return (e && e.stack) ? (e + '\n' + e.stack) : String(e); }
+
+function base64ToU8(b64) {
+  var map = { '-': '+', '_': '/', '.': '=' };
+  var s = b64.replace(/[-_.]/g, function (c) { return map[c]; });
+  var bin = atob(s);
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+function u8ToBase64Url(u8) {
+  var s = '';
+  for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+/*
+ * 1) 首頁挑戰：ytcfg 設到 window.yt.config_（BotGuard 會讀 EVENT_ID），
+ *    ytAtN 的 R.bgChallenge 是挑戰本體。兩者都是 YouTube 頁面裡的 JS 物件字面值，
+ *    直接以運算式求值（頁面已斷網、無 cookie）。
+ */
+function applyHomepageChallenge(ytcfgText, ytAtNText) {
+  try {
+    if (ytcfgText) {
+      window.yt = { config_: (new Function('return (' + ytcfgText + ')'))() };
+    }
+    var att = (new Function('return (' + ytAtNText + ')'))();
+    var ch = att && att.R && att.R.bgChallenge;
+    if (!ch || !ch.program || !ch.interpreterUrl) throw new Error('ytAtN 缺少 bgChallenge');
+    bridge().onChallenge(JSON.stringify({
+      program: ch.program,
+      globalName: ch.globalName,
+      interpreterUrl: ch.interpreterUrl.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue
+    }));
+  } catch (e) {
+    bridge().onInitError('applyHomepageChallenge: ' + errStr(e));
+  }
+}
+
+/*
+ * 2) 載入直譯器、執行 program、取得 botguardResponse 與 webPoSignalOutput
+ *    （對應 bgutils-js BotGuardClient.load + snapshot）。
+ */
+function runBotGuard(program, globalName, interpreterJs) {
+  try {
+    (new Function(interpreterJs))();
+    var vm = window[globalName];
+    if (!vm) throw new Error('EGOU: BotGuard unavailable');
+    if (!vm.a) throw new Error('ELIU: BotGuard initialization function unavailable');
+
+    vmFunctions = null;
+    var setup = function (asyncSnapshot, shutdown, passEvent, checkCamera) {
+      vmFunctions = { asyncSnapshot: asyncSnapshot };
+    };
+    var noop = function () {};
+    var loggers = [noop, noop, noop, noop, noop];
+    vm.a(program, setup, true, undefined, noop, [[], []], undefined, false, loggers);
+
+    // vm.a 在背景非同步呼叫 setup，要讓出控制權等它；bgutils 以 await 達成，這裡輪詢
+    var waited = 0;
+    var timer = setInterval(function () {
+      if (vmFunctions && vmFunctions.asyncSnapshot) {
+        clearInterval(timer);
+        snapshot();
+      } else if ((waited += 10) > 10000) {
+        clearInterval(timer);
+        bridge().onInitError('asyncSnapshotFunction 10 秒內未就緒');
+      }
+    }, 10);
+  } catch (e) {
+    bridge().onInitError('runBotGuard: ' + errStr(e));
+  }
+}
+
+function snapshot() {
+  try {
+    webPoSignalOutput = [];
+    var done = false;
+    var guard = setTimeout(function () {
+      if (!done) { done = true; bridge().onInitError('snapshot 逾時'); }
+    }, 10000);
+    vmFunctions.asyncSnapshot(function (response) {
+      if (done) return;
+      done = true;
+      clearTimeout(guard);
+      bridge().onBotguardResult(response);
+    }, [undefined, undefined, webPoSignalOutput, undefined]);
+  } catch (e) {
+    bridge().onInitError('snapshot: ' + errStr(e));
+  }
+}
+
+/* 3) 以 integrityToken 取得鑄造函式（對應 WebPoMinter.create） */
+function setIntegrityToken(token) {
+  try {
+    var getMinter = webPoSignalOutput && webPoSignalOutput[0];
+    if (!getMinter) throw new Error('PMD:Undefined');
+    Promise.resolve(getMinter(base64ToU8(token))).then(function (cb) {
+      if (!(cb instanceof Function)) throw new Error('APF:Failed');
+      mintCallback = cb;
+      bridge().onReady();
+    }).catch(function (e) {
+      bridge().onInitError('setIntegrityToken: ' + errStr(e));
+    });
+  } catch (e) {
+    bridge().onInitError('setIntegrityToken: ' + errStr(e));
+  }
+}
+
+/* 4) 鑄造（對應 WebPoMinter.mintAsWebsafeString）；id 讓 Java 端配對並行的請求 */
+function mintPoToken(id, contentBinding) {
+  try {
+    if (!mintCallback) throw new Error('minter not ready');
+    Promise.resolve(mintCallback(new TextEncoder().encode(contentBinding))).then(function (result) {
+      if (!result) throw new Error('YNJ:Undefined');
+      if (!(result instanceof Uint8Array)) throw new Error('ODM:Invalid');
+      bridge().onMinted(id, u8ToBase64Url(result));
+    }).catch(function (e) {
+      bridge().onMintError(id, errStr(e));
+    });
+  } catch (e) {
+    bridge().onMintError(id, errStr(e));
+  }
+}
+</script></head><body></body></html>

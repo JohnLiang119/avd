@@ -56,7 +56,17 @@ public class YoutubeDlPlugin extends Plugin {
 
     private LocalFileServer localServer;
 
+    /**
+     * App 內建的 PO Token provider（見 OpenSpec android-po-token-provider）。
+     * null 表示未啟動，YouTube 下載不帶 token，行為與未導入本功能前相同。
+     */
+    private PoTokenServer poTokenServer;
+    private PoTokenWebView poTokenWebView;
+    /** yt-dlp `--plugin-dirs` 指向的目錄：底下每個子目錄是一個外掛套件 */
+    private File ytdlpPluginDir;
+
     private static final String TAG = "YoutubeDlPlugin";
+    private static final String TAG_POT = "PoToken";
     private boolean isInitialized = false;
 
     /**
@@ -78,6 +88,86 @@ public class YoutubeDlPlugin extends Plugin {
         } catch (YoutubeDLException e) {
             Log.e(TAG, "failed to initialize youtubedl-android", e);
         }
+        setupPoTokenProvider();
+    }
+
+    /**
+     * 啟動 PO Token provider：複製 yt-dlp 外掛到私有目錄、建立 WebView 鑄造器、
+     * 在 127.0.0.1:4416 開本機伺服器。任何一步失敗就停用（fail-open），只記 log。
+     */
+    private void setupPoTokenProvider() {
+        try {
+            ytdlpPluginDir = installYtdlpPlugins();
+            poTokenWebView = new PoTokenWebView(getContext());
+            final PoTokenWebView webView = poTokenWebView;
+            PoTokenServer server = new PoTokenServer(PoTokenServer.DEFAULT_PORT, webView::mint,
+                    new PoTokenServer.Logger() {
+                        @Override
+                        public void info(String msg) {
+                            Log.d(TAG_POT, msg);
+                        }
+
+                        @Override
+                        public void warn(String msg, Throwable t) {
+                            Log.w(TAG_POT, msg, t);
+                        }
+                    });
+            server.start(fi.iki.elonen.NanoHTTPD.SOCKET_READ_TIMEOUT, true);
+            poTokenServer = server;
+            Log.d(TAG_POT, "PO Token provider 已啟動於 127.0.0.1:" + PoTokenServer.DEFAULT_PORT
+                    + "，外掛目錄 " + ytdlpPluginDir);
+        } catch (Exception e) {
+            Log.w(TAG_POT, "PO Token provider 未啟動，YouTube 下載將不帶 token", e);
+            poTokenServer = null;
+            ytdlpPluginDir = null;
+        }
+    }
+
+    /**
+     * 把 assets/ytdlp-plugins 整棵複製到 noBackupFilesDir/ytdlp-plugins（每次啟動覆蓋，
+     * 外掛隨 App 版本更新）。回傳的目錄即 `--plugin-dirs` 的值。
+     */
+    private File installYtdlpPlugins() throws java.io.IOException {
+        File dir = new File(getContext().getNoBackupFilesDir(), "ytdlp-plugins");
+        copyAssetTree("ytdlp-plugins", dir);
+        return dir;
+    }
+
+    private void copyAssetTree(String assetPath, File dest) throws java.io.IOException {
+        android.content.res.AssetManager assets = getContext().getAssets();
+        String[] children = assets.list(assetPath);
+        if (children == null || children.length == 0) {
+            // 葉節點：檔案（本樹沒有空目錄）
+            File parent = dest.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                throw new java.io.IOException("無法建立目錄 " + parent);
+            }
+            try (java.io.InputStream in = assets.open(assetPath);
+                 java.io.OutputStream out = new java.io.FileOutputStream(dest)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+            return;
+        }
+        if (!dest.exists() && !dest.mkdirs()) {
+            throw new java.io.IOException("無法建立目錄 " + dest);
+        }
+        for (String child : children) {
+            copyAssetTree(assetPath + "/" + child, new File(dest, child));
+        }
+    }
+
+    /**
+     * 讓 yt-dlp 載入 App 內建的 PO Token provider 外掛，並在每個 context 都先取 token。
+     * 預設的 fetch_pot=auto 只在 client 政策標為必要時才取，web/mweb 的 player 階段因此不帶
+     * token —— 正是被 bot 驗證擋下的那一步（見 android-po-token-provider/design.md 決策 5）。
+     * provider 未啟動時不加任何選項，行為與未導入本功能前相同。
+     */
+    private void addPoTokenOptions(YoutubeDLRequest request) {
+        if (poTokenServer == null || ytdlpPluginDir == null) return;
+        request.addOption("--plugin-dirs", ytdlpPluginDir.getAbsolutePath());
+        request.addOption("--extractor-args", "youtube:fetch_pot=always");
     }
 
     @PluginMethod
@@ -374,6 +464,7 @@ public class YoutubeDlPlugin extends Plugin {
                 request.addOption("--no-warnings");
                 request.addOption("--socket-timeout", "15");
                 request.addOption("--retries", "2");
+                addPoTokenOptions(request);
 
                 YoutubeDLResponse response = YoutubeDL.getInstance().execute(request, processId);
                 JSObject ret = new JSObject();
@@ -940,6 +1031,7 @@ public class YoutubeDlPlugin extends Plugin {
                         infoRequest.addOption("--dump-json");
                         infoRequest.addOption("--skip-download");
                         infoRequest.addOption("--no-warnings");
+                        addPoTokenOptions(infoRequest);
 
                         YoutubeDLResponse infoResponse = YoutubeDL.getInstance().execute(infoRequest);
                         String infoJson = infoResponse.getOut() == null ? "" : infoResponse.getOut().trim();
@@ -1030,6 +1122,7 @@ public class YoutubeDlPlugin extends Plugin {
                     request.addOption("--retries", "3");
                     request.addOption("--fragment-retries", "3");
                     request.addOption("--extractor-retries", "3");
+                    addPoTokenOptions(request);
 
                     if (isMp3 != null && isMp3) {
                         finalExt = "mp3";
