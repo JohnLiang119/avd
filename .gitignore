@@ -53,3 +53,7 @@ android/captures/
 search_results.json
 test.json
 
+
+# Python 編譯快取（PC 上對 assets 的外掛做 py_compile 會產生）
+__pycache__/
+*.pyc
