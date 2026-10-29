@@ -2371,6 +2371,7 @@ public class YoutubeDlPlugin extends Plugin {
             JSObject o = new JSObject();
             o.put("id", e.id);
             o.put("time", e.time);
+            o.put("endTime", e.endTime);
             o.put("weekdays", e.weekdays);
             o.put("enabled", e.enabled);
             entries.put(o);
@@ -2378,6 +2379,8 @@ public class YoutubeDlPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("entries", entries);
         ret.put("nextTriggerAt", CarBluetoothScheduler.nextTriggerAt(getContext()));
+        ret.put("activeUntil", CarBluetoothScheduler.activeUntil(getContext()));
+        ret.put("connecting", CarBluetoothConnectService.isRunning());
         ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
         return ret;
     }
@@ -2400,7 +2403,8 @@ public class YoutubeDlPlugin extends Plugin {
             String json = incoming == null ? "[]" : incoming.toString();
             CarBluetoothStore store = new CarBluetoothStore(getContext());
             store.setSchedule(CarBluetoothSchedule.parse(json));
-            CarBluetoothScheduler.reschedule(getContext());
+            // 儲存時若剛好落在區段內也立刻開始連線（使用者剛設好就期望生效）
+            CarBluetoothScheduler.reschedule(getContext(), true);
             call.resolve(carBluetoothScheduleState());
         } catch (Exception e) {
             Log.e(TAG, "setCarBluetoothSchedule failed", e);

@@ -57,18 +57,28 @@ export interface CarBluetoothConnectResult {
   message: string;
 }
 
-/** 連線排程的一筆：到時間自動盡力連線車機。星期為遮罩（bit 0 = 週日），語意同鬧鐘。 */
+/**
+ * 連線排程的一筆：一個**時間區段**。區段內持續嘗試連線車機，連到就停；區段結束仍沒連上
+ * 才通知。結束早於或等於開始表示跨午夜。星期為遮罩（bit 0 = 週日），以開始日為準。
+ */
 export interface CarScheduleEntry {
   id: string;
+  /** 區段開始 HH:mm。 */
   time: string;
+  /** 區段結束 HH:mm。 */
+  endTime: string;
   weekdays: number;
   enabled: boolean;
 }
 
 export interface CarScheduleState {
   entries: CarScheduleEntry[];
-  /** 下一次連線的 epoch 毫秒；沒有啟用的排程為 -1。 */
+  /** 下一次區段開始的 epoch 毫秒；沒有啟用的排程為 -1。 */
   nextTriggerAt: number;
+  /** 現在所在區段的結束 epoch 毫秒；不在任何區段內為 -1。 */
+  activeUntil: number;
+  /** 連線迴圈是否正在跑（尚未連上、區段未結束）。 */
+  connecting: boolean;
   /** 精確鬧鐘是否被允許；被關閉時排程可能晚幾分鐘。 */
   exactAlarmAllowed: boolean;
 }
@@ -76,6 +86,9 @@ export interface CarScheduleState {
 /** 與原生端 CarBluetoothSchedule.MAX_ENTRIES 一致。 */
 export const MAX_CAR_SCHEDULE_ENTRIES = 12;
 export const DEFAULT_CAR_SCHEDULE_TIME = '07:30';
+export const DEFAULT_CAR_SCHEDULE_END_TIME = '08:00';
+/** 結束缺漏或與開始相同時補的區段長度（分鐘），與原生端 DEFAULT_WINDOW_MIN 一致。 */
+export const DEFAULT_CAR_WINDOW_MIN = 30;
 
 // ---- 正規化 ----
 
@@ -198,9 +211,11 @@ function normalizeSchedule(raw: any): CarScheduleState {
     const id = String(item?.id ?? '').trim();
     const time = normalizeTime(item?.time);
     if (!id || time === null) continue;
+    const parsedEnd = normalizeTime(item?.endTime);
     entries.push({
       id,
       time,
+      endTime: parsedEnd === null || parsedEnd === time ? addMinutesToTime(time, DEFAULT_CAR_WINDOW_MIN) : parsedEnd,
       weekdays: normalizeWeekdays(Number(item?.weekdays ?? ALL_WEEKDAYS)),
       enabled: item?.enabled !== false,
     });
@@ -208,15 +223,41 @@ function normalizeSchedule(raw: any): CarScheduleState {
   return {
     entries,
     nextTriggerAt: Number.isFinite(raw?.nextTriggerAt) ? Number(raw.nextTriggerAt) : -1,
+    activeUntil: Number.isFinite(raw?.activeUntil) ? Number(raw.activeUntil) : -1,
+    connecting: raw?.connecting === true,
     exactAlarmAllowed: raw?.exactAlarmAllowed !== false,
   };
 }
 
-/** 新增一筆排程的預設值：07:30、每天、啟用。 */
+/** HH:mm 加減分鐘（跨午夜回繞）；輸入不合法回原值。 */
+export function addMinutesToTime(time: string, minutes: number): string {
+  const normalized = normalizeTime(time);
+  if (normalized === null) return time;
+  const [h, m] = normalized.split(':').map(Number);
+  const total = (((h * 60 + m + minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** 區段的把關：開始與結束不可相同（相同無法分辨是零長度還是整天）。 */
+export function validateCarWindow(start: string, end: string): { ok: true } | { ok: false; reason: string } {
+  if (normalizeTime(start) !== null && normalizeTime(start) === normalizeTime(end)) {
+    return { ok: false, reason: '結束時間不可與開始時間相同' };
+  }
+  return { ok: true };
+}
+
+/** 區段的顯示：「07:30–08:00」，跨午夜加「（隔日）」標示。 */
+export function describeCarWindow(entry: Pick<CarScheduleEntry, 'time' | 'endTime'>): string {
+  const crossesMidnight = entry.endTime <= entry.time;
+  return `${entry.time}–${entry.endTime}${crossesMidnight ? '（隔日）' : ''}`;
+}
+
+/** 新增一筆排程的預設值：07:30–08:00、每天、啟用。 */
 export function newCarScheduleEntry(): CarScheduleEntry {
   return {
     id: `c${Date.now()}_${Math.floor(Math.random() * 1000)}`,
     time: DEFAULT_CAR_SCHEDULE_TIME,
+    endTime: DEFAULT_CAR_SCHEDULE_END_TIME,
     weekdays: ALL_WEEKDAYS,
     enabled: true,
   };
@@ -230,6 +271,22 @@ export function sortCarSchedule(entries: readonly CarScheduleEntry[]): CarSchedu
 const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
 
 /**
+ * 排程狀態列的說明。在區段內：說明連線進行中或已在區段內及結束時刻；不在區段內：下一次
+ * 開始。沒有啟用的排程回空字串（正常時安靜）。`now` 可注入以便測試。
+ */
+export function describeCarScheduleStatus(state: CarScheduleState | null, now: Date = new Date()): string {
+  if (!state) return '';
+  if (state.activeUntil > 0) {
+    const end = new Date(state.activeUntil);
+    const hhmm = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+    return state.connecting
+      ? `正在嘗試連線車機，到 ${hhmm} 為止，連上即停`
+      : `目前在連線時段內，到 ${hhmm} 為止`;
+  }
+  return describeNextConnect(state.nextTriggerAt, now);
+}
+
+/**
  * 「下一次連線」的說明：今天／明天／週X 加上時刻。沒有啟用的排程回空字串（正常時安靜）。
  * `now` 可注入以便測試。
  */
@@ -240,5 +297,5 @@ export function describeNextConnect(nextTriggerAt: number, now: Date = new Date(
   const days = Math.round((startOfDay(at) - startOfDay(now)) / 86400000);
   const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
   const label = days <= 0 ? '今天' : days === 1 ? '明天' : `週${DAY_NAMES[at.getDay()]}`;
-  return `下一次連線：${label} ${hhmm}`;
+  return `下一次連線：${label} ${hhmm} 開始`;
 }

@@ -929,13 +929,26 @@
           <div v-if="carBt?.device" style="margin-top: 10px;">
             <div v-for="entry in carScheduleSorted" :key="entry.id" class="car-schedule-item">
               <div class="car-schedule-head">
-                <button
-                  type="button"
-                  class="car-schedule-time"
-                  :class="{ 'car-schedule-time--off': !entry.enabled }"
-                  :disabled="carScheduleBusy"
-                  @click="openCarScheduleTimePicker(entry)"
-                >{{ entry.time }}</button>
+                <div class="car-schedule-window" :class="{ 'car-schedule-time--off': !entry.enabled }">
+                  <button
+                    type="button"
+                    class="car-schedule-time"
+                    :class="{ 'car-schedule-time--off': !entry.enabled }"
+                    title="修改開始時刻"
+                    :disabled="carScheduleBusy"
+                    @click="openCarScheduleTimePicker(entry, 'start')"
+                  >{{ entry.time }}</button>
+                  <span class="car-schedule-dash">–</span>
+                  <button
+                    type="button"
+                    class="car-schedule-time"
+                    :class="{ 'car-schedule-time--off': !entry.enabled }"
+                    :title="`修改結束時刻${entry.endTime <= entry.time ? '（隔日）' : ''}`"
+                    :disabled="carScheduleBusy"
+                    @click="openCarScheduleTimePicker(entry, 'end')"
+                  >{{ entry.endTime }}</button>
+                  <span v-if="entry.endTime <= entry.time" class="car-schedule-next-day">隔日</span>
+                </div>
                 <div class="radio-weekdays" style="flex: 1; justify-content: center;">
                   <button
                     v-for="day in RADIO_WEEKDAY_ORDER"
@@ -969,7 +982,7 @@
               :disabled="carScheduleBusy"
               @click="addCarSchedule"
             >新增連線排程</van-button>
-            <!-- 正常時安靜：沒有啟用的排程不顯示；精確鬧鐘被關才警告 -->
+            <!-- 區段內持續嘗試連線、連到就停；正常時安靜：沒有啟用的排程不顯示，精確鬧鐘被關才警告 -->
             <div
               v-if="carScheduleNextText || (carSchedule && !carSchedule.exactAlarmAllowed)"
               style="font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.6;"
@@ -1196,7 +1209,7 @@
     <van-popup v-model:show="showCarScheduleTimePicker" position="bottom" round>
       <van-time-picker
         v-model="carScheduleTimeDraft"
-        title="連線時刻"
+        :title="carScheduleTimePickerField === 'end' ? '結束時刻' : '開始時刻'"
         :columns-type="['hour', 'minute']"
         @confirm="onCarScheduleTimeConfirm"
         @cancel="showCarScheduleTimePicker = false"
@@ -1901,7 +1914,8 @@ import {
   needsSettingsFallback,
   newCarScheduleEntry,
   sortCarSchedule,
-  describeNextConnect,
+  describeCarScheduleStatus,
+  validateCarWindow,
   MAX_CAR_SCHEDULE_ENTRIES,
   type BondedDevice,
   type CarBluetoothState,
@@ -3873,7 +3887,9 @@ const showCarScheduleTimePicker = ref(false);
 const carScheduleTimePickerFor = ref<string | null>(null);
 const carScheduleTimeDraft = ref<string[]>(['07', '30']);
 const carScheduleSorted = computed(() => sortCarSchedule(carSchedule.value?.entries ?? []));
-const carScheduleNextText = computed(() => describeNextConnect(carSchedule.value?.nextTriggerAt ?? -1));
+const carScheduleNextText = computed(() => describeCarScheduleStatus(carSchedule.value));
+/** 目前改的是開始還是結束時刻 */
+const carScheduleTimePickerField = ref<'start' | 'end'>('start');
 
 const loadCarSchedule = async () => {
   if (isTauri()) return;
@@ -3917,9 +3933,10 @@ const onCarScheduleWeekday = (id: string, day: number) => {
   updateCarSchedule(id, { weekdays: toggleWeekday(target.weekdays, day) });
 };
 
-const openCarScheduleTimePicker = (entry: CarScheduleEntry) => {
+const openCarScheduleTimePicker = (entry: CarScheduleEntry, field: 'start' | 'end') => {
   carScheduleTimePickerFor.value = entry.id;
-  carScheduleTimeDraft.value = entry.time.split(':');
+  carScheduleTimePickerField.value = field;
+  carScheduleTimeDraft.value = (field === 'end' ? entry.endTime : entry.time).split(':');
   showCarScheduleTimePicker.value = true;
 };
 
@@ -3932,7 +3949,17 @@ const onCarScheduleTimeConfirm = () => {
     showToast(result.reason);
     return;
   }
-  updateCarSchedule(id, { time: result.time });
+  const target = carSchedule.value?.entries.find((e) => e.id === id);
+  if (!target) return;
+  const isEnd = carScheduleTimePickerField.value === 'end';
+  const start = isEnd ? target.time : result.time;
+  const end = isEnd ? result.time : target.endTime;
+  const window = validateCarWindow(start, end);
+  if (!window.ok) {
+    showToast(window.reason);
+    return;
+  }
+  updateCarSchedule(id, isEnd ? { endTime: result.time } : { time: result.time });
 };
 
 /** 主畫面的「連線車機」鈕：尚未選車機時提示去設定，已選則盡力連線。 */
@@ -6305,12 +6332,13 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 .car-schedule-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
 }
 .car-schedule-time {
   border: none;
   background: transparent;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #0f172a;
@@ -6319,6 +6347,20 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 }
 .car-schedule-time--off {
   color: #94a3b8;
+}
+.car-schedule-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.car-schedule-dash {
+  color: #94a3b8;
+  font-size: 16px;
+}
+.car-schedule-next-day {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-left: 2px;
 }
 .car-schedule-remove {
   border: none;

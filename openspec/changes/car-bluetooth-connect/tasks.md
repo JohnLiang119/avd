@@ -20,9 +20,9 @@
 
 ## 3b. 連線排程
 
-- [x] 3b.1 `CarBluetoothSchedule.java`（資料模型、JSON、最早下一次，沿用 `RadioAlarmSchedule`）、`CarBluetoothScheduler.java`（單一系統鬧鐘）、`CarBluetoothScheduleReceiver.java`（觸發與開機／時間變更重登錄，goAsync 背景連線）；`CarBluetooth.notifyNotConnected` 與播放服務共用
-- [x] 3b.2 `YoutubeDlPlugin`：`getCarBluetoothSchedule`／`setCarBluetoothSchedule`；Manifest 註冊接收器；`CarBluetoothScheduleTest`
-- [x] 3b.3 前端 `carBluetooth.ts` 排程型別、`describeNextConnect` 等純函式與測試；`App.vue` 車機藍牙區段的排程列（時刻、星期、開關、移除、新增、下一次連線）
+- [x] 3b.1 `CarBluetoothSchedule.java`（時間區段模型、JSON、下一次開始、現在是否在區段內，沿用 `RadioAlarmSchedule`）、`CarBluetoothScheduler.java`（單一系統鬧鐘，區段內儲存或開機即立刻開始）、`CarBluetoothScheduleReceiver.java`（區段開始與開機／時間變更重登錄）、`CarBluetoothConnectService.java`（連接裝置型前景服務：區段內重試、連到即停、區段結束仍未連上才通知）；`CarBluetooth.notifyNotConnected` 與播放服務共用
+- [x] 3b.2 `YoutubeDlPlugin`：`getCarBluetoothSchedule`／`setCarBluetoothSchedule`（含 endTime、activeUntil、connecting）；Manifest 註冊接收器、前景服務與 `FOREGROUND_SERVICE_CONNECTED_DEVICE`；`CarBluetoothScheduleTest`
+- [x] 3b.3 前端 `carBluetooth.ts` 區段型別與純函式（`describeCarScheduleStatus`、`addMinutesToTime`、`validateCarWindow` 等）及測試；`App.vue` 車機藍牙區段的排程列（開始與結束時刻、星期、開關、移除、新增、狀態說明）
 
 ## 4. 建置與驗證
 

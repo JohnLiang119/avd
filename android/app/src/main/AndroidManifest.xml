@@ -93,6 +93,15 @@
             快速設定磚「連線車機」（OpenSpec car-bluetooth-connect）：上車時下拉一按即盡力
             連線選定的車機，連不上就開系統藍牙設定讓使用者點一下。
         -->
+        <!--
+            連線排程區段內的持續重試（連到就停）。連接裝置型前景服務：區段可長達數十分鐘，
+            廣播接收器與 Doze 下的重複鬧鐘都撐不住。
+        -->
+        <service
+            android:name=".CarBluetoothConnectService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
         <service
             android:name=".CarBluetoothTileService"
             android:label="@string/car_bluetooth_tile_label"
@@ -154,6 +163,7 @@
         理由同 NFC —— 同一份 APK 也裝在 Android TV。
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 </manifest>
