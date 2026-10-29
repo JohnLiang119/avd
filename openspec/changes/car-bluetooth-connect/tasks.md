@@ -18,6 +18,12 @@
 - [x] 3.2 `src/services/carBluetooth.ts`：型別、插件封裝、`sortBondedDevices`／`describeCarBluetoothStatus`／`needsSettingsFallback` 等純函式；`carBluetooth.spec.ts`
 - [x] 3.3 `App.vue` 偏好設定「車機藍牙」區段：選擇／更換／清除車機（action sheet 列已配對裝置）、狀態文字；手動「連線車機」鈕放在主畫面左側取代「網路正常」標籤（失敗即開藍牙設定）
 
+## 3b. 連線排程
+
+- [x] 3b.1 `CarBluetoothSchedule.java`（資料模型、JSON、最早下一次，沿用 `RadioAlarmSchedule`）、`CarBluetoothScheduler.java`（單一系統鬧鐘）、`CarBluetoothScheduleReceiver.java`（觸發與開機／時間變更重登錄，goAsync 背景連線）；`CarBluetooth.notifyNotConnected` 與播放服務共用
+- [x] 3b.2 `YoutubeDlPlugin`：`getCarBluetoothSchedule`／`setCarBluetoothSchedule`；Manifest 註冊接收器；`CarBluetoothScheduleTest`
+- [x] 3b.3 前端 `carBluetooth.ts` 排程型別、`describeNextConnect` 等純函式與測試；`App.vue` 車機藍牙區段的排程列（時刻、星期、開關、移除、新增、下一次連線）
+
 ## 4. 建置與驗證
 
 - [x] 4.1 `npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過

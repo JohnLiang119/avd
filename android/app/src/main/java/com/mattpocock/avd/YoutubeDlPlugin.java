@@ -2363,6 +2363,51 @@ public class YoutubeDlPlugin extends Plugin {
         }
     }
 
+    // ---- 車機連線排程 ----
+
+    private JSObject carBluetoothScheduleState() {
+        JSArray entries = new JSArray();
+        for (CarBluetoothSchedule.Entry e : new CarBluetoothStore(getContext()).getSchedule()) {
+            JSObject o = new JSObject();
+            o.put("id", e.id);
+            o.put("time", e.time);
+            o.put("weekdays", e.weekdays);
+            o.put("enabled", e.enabled);
+            entries.put(o);
+        }
+        JSObject ret = new JSObject();
+        ret.put("entries", entries);
+        ret.put("nextTriggerAt", CarBluetoothScheduler.nextTriggerAt(getContext()));
+        ret.put("exactAlarmAllowed", RadioAlarmScheduler.canScheduleExactAlarms(getContext()));
+        return ret;
+    }
+
+    @PluginMethod
+    public void getCarBluetoothSchedule(PluginCall call) {
+        try {
+            call.resolve(carBluetoothScheduleState());
+        } catch (Exception e) {
+            Log.e(TAG, "getCarBluetoothSchedule failed", e);
+            call.reject("讀取車機連線排程失敗: " + e.getMessage());
+        }
+    }
+
+    /** 整包寫回並重新登錄系統鬧鐘；原生端會過濾不合法項目，回傳過濾後的結果。 */
+    @PluginMethod
+    public void setCarBluetoothSchedule(PluginCall call) {
+        try {
+            JSArray incoming = call.getArray("entries");
+            String json = incoming == null ? "[]" : incoming.toString();
+            CarBluetoothStore store = new CarBluetoothStore(getContext());
+            store.setSchedule(CarBluetoothSchedule.parse(json));
+            CarBluetoothScheduler.reschedule(getContext());
+            call.resolve(carBluetoothScheduleState());
+        } catch (Exception e) {
+            Log.e(TAG, "setCarBluetoothSchedule failed", e);
+            call.reject("儲存車機連線排程失敗: " + e.getMessage());
+        }
+    }
+
     /** 退回用：開系統藍牙設定頁，使用者點一下車機即可連線。 */
     @PluginMethod
     public void openBluetoothSettings(PluginCall call) {

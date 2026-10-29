@@ -5,6 +5,9 @@ import {
   describeBondedKind,
   describeCarBluetoothStatus,
   needsSettingsFallback,
+  describeNextConnect,
+  newCarScheduleEntry,
+  sortCarSchedule,
   type BondedDevice,
   type CarBluetoothState,
 } from '../carBluetooth';
@@ -73,5 +76,40 @@ describe('needsSettingsFallback', () => {
     expect(needsSettingsFallback('alreadyConnected')).toBe(false);
     expect(needsSettingsFallback('noDevice')).toBe(false);
     expect(needsSettingsFallback('noPermission')).toBe(false);
+  });
+});
+
+describe('describeNextConnect', () => {
+  const now = new Date(2026, 8, 17, 6, 0); // 2026-09-17 週四 06:00
+
+  it('沒有啟用的排程時不顯示任何字', () => {
+    expect(describeNextConnect(-1, now)).toBe('');
+    expect(describeNextConnect(0, now)).toBe('');
+  });
+
+  it('今天、明天與更遠的日子', () => {
+    expect(describeNextConnect(new Date(2026, 8, 17, 7, 30).getTime(), now)).toBe('下一次連線：今天 07:30');
+    expect(describeNextConnect(new Date(2026, 8, 18, 7, 30).getTime(), now)).toBe('下一次連線：明天 07:30');
+    // 9/21 是週一
+    expect(describeNextConnect(new Date(2026, 8, 21, 18, 5).getTime(), now)).toBe('下一次連線：週一 18:05');
+  });
+});
+
+describe('車機連線排程', () => {
+  it('新增的預設值為 07:30、每天、啟用', () => {
+    const entry = newCarScheduleEntry();
+    expect(entry.time).toBe('07:30');
+    expect(entry.weekdays).toBe(0x7f);
+    expect(entry.enabled).toBe(true);
+    expect(entry.id).not.toBe(newCarScheduleEntry().id);
+  });
+
+  it('依時刻由早到晚排序且不改動輸入', () => {
+    const input = [
+      { ...newCarScheduleEntry(), id: 'b', time: '18:00' },
+      { ...newCarScheduleEntry(), id: 'a', time: '07:30' },
+    ];
+    expect(sortCarSchedule(input).map((e) => e.id)).toEqual(['a', 'b']);
+    expect(input.map((e) => e.id)).toEqual(['b', 'a']);
   });
 });

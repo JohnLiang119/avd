@@ -921,6 +921,65 @@
               </div>
             </template>
           </van-cell-group>
+
+          <!--
+            連線排程：到時間自動盡力連線車機（上班、下班等固定上車時間）。星期與時刻的
+            語意同廣播鬧鐘。要先選車機才有意義，所以選了才顯示。
+          -->
+          <div v-if="carBt?.device" style="margin-top: 10px;">
+            <div v-for="entry in carScheduleSorted" :key="entry.id" class="car-schedule-item">
+              <div class="car-schedule-head">
+                <button
+                  type="button"
+                  class="car-schedule-time"
+                  :class="{ 'car-schedule-time--off': !entry.enabled }"
+                  :disabled="carScheduleBusy"
+                  @click="openCarScheduleTimePicker(entry)"
+                >{{ entry.time }}</button>
+                <div class="radio-weekdays" style="flex: 1; justify-content: center;">
+                  <button
+                    v-for="day in RADIO_WEEKDAY_ORDER"
+                    :key="day"
+                    type="button"
+                    class="radio-weekday"
+                    :class="{ 'radio-weekday--on': hasWeekday(entry.weekdays, day) }"
+                    :disabled="carScheduleBusy"
+                    @click="onCarScheduleWeekday(entry.id, day)"
+                  >{{ RADIO_WEEKDAY_LABEL[day] }}</button>
+                </div>
+                <van-switch
+                  :model-value="entry.enabled"
+                  size="18px"
+                  :disabled="carScheduleBusy"
+                  @update:model-value="(v: boolean) => updateCarSchedule(entry.id, { enabled: v })"
+                />
+                <button
+                  type="button"
+                  class="car-schedule-remove"
+                  title="移除這筆排程"
+                  :disabled="carScheduleBusy"
+                  @click="removeCarSchedule(entry.id)"
+                >×</button>
+              </div>
+            </div>
+            <van-button
+              v-if="(carSchedule?.entries.length ?? 0) < MAX_CAR_SCHEDULE_ENTRIES"
+              size="small" block plain
+              style="border-color: #e2e8f0; color: #64748b; margin-top: 8px;"
+              :disabled="carScheduleBusy"
+              @click="addCarSchedule"
+            >新增連線排程</van-button>
+            <!-- 正常時安靜：沒有啟用的排程不顯示；精確鬧鐘被關才警告 -->
+            <div
+              v-if="carScheduleNextText || (carSchedule && !carSchedule.exactAlarmAllowed)"
+              style="font-size: 11px; color: #64748b; margin-top: 6px; line-height: 1.6;"
+            >
+              <div v-if="carScheduleNextText">{{ carScheduleNextText }}</div>
+              <div v-if="carSchedule && !carSchedule.exactAlarmAllowed">
+                系統目前不允許精確鬧鐘，連線時間可能晚幾分鐘。
+              </div>
+            </div>
+          </div>
           <van-action-sheet
             v-model:show="carBtPickerVisible"
             :actions="carBtPickerActions"
@@ -1133,6 +1192,16 @@
         >移除這個頻道</van-button>
       </div>
     </van-dialog>
+
+    <van-popup v-model:show="showCarScheduleTimePicker" position="bottom" round>
+      <van-time-picker
+        v-model="carScheduleTimeDraft"
+        title="連線時刻"
+        :columns-type="['hour', 'minute']"
+        @confirm="onCarScheduleTimeConfirm"
+        @cancel="showCarScheduleTimePicker = false"
+      />
+    </van-popup>
 
     <van-popup v-model:show="showRadioTimePicker" position="bottom" round>
       <van-time-picker
@@ -1830,8 +1899,14 @@ import {
   describeBondedKind,
   describeCarBluetoothStatus,
   needsSettingsFallback,
+  newCarScheduleEntry,
+  sortCarSchedule,
+  describeNextConnect,
+  MAX_CAR_SCHEDULE_ENTRIES,
   type BondedDevice,
   type CarBluetoothState,
+  type CarScheduleEntry,
+  type CarScheduleState,
 } from './services/carBluetooth';
 import {
   nextQuotaResetTime,
@@ -2201,6 +2276,7 @@ onMounted(async () => {
 
   // 主畫面的「連線車機」鈕要先知道有沒有選車機、是否已連線
   void loadCarBluetooth();
+  void loadCarSchedule();
 
   // 早報鬧鐘若在背景播放失敗，摘要留在原生端等這一刻才寫入錯誤紀錄
   void drainRadioAlarmJournal();
@@ -3787,6 +3863,78 @@ const onCarBtConnect = async () => {
   }
 };
 
+// ---- 車機連線排程 ----
+//
+// 同樣由原生端持有（時間到時 WebView 未必在執行）；整包寫回，以回傳值覆蓋本地狀態。
+
+const carSchedule = ref<CarScheduleState | null>(null);
+const carScheduleBusy = ref(false);
+const showCarScheduleTimePicker = ref(false);
+const carScheduleTimePickerFor = ref<string | null>(null);
+const carScheduleTimeDraft = ref<string[]>(['07', '30']);
+const carScheduleSorted = computed(() => sortCarSchedule(carSchedule.value?.entries ?? []));
+const carScheduleNextText = computed(() => describeNextConnect(carSchedule.value?.nextTriggerAt ?? -1));
+
+const loadCarSchedule = async () => {
+  if (isTauri()) return;
+  try {
+    carSchedule.value = await CarBluetoothService.getSchedule();
+  } catch (e) {
+    console.error('[carBluetooth] 讀取連線排程失敗', e);
+  }
+};
+
+const persistCarSchedule = async (entries: CarScheduleEntry[]) => {
+  carScheduleBusy.value = true;
+  try {
+    carSchedule.value = await CarBluetoothService.setSchedule(entries);
+  } catch (e) {
+    reportError('車機藍牙', e);
+    await loadCarSchedule();
+  } finally {
+    carScheduleBusy.value = false;
+  }
+};
+
+const updateCarSchedule = (id: string, patch: Partial<CarScheduleEntry>) => {
+  const entries = (carSchedule.value?.entries ?? []).map((e) => (e.id === id ? { ...e, ...patch } : e));
+  void persistCarSchedule(entries);
+};
+
+const addCarSchedule = () => {
+  const entries = carSchedule.value?.entries ?? [];
+  if (entries.length >= MAX_CAR_SCHEDULE_ENTRIES) return;
+  void persistCarSchedule([...entries, newCarScheduleEntry()]);
+};
+
+const removeCarSchedule = (id: string) => {
+  void persistCarSchedule((carSchedule.value?.entries ?? []).filter((e) => e.id !== id));
+};
+
+const onCarScheduleWeekday = (id: string, day: number) => {
+  const target = carSchedule.value?.entries.find((e) => e.id === id);
+  if (!target) return;
+  updateCarSchedule(id, { weekdays: toggleWeekday(target.weekdays, day) });
+};
+
+const openCarScheduleTimePicker = (entry: CarScheduleEntry) => {
+  carScheduleTimePickerFor.value = entry.id;
+  carScheduleTimeDraft.value = entry.time.split(':');
+  showCarScheduleTimePicker.value = true;
+};
+
+const onCarScheduleTimeConfirm = () => {
+  const id = carScheduleTimePickerFor.value;
+  const result = validateTime(`${carScheduleTimeDraft.value[0]}:${carScheduleTimeDraft.value[1]}`);
+  showCarScheduleTimePicker.value = false;
+  if (!id) return;
+  if (!result.ok) {
+    showToast(result.reason);
+    return;
+  }
+  updateCarSchedule(id, { time: result.time });
+};
+
 /** 主畫面的「連線車機」鈕：尚未選車機時提示去設定，已選則盡力連線。 */
 const onCarBtMainButton = async () => {
   if (!carBt.value?.device) {
@@ -4501,6 +4649,7 @@ watch(showSettingsModal, (open) => {
   radioAdvanced.value = false;
   void loadRadioAlarm();
   void loadCarBluetooth();
+  void loadCarSchedule();
   startRadioStatusPolling();
 });
 
@@ -6148,6 +6297,37 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.car-schedule-item {
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.car-schedule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.car-schedule-time {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #0f172a;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+.car-schedule-time--off {
+  color: #94a3b8;
+}
+.car-schedule-remove {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 20px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
 }
 .radio-advanced-toggle {
   display: block;

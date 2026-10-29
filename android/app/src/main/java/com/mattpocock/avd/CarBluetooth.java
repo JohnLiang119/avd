@@ -1,6 +1,11 @@
 package com.mattpocock.avd;
 
 import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import androidx.core.app.NotificationCompat;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
@@ -233,6 +238,42 @@ public final class CarBluetooth {
         Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;
+    }
+
+    /**
+     * 連不上時的一鍵入口：高優先通知，點下去開系統藍牙設定。鬧鐘前連線與連線排程共用。
+     * 通知頻道在這裡建立 —— 排程由接收器觸發時，播放服務可能一次都沒起來過。
+     */
+    public static void notifyNotConnected(Context context, String deviceName, Outcome outcome) {
+        NotificationManager manager =
+                (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                        RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID, "車機藍牙",
+                        NotificationManager.IMPORTANCE_HIGH);
+                channel.setDescription("連不上車機時，點一下開啟藍牙設定");
+                manager.createNotificationChannel(channel);
+            }
+            PendingIntent open = PendingIntent.getActivity(
+                    context, 0, settingsIntent(),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            String message = describe(outcome, deviceName) + "。點這裡開啟藍牙設定。";
+            Notification notification = new NotificationCompat.Builder(
+                    context, RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID)
+                    .setContentTitle("車機未連線")
+                    .setContentText(message)
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                    .setSmallIcon(R.drawable.ic_car_bluetooth)
+                    .setContentIntent(open)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build();
+            manager.notify(RadioAlarmConstants.CAR_BLUETOOTH_NOTIFICATION_ID, notification);
+        } catch (Exception e) {
+            Log.e(TAG, "failed to show car bluetooth notification", e);
+        }
     }
 
     /** 可直接顯示給使用者的結果說明。 */

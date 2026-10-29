@@ -140,6 +140,12 @@ public final class RadioAlarmConstants {
      */
     public static final long CAR_BLUETOOTH_WAIT_MS = 10 * 1000L;
 
+    /**
+     * 連線排程觸發時的等待上限。比 {@link #CAR_BLUETOOTH_WAIT_MS} 短：排程是在廣播接收器
+     * 裡以 goAsync 執行，系統對接收器的時限約 10 秒，留出啟動與收尾的餘裕。
+     */
+    public static final long CAR_BLUETOOTH_SCHEDULE_WAIT_MS = 8 * 1000L;
+
     /** 連不上車機時「點一下開藍牙設定」的通知。 */
     public static final String CAR_BLUETOOTH_CHANNEL_ID = "CarBluetoothChannel";
     public static final int CAR_BLUETOOTH_NOTIFICATION_ID = 4103;

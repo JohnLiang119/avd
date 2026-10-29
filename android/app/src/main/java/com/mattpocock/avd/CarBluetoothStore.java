@@ -54,4 +54,16 @@ public final class CarBluetoothStore {
     public void clear() {
         prefs.edit().remove(KEY_ADDRESS).remove(KEY_NAME).apply();
     }
+
+    // ---- 連線排程 ----
+
+    private static final String KEY_SCHEDULE = "schedule";
+
+    public java.util.List<CarBluetoothSchedule.Entry> getSchedule() {
+        return CarBluetoothSchedule.parse(prefs.getString(KEY_SCHEDULE, ""));
+    }
+
+    public void setSchedule(java.util.List<CarBluetoothSchedule.Entry> entries) {
+        prefs.edit().putString(KEY_SCHEDULE, CarBluetoothSchedule.toJson(entries)).apply();
+    }
 }

@@ -291,28 +291,9 @@ public class RadioPlaybackService extends Service {
         }, "radio-alarm-car-bt").start();
     }
 
-    /** 連不上車機時的一鍵入口：點通知即開系統藍牙設定，使用者點一下車機即可。 */
+    /** 連不上車機時的一鍵入口：實作與連線排程共用，見 {@link CarBluetooth#notifyNotConnected}。 */
     private void showCarBluetoothNotification(CarBluetoothStore.Device car, CarBluetooth.Outcome outcome) {
-        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (manager == null) return;
-        try {
-            PendingIntent open = PendingIntent.getActivity(
-                    this, 0, CarBluetooth.settingsIntent(),
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            String message = CarBluetooth.describe(outcome, car.name) + "。點這裡開啟藍牙設定。";
-            Notification notification = new NotificationCompat.Builder(this, RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID)
-                    .setContentTitle("車機未連線")
-                    .setContentText(message)
-                    .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                    .setSmallIcon(R.drawable.ic_car_bluetooth)
-                    .setContentIntent(open)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setAutoCancel(true)
-                    .build();
-            manager.notify(RadioAlarmConstants.CAR_BLUETOOTH_NOTIFICATION_ID, notification);
-        } catch (Exception e) {
-            Log.e(TAG, "failed to show car bluetooth notification", e);
-        }
+        CarBluetooth.notifyNotConnected(this, car.name, outcome);
     }
 
     // ---- 播放 ----
@@ -701,11 +682,6 @@ public class RadioPlaybackService extends Service {
                 RadioAlarmConstants.FAILURE_CHANNEL_ID, "早報鬧鐘失敗", NotificationManager.IMPORTANCE_DEFAULT);
         failure.setDescription("播放無法開始時的說明");
         manager.createNotificationChannel(failure);
-
-        NotificationChannel car = new NotificationChannel(
-                RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID, "車機藍牙", NotificationManager.IMPORTANCE_HIGH);
-        car.setDescription("鬧鐘響起前連不上車機時，點一下開啟藍牙設定");
-        manager.createNotificationChannel(car);
     }
 
     private void startForegroundWithNotification() {

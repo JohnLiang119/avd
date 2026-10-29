@@ -13,6 +13,8 @@
 
 import { registerPlugin } from '@capacitor/core';
 
+import { ALL_WEEKDAYS, normalizeTime, normalizeWeekdays } from './radioAlarm';
+
 const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
 
 // ---- 型別 ----
@@ -54,6 +56,26 @@ export interface CarBluetoothConnectResult {
   /** 原生端產生、可直接顯示的結果說明。 */
   message: string;
 }
+
+/** 連線排程的一筆：到時間自動盡力連線車機。星期為遮罩（bit 0 = 週日），語意同鬧鐘。 */
+export interface CarScheduleEntry {
+  id: string;
+  time: string;
+  weekdays: number;
+  enabled: boolean;
+}
+
+export interface CarScheduleState {
+  entries: CarScheduleEntry[];
+  /** 下一次連線的 epoch 毫秒；沒有啟用的排程為 -1。 */
+  nextTriggerAt: number;
+  /** 精確鬧鐘是否被允許；被關閉時排程可能晚幾分鐘。 */
+  exactAlarmAllowed: boolean;
+}
+
+/** 與原生端 CarBluetoothSchedule.MAX_ENTRIES 一致。 */
+export const MAX_CAR_SCHEDULE_ENTRIES = 12;
+export const DEFAULT_CAR_SCHEDULE_TIME = '07:30';
 
 // ---- 正規化 ----
 
@@ -121,6 +143,15 @@ export const CarBluetoothService = {
     };
   },
 
+  async getSchedule(): Promise<CarScheduleState> {
+    return normalizeSchedule(await YoutubeDlPlugin.getCarBluetoothSchedule());
+  },
+
+  /** 整包寫回；原生端會過濾不合法項目並重新登錄系統鬧鐘，回傳過濾後的結果。 */
+  async setSchedule(entries: readonly CarScheduleEntry[]): Promise<CarScheduleState> {
+    return normalizeSchedule(await YoutubeDlPlugin.setCarBluetoothSchedule({ entries }));
+  },
+
   async openSettings(): Promise<void> {
     await YoutubeDlPlugin.openBluetoothSettings();
   },
@@ -157,4 +188,57 @@ export function describeCarBluetoothStatus(state: CarBluetoothState | null): str
 /** 哪些結果該退回「開藍牙設定讓使用者點一下」：車機沒回應、或藍牙根本關著。 */
 export function needsSettingsFallback(outcome: CarBluetoothOutcome): boolean {
   return outcome === 'notConnected' || outcome === 'adapterOff';
+}
+
+// ---- 連線排程 ----
+
+function normalizeSchedule(raw: any): CarScheduleState {
+  const entries: CarScheduleEntry[] = [];
+  for (const item of Array.isArray(raw?.entries) ? raw.entries : []) {
+    const id = String(item?.id ?? '').trim();
+    const time = normalizeTime(item?.time);
+    if (!id || time === null) continue;
+    entries.push({
+      id,
+      time,
+      weekdays: normalizeWeekdays(Number(item?.weekdays ?? ALL_WEEKDAYS)),
+      enabled: item?.enabled !== false,
+    });
+  }
+  return {
+    entries,
+    nextTriggerAt: Number.isFinite(raw?.nextTriggerAt) ? Number(raw.nextTriggerAt) : -1,
+    exactAlarmAllowed: raw?.exactAlarmAllowed !== false,
+  };
+}
+
+/** 新增一筆排程的預設值：07:30、每天、啟用。 */
+export function newCarScheduleEntry(): CarScheduleEntry {
+  return {
+    id: `c${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    time: DEFAULT_CAR_SCHEDULE_TIME,
+    weekdays: ALL_WEEKDAYS,
+    enabled: true,
+  };
+}
+
+/** 排程依時刻由早到晚排序，介面看起來才有條理；不改動輸入。 */
+export function sortCarSchedule(entries: readonly CarScheduleEntry[]): CarScheduleEntry[] {
+  return [...entries].sort((a, b) => a.time.localeCompare(b.time));
+}
+
+const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六'];
+
+/**
+ * 「下一次連線」的說明：今天／明天／週X 加上時刻。沒有啟用的排程回空字串（正常時安靜）。
+ * `now` 可注入以便測試。
+ */
+export function describeNextConnect(nextTriggerAt: number, now: Date = new Date()): string {
+  if (!Number.isFinite(nextTriggerAt) || nextTriggerAt <= 0) return '';
+  const at = new Date(nextTriggerAt);
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / 86400000);
+  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  const label = days <= 0 ? '今天' : days === 1 ? '明天' : `週${DAY_NAMES[at.getDay()]}`;
+  return `下一次連線：${label} ${hhmm}`;
 }

@@ -75,6 +75,21 @@
         </receiver>
 
         <!--
+            車機連線排程的觸發，以及會讓排程登錄失效的系統事件（重開機、改時間、改時區）。
+        -->
+        <receiver
+            android:name=".CarBluetoothScheduleReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
             快速設定磚「連線車機」（OpenSpec car-bluetooth-connect）：上車時下拉一按即盡力
             連線選定的車機，連不上就開系統藍牙設定讓使用者點一下。
         -->
