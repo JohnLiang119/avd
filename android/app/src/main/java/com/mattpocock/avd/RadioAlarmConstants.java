@@ -132,6 +132,18 @@ public final class RadioAlarmConstants {
     public static final String FAILURE_CHANNEL_ID = "RadioAlarmFailureChannel";
     public static final int FAILURE_NOTIFICATION_ID = 4102;
 
+    // ---- 車機藍牙（OpenSpec car-bluetooth-connect）----
+
+    /**
+     * 鬧鐘響起前等待車機接回音訊協定的上限（毫秒）。車機通常在 2–5 秒內接回；
+     * 超過就照播 —— 早報不能因為車機沒回應而遲到太久。快速設定磚與「立即連線」同用此值。
+     */
+    public static final long CAR_BLUETOOTH_WAIT_MS = 10 * 1000L;
+
+    /** 連不上車機時「點一下開藍牙設定」的通知。 */
+    public static final String CAR_BLUETOOTH_CHANNEL_ID = "CarBluetoothChannel";
+    public static final int CAR_BLUETOOTH_NOTIFICATION_ID = 4103;
+
     /** 寫入錯誤紀錄時使用的情境名稱（error-journal 的 context 欄位）。 */
     public static final String JOURNAL_CONTEXT = "早報鬧鐘";
 

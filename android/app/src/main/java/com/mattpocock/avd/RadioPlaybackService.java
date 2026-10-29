@@ -139,6 +139,15 @@ public class RadioPlaybackService extends Service {
      */
     private String stockFailureMessage = null;
 
+    /**
+     * 鬧鐘響起前正在連車機（OpenSpec car-bluetooth-connect）。此時 player 仍為 null，
+     * 第二筆鬧鐘到達要走「延長」而不是重新初始化。
+     */
+    private boolean carConnecting = false;
+    private String carName = "";
+    /** 每次 START 遞增、stopEverything 也遞增：連車機的背景等待回來時據此判斷是否已被停止。 */
+    private int startGeneration = 0;
+
     private final Runnable stopAtEnd = new Runnable() {
         @Override
         public void run() {
@@ -203,8 +212,8 @@ public class RadioPlaybackService extends Service {
         String requestedMode = intent.getStringExtra(EXTRA_MODE);
         if (requestedMode == null) requestedMode = MODE_ALARM;
 
-        if (player != null) {
-            // 已在播放：第二筆時間到達時 MUST NOT 中斷或重頭開始，只把結束時間延後到
+        if (player != null || carConnecting) {
+            // 已在播放（或正在連車機、即將播放）：第二筆時間到達時 MUST NOT 中斷或重頭開始，只把結束時間延後到
             // 兩者中較晚者（規格的「兩筆時間的播放重疊」情境）。頻道維持第一筆的，
             // 不中途切換 —— 切換等於重頭開始。
             if (requestedEnd > endAt) {
@@ -227,11 +236,83 @@ public class RadioPlaybackService extends Service {
         localPlayback = false;
         missingFiles = 0;
         stockFailureMessage = null;
+        startGeneration++;
 
         startForegroundWithNotification();
         acquireLocks();
-        beginPlayback();
+        beginPlaybackAfterCarBluetooth();
         return START_NOT_STICKY;
+    }
+
+    // ---- 車機藍牙（OpenSpec car-bluetooth-connect）----
+
+    /**
+     * 鬧鐘模式下先盡力把手機連到車機，再開始播放。
+     *
+     * 只有鬧鐘走這段：試播與手動直播時使用者就在 App 裡，不需要。沒選車機、沒權限
+     * 都直接播。等待有上限（CAR_BLUETOOTH_WAIT_MS）—— 早報不能因為車機沒回應而不響；
+     * 沒連上就照播，並以通知給使用者一個「點一下就開藍牙設定」的入口，連上後系統會
+     * 自動把正在播的聲音切到車機。
+     */
+    private void beginPlaybackAfterCarBluetooth() {
+        final CarBluetoothStore.Device car =
+                MODE_ALARM.equals(mode) ? new CarBluetoothStore(this).get() : null;
+        if (car == null || !CarBluetooth.hasPermission(this)) {
+            beginPlayback();
+            return;
+        }
+
+        final int generation = startGeneration;
+        carConnecting = true;
+        carName = car.name;
+        updateNotification();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final CarBluetooth.Outcome outcome = CarBluetooth.connect(
+                        RadioPlaybackService.this, car, RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS);
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        carConnecting = false;
+                        if (generation != startGeneration) {
+                            // 等待期間被停止：這次的結果已無意義，也不可再開始播放
+                            return;
+                        }
+                        Log.d(TAG, "car bluetooth before alarm: " + outcome);
+                        if (outcome == CarBluetooth.Outcome.NOT_CONNECTED
+                                || outcome == CarBluetooth.Outcome.ADAPTER_OFF) {
+                            showCarBluetoothNotification(car, outcome);
+                        }
+                        beginPlayback();
+                    }
+                });
+            }
+        }, "radio-alarm-car-bt").start();
+    }
+
+    /** 連不上車機時的一鍵入口：點通知即開系統藍牙設定，使用者點一下車機即可。 */
+    private void showCarBluetoothNotification(CarBluetoothStore.Device car, CarBluetooth.Outcome outcome) {
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+        try {
+            PendingIntent open = PendingIntent.getActivity(
+                    this, 0, CarBluetooth.settingsIntent(),
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            String message = CarBluetooth.describe(outcome, car.name) + "。點這裡開啟藍牙設定。";
+            Notification notification = new NotificationCompat.Builder(this, RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID)
+                    .setContentTitle("車機未連線")
+                    .setContentText(message)
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                    .setSmallIcon(R.drawable.ic_car_bluetooth)
+                    .setContentIntent(open)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .build();
+            manager.notify(RadioAlarmConstants.CAR_BLUETOOTH_NOTIFICATION_ID, notification);
+        } catch (Exception e) {
+            Log.e(TAG, "failed to show car bluetooth notification", e);
+        }
     }
 
     // ---- 播放 ----
@@ -500,6 +581,8 @@ public class RadioPlaybackService extends Service {
 
     private void stopEverything() {
         playing = false;
+        carConnecting = false;
+        startGeneration++;
         // 還原音量鍵原本的行為
         MainActivity.notifyPlaybackStateChanged();
         handler.removeCallbacks(stopAtEnd);
@@ -618,6 +701,11 @@ public class RadioPlaybackService extends Service {
                 RadioAlarmConstants.FAILURE_CHANNEL_ID, "早報鬧鐘失敗", NotificationManager.IMPORTANCE_DEFAULT);
         failure.setDescription("播放無法開始時的說明");
         manager.createNotificationChannel(failure);
+
+        NotificationChannel car = new NotificationChannel(
+                RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID, "車機藍牙", NotificationManager.IMPORTANCE_HIGH);
+        car.setDescription("鬧鐘響起前連不上車機時，點一下開啟藍牙設定");
+        manager.createNotificationChannel(car);
     }
 
     private void startForegroundWithNotification() {
@@ -645,9 +733,10 @@ public class RadioPlaybackService extends Service {
                 this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         String until = new SimpleDateFormat("HH:mm", Locale.US).format(new Date(endAt));
-        String state = everReady
-                ? (MODE_LIVE.equals(mode) ? "直播中" : "播放中")
-                : "正在連線";
+        String state;
+        if (everReady) state = MODE_LIVE.equals(mode) ? "直播中" : "播放中";
+        else if (carConnecting) state = "正在連線車機 " + carName;
+        else state = "正在連線";
         String text = state + "，預計 " + until + " 停止";
 
         String suffix = "";

@@ -50,7 +50,11 @@ import android.net.wifi.WifiManager;
         permissions = {
                 // 早報鬧鐘的播放通知（含「停止」按鈕）。API 33 起為執行期權限；
                 // 未授予時播放照常進行，失去的只是通知與停止按鈕。
-                @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS})
+                @Permission(alias = "notifications", strings = {Manifest.permission.POST_NOTIFICATIONS}),
+                // 車機藍牙（OpenSpec car-bluetooth-connect）。API 31 起列出已配對裝置與開
+                // RFCOMM 連線都需要這個執行期權限；更舊的版本上 BLUETOOTH 為安裝即授予，
+                // 插件方法會跳過請求。
+                @Permission(alias = "bluetooth", strings = {Manifest.permission.BLUETOOTH_CONNECT})
         })
 public class YoutubeDlPlugin extends Plugin {
 
@@ -2222,6 +2226,152 @@ public class YoutubeDlPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "removeRadioAlarmChannelFiles failed", e);
             call.reject("刪除頻道檔案失敗: " + e.getMessage());
+        }
+    }
+
+    // ---- 車機藍牙（OpenSpec car-bluetooth-connect）----
+    //
+    // 選定的車機由原生端持有（CarBluetoothStore），理由與鬧鐘設定相同：鬧鐘響起前要連車機，
+    // 那一刻 WebView 多半沒在執行。會阻塞的查詢與連線一律丟到背景執行緒再 resolve。
+
+    @PluginMethod
+    public void getCarBluetooth(final PluginCall call) {
+        final Context context = getContext();
+        final CarBluetoothStore.Device device = new CarBluetoothStore(context).get();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean connected = device != null
+                        && CarBluetooth.hasPermission(context)
+                        && CarBluetooth.isConnected(context, device.address);
+                call.resolve(carBluetoothState(context, device, connected));
+            }
+        }, "car-bt-state").start();
+    }
+
+    private static JSObject carBluetoothState(Context context, CarBluetoothStore.Device device, boolean connected) {
+        JSObject ret = new JSObject();
+        if (device == null) {
+            ret.put("device", JSONObject.NULL);
+        } else {
+            JSObject d = new JSObject();
+            d.put("address", device.address);
+            d.put("name", device.name);
+            ret.put("device", d);
+        }
+        ret.put("permissionGranted", CarBluetooth.hasPermission(context));
+        ret.put("adapterOn", CarBluetooth.isAdapterOn(context));
+        ret.put("connected", connected);
+        return ret;
+    }
+
+    /** 列出已配對的藍牙裝置；API 31 起先要 BLUETOOTH_CONNECT。 */
+    @PluginMethod
+    public void listBondedBluetoothDevices(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && getPermissionState("bluetooth") != PermissionState.GRANTED) {
+            requestPermissionForAlias("bluetooth", call, "carBluetoothPermissionCallback");
+            return;
+        }
+        resolveBondedDevices(call);
+    }
+
+    @PermissionCallback
+    private void carBluetoothPermissionCallback(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && getPermissionState("bluetooth") != PermissionState.GRANTED) {
+            call.reject("未授予藍牙權限，無法列出已配對的裝置");
+            return;
+        }
+        resolveBondedDevices(call);
+    }
+
+    private void resolveBondedDevices(PluginCall call) {
+        try {
+            JSArray devices = new JSArray();
+            for (CarBluetooth.Device device : CarBluetooth.bondedDevices(getContext())) {
+                JSObject d = new JSObject();
+                d.put("address", device.address);
+                d.put("name", device.name);
+                d.put("kind", device.kind);
+                devices.put(d);
+            }
+            JSObject ret = new JSObject();
+            ret.put("adapterOn", CarBluetooth.isAdapterOn(getContext()));
+            ret.put("devices", devices);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "listBondedBluetoothDevices failed", e);
+            call.reject("無法列出已配對的藍牙裝置: " + e.getMessage());
+        }
+    }
+
+    /** 設定（address 非空）或清除（address 空）車機，回傳最新狀態。 */
+    @PluginMethod
+    public void setCarBluetooth(PluginCall call) {
+        try {
+            String address = call.getString("address", "");
+            String name = call.getString("name", "");
+            CarBluetoothStore store = new CarBluetoothStore(getContext());
+            if (address == null || address.isEmpty()) {
+                store.clear();
+            } else {
+                store.set(address, name);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "setCarBluetooth failed", e);
+            call.reject("無法儲存車機設定: " + e.getMessage());
+            return;
+        }
+        getCarBluetooth(call);
+    }
+
+    /** 盡力連線選定的車機（最多等 CAR_BLUETOOTH_WAIT_MS）；前端依 outcome 決定要不要開藍牙設定。 */
+    @PluginMethod
+    public void connectCarBluetooth(final PluginCall call) {
+        final Context context = getContext();
+        final CarBluetoothStore.Device device = new CarBluetoothStore(context).get();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                CarBluetooth.Outcome outcome;
+                try {
+                    outcome = CarBluetooth.connect(context, device, RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS);
+                } catch (Exception e) {
+                    Log.e(TAG, "connectCarBluetooth failed", e);
+                    call.reject("連線車機時發生錯誤: " + e.getMessage());
+                    return;
+                }
+                JSObject ret = new JSObject();
+                ret.put("outcome", carBluetoothOutcomeKey(outcome));
+                ret.put("connected", outcome == CarBluetooth.Outcome.CONNECTED
+                        || outcome == CarBluetooth.Outcome.ALREADY_CONNECTED);
+                ret.put("message", CarBluetooth.describe(outcome, device == null ? "" : device.name));
+                call.resolve(ret);
+            }
+        }, "car-bt-connect").start();
+    }
+
+    private static String carBluetoothOutcomeKey(CarBluetooth.Outcome outcome) {
+        switch (outcome) {
+            case NO_DEVICE: return "noDevice";
+            case NO_PERMISSION: return "noPermission";
+            case ADAPTER_OFF: return "adapterOff";
+            case ALREADY_CONNECTED: return "alreadyConnected";
+            case CONNECTED: return "connected";
+            default: return "notConnected";
+        }
+    }
+
+    /** 退回用：開系統藍牙設定頁，使用者點一下車機即可連線。 */
+    @PluginMethod
+    public void openBluetoothSettings(PluginCall call) {
+        try {
+            getContext().startActivity(CarBluetooth.settingsIntent());
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "openBluetoothSettings failed", e);
+            call.reject("無法開啟藍牙設定: " + e.getMessage());
         }
     }
 

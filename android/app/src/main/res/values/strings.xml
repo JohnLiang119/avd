@@ -4,4 +4,6 @@
     <string name="title_activity_main">AVD</string>
     <string name="package_name">com.mattpocock.avd</string>
     <string name="custom_url_scheme">com.mattpocock.avd</string>
+    <!-- 快速設定磚「連線車機」（OpenSpec car-bluetooth-connect） -->
+    <string name="car_bluetooth_tile_label">連線車機</string>
 </resources>

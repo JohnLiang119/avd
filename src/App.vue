@@ -861,6 +861,57 @@
         </template>
 
         <!--
+          車機藍牙（OpenSpec car-bluetooth-connect）：僅 Android。選定的車機由原生端持有，
+          鬧鐘響起前先盡力連線；這裡的「立即連線」給上車時手動用（快速設定磚亦同）。
+          Android 12 起 App 不能直接叫系統連某台已配對裝置，連不上一律退回開藍牙設定
+          讓使用者點一下 —— 介面上不假裝「已自動連上」。
+        -->
+        <template v-if="!isTauri()">
+          <p style="font-size: 13px; color: #64748b; margin-top: 12px; margin-bottom: 8px; font-weight: bold;">
+            車機藍牙
+          </p>
+          <van-cell-group inset style="margin: 0; border: 1px solid #e2e8f0;">
+            <van-cell
+              v-if="!carBt?.device"
+              title="選擇車機"
+              label="鬧鐘響起前先把手機連到車上的藍牙；上車時也可用快速設定的「連線車機」磚"
+              is-link
+              @click="onCarBtPick"
+            />
+            <template v-else>
+              <van-cell :title="carBt.device.name" :label="carBtStatusText" />
+              <div style="display: flex; gap: 8px; padding: 4px 12px 10px;">
+                <van-button
+                  size="small" block type="primary"
+                  :disabled="carBtBusy || carBt.connected"
+                  :loading="carBtConnecting" loading-text="連線中…"
+                  @click="onCarBtConnect"
+                >立即連線</van-button>
+                <van-button
+                  size="small" plain style="border-color: #e2e8f0; color: #64748b;"
+                  :disabled="carBtBusy || carBtConnecting"
+                  @click="onCarBtPick"
+                >更換</van-button>
+                <van-button
+                  size="small" plain style="border-color: #e2e8f0; color: #64748b;"
+                  :disabled="carBtBusy || carBtConnecting"
+                  @click="onCarBtClear"
+                >清除</van-button>
+              </div>
+            </template>
+          </van-cell-group>
+          <van-action-sheet
+            v-model:show="carBtPickerVisible"
+            :actions="carBtPickerActions"
+            cancel-text="取消"
+            description="已配對的藍牙裝置"
+            close-on-click-action
+            teleport="body"
+            @select="(_action: unknown, index: number) => onCarBtSelect(index)"
+          />
+        </template>
+
+        <!--
           NFC 讀卡機：僅 Android 提供（design.md D4）。讀卡只在彈窗開著時進行，
           進入點的 label 寫明要先開啟；「請將卡片靠近」只在彈窗內、且只在能讀卡時顯示。
         -->
@@ -1752,6 +1803,15 @@ import {
   type RadioStockItem,
   type TtsVoice,
 } from './services/radioAlarm';
+import {
+  CarBluetoothService,
+  sortBondedDevices,
+  describeBondedKind,
+  describeCarBluetoothStatus,
+  needsSettingsFallback,
+  type BondedDevice,
+  type CarBluetoothState,
+} from './services/carBluetooth';
 import {
   nextQuotaResetTime,
   apiKeyFingerprint,
@@ -3612,6 +3672,97 @@ const confirmClearAll = storage.defineSetting('avd_confirm_clear_all', true);
 const confirmClearSingle = storage.defineSetting('avd_confirm_clear_single', true);
 const testModeEnabled = storage.defineSetting('avd_test_mode_enabled', false);
 
+// ---- 車機藍牙（OpenSpec car-bluetooth-connect）----
+//
+// 與鬧鐘相同**沒有** defineSetting：選定的車機由 Android 原生端持有（鬧鐘響起前要在
+// WebView 未執行時讀到），前端每次開設定都經插件回去讀、變更時寫回並以回傳值覆蓋。
+
+const carBt = ref<CarBluetoothState | null>(null);
+/** 讀寫設定中（選擇、清除）。 */
+const carBtBusy = ref(false);
+/** 「立即連線」進行中：原生端最多等 10 秒，按鈕要顯示 loading 而不是像沒反應。 */
+const carBtConnecting = ref(false);
+const carBtPickerVisible = ref(false);
+/** 選擇清單的來源，已依車用→音訊→其餘排序；@select 以 index 對回來。 */
+const carBtBonded = ref<BondedDevice[]>([]);
+const carBtStatusText = computed(() => describeCarBluetoothStatus(carBt.value));
+const carBtPickerActions = computed(() => carBtBonded.value.map((d) => ({
+  name: d.name,
+  subname: describeBondedKind(d.kind) || d.address,
+})));
+
+const loadCarBluetooth = async () => {
+  if (isTauri()) return;
+  try {
+    carBt.value = await CarBluetoothService.getState();
+  } catch (e) {
+    console.error('[carBluetooth] 讀取狀態失敗', e);
+  }
+};
+
+/** 列出已配對裝置讓使用者挑；原生端會在需要時先要藍牙權限，拒絕即丟錯。 */
+const onCarBtPick = async () => {
+  if (carBtBusy.value) return;
+  carBtBusy.value = true;
+  try {
+    const r = await CarBluetoothService.listBonded();
+    if (!r.adapterOn) {
+      showToast('手機的藍牙是關閉的，請先開啟');
+      return;
+    }
+    carBtBonded.value = sortBondedDevices(r.devices);
+    if (!carBtBonded.value.length) {
+      showToast('沒有已配對的藍牙裝置，請先在系統設定與車機配對');
+      return;
+    }
+    carBtPickerVisible.value = true;
+  } catch (e) {
+    reportError('車機藍牙', e);
+  } finally {
+    carBtBusy.value = false;
+  }
+};
+
+const onCarBtSelect = async (index: number) => {
+  const picked = carBtBonded.value[index];
+  if (!picked) return;
+  carBtBusy.value = true;
+  try {
+    carBt.value = await CarBluetoothService.setDevice({ address: picked.address, name: picked.name });
+  } catch (e) {
+    reportError('車機藍牙', e);
+  } finally {
+    carBtBusy.value = false;
+  }
+};
+
+const onCarBtClear = async () => {
+  carBtBusy.value = true;
+  try {
+    carBt.value = await CarBluetoothService.setDevice(null);
+  } catch (e) {
+    reportError('車機藍牙', e);
+  } finally {
+    carBtBusy.value = false;
+  }
+};
+
+/** 盡力連線；車機沒回應或藍牙關著就直接開系統藍牙設定，讓使用者點一下 —— 不假裝已連上。 */
+const onCarBtConnect = async () => {
+  if (carBtConnecting.value) return;
+  carBtConnecting.value = true;
+  try {
+    const r = await CarBluetoothService.connect();
+    showToast(r.message);
+    if (needsSettingsFallback(r.outcome)) await CarBluetoothService.openSettings();
+  } catch (e) {
+    reportError('車機藍牙', e);
+  } finally {
+    carBtConnecting.value = false;
+    await loadCarBluetooth();
+  }
+};
+
 // ---- 廣播鬧鐘 ----
 //
 // 注意這裡**沒有** defineSetting：鬧鐘設定的權威來源在 Android 原生端
@@ -4316,6 +4467,7 @@ watch(showSettingsModal, (open) => {
   radioExpandedId.value = null;
   radioAdvanced.value = false;
   void loadRadioAlarm();
+  void loadCarBluetooth();
   startRadioStatusPolling();
 });
 

@@ -73,6 +73,21 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!--
+            快速設定磚「連線車機」（OpenSpec car-bluetooth-connect）：上車時下拉一按即盡力
+            連線選定的車機，連不上就開系統藍牙設定讓使用者點一下。
+        -->
+        <service
+            android:name=".CarBluetoothTileService"
+            android:label="@string/car_bluetooth_tile_label"
+            android:icon="@drawable/ic_car_bluetooth"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
     <!--
@@ -116,4 +131,14 @@
     <!-- NFC 讀卡機：兩者皆為普通權限，安裝即授予，無執行期請求（design.md D7）。 -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+        車機藍牙（OpenSpec car-bluetooth-connect）。API 31 起列出已配對裝置與建立 RFCOMM
+        連線需要執行期權限 BLUETOOTH_CONNECT；更舊的版本用安裝即授予的 BLUETOOTH。
+        刻意不要 BLUETOOTH_SCAN：只連已配對的裝置，不掃描。藍牙硬體標為非必要，
+        理由同 NFC —— 同一份 APK 也裝在 Android TV。
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 </manifest>
