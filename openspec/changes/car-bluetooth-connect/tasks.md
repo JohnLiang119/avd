@@ -16,7 +16,7 @@
 
 - [x] 3.1 `YoutubeDlPlugin`：`bluetooth` 權限別名與 `getCarBluetooth`／`listBondedBluetoothDevices`／`setCarBluetooth`／`connectCarBluetooth`／`openBluetoothSettings`
 - [x] 3.2 `src/services/carBluetooth.ts`：型別、插件封裝、`sortBondedDevices`／`describeCarBluetoothStatus`／`needsSettingsFallback` 等純函式；`carBluetooth.spec.ts`
-- [x] 3.3 `App.vue` 偏好設定「車機藍牙」區段：選擇／更換／清除車機（action sheet 列已配對裝置）、立即連線（失敗即開藍牙設定）、狀態文字
+- [x] 3.3 `App.vue` 偏好設定「車機藍牙」區段：選擇／更換／清除車機（action sheet 列已配對裝置）、狀態文字；手動「連線車機」鈕放在主畫面左側取代「網路正常」標籤（失敗即開藍牙設定）
 
 ## 4. 建置與驗證
 

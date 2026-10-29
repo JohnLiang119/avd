@@ -112,7 +112,33 @@
 
         <!-- 網路狀態標籤（正常／檢查中，置左，與右側兩排按鈕等高）＋ 重整/清除/刪除/設定、音訊/頻道/快傳/收合 -->
         <div style="display: flex; align-items: stretch; gap: 8px;">
-          <div v-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
+          <!--
+            Android：此處原為「網路正常」標籤，改放手動「連線車機」鈕（OpenSpec car-bluetooth-connect）。
+            網路不穩／離線時上方仍有獨立警示列，不會因此看不到網路異常。
+            已連線時用狀態色（與原標籤同一組顏色），並以文字「已連／車機」並列，不單靠顏色。
+          -->
+          <div v-if="!isTauri()" style="display: flex; align-items: center; flex-shrink: 0;">
+            <button
+              type="button"
+              :disabled="carBtConnecting"
+              title="連線車機藍牙；連不上會開啟藍牙設定"
+              :style="carBt?.connected
+                ? `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px; background: ${UI_COLOR.okSurface}; color: ${UI_COLOR.ok}; border: 1px solid ${UI_COLOR.okLine}; cursor: pointer;`
+                : `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px; background: transparent; color: ${UI_COLOR.text}; border: 1px solid #e2e8f0; cursor: pointer;`"
+              @click="onCarBtMainButton"
+            >
+              <span v-if="carBtConnecting" class="ns-spinner"></span>
+              <template v-else-if="carBt?.connected">
+                <span>已連</span>
+                <span>車機</span>
+              </template>
+              <template v-else>
+                <span>連線</span>
+                <span>車機</span>
+              </template>
+            </button>
+          </div>
+          <div v-else-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <!--
               連線正常時保留狀態色。這是全應用程式唯一用於「狀態」的顏色，
               與 `danger` 分屬兩個用途軸（一個說「現在如何」、一個說「按下
@@ -880,20 +906,15 @@
             />
             <template v-else>
               <van-cell :title="carBt.device.name" :label="carBtStatusText" />
+              <!-- 手動連線鈕在主畫面左側（原「網路正常」標籤的位置），這裡只管選擇與清除 -->
               <div style="display: flex; gap: 8px; padding: 4px 12px 10px;">
                 <van-button
-                  size="small" block type="primary"
-                  :disabled="carBtBusy || carBt.connected"
-                  :loading="carBtConnecting" loading-text="連線中…"
-                  @click="onCarBtConnect"
-                >立即連線</van-button>
-                <van-button
-                  size="small" plain style="border-color: #e2e8f0; color: #64748b;"
+                  size="small" block plain style="border-color: #e2e8f0; color: #64748b;"
                   :disabled="carBtBusy || carBtConnecting"
                   @click="onCarBtPick"
                 >更換</van-button>
                 <van-button
-                  size="small" plain style="border-color: #e2e8f0; color: #64748b;"
+                  size="small" block plain style="border-color: #e2e8f0; color: #64748b;"
                   :disabled="carBtBusy || carBtConnecting"
                   @click="onCarBtClear"
                 >清除</van-button>
@@ -2177,6 +2198,9 @@ onMounted(async () => {
   if (taskStore.trimmedOnRestore.value > 0) {
     showToast(`已自動清理 ${taskStore.trimmedOnRestore.value} 筆較舊的任務紀錄`);
   }
+
+  // 主畫面的「連線車機」鈕要先知道有沒有選車機、是否已連線
+  void loadCarBluetooth();
 
   // 早報鬧鐘若在背景播放失敗，摘要留在原生端等這一刻才寫入錯誤紀錄
   void drainRadioAlarmJournal();
@@ -3761,6 +3785,15 @@ const onCarBtConnect = async () => {
     carBtConnecting.value = false;
     await loadCarBluetooth();
   }
+};
+
+/** 主畫面的「連線車機」鈕：尚未選車機時提示去設定，已選則盡力連線。 */
+const onCarBtMainButton = async () => {
+  if (!carBt.value?.device) {
+    showToast('請先在偏好設定的「車機藍牙」選擇車機');
+    return;
+  }
+  await onCarBtConnect();
 };
 
 // ---- 廣播鬧鐘 ----
