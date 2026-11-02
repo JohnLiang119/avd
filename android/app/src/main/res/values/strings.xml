@@ -6,4 +6,7 @@
     <string name="custom_url_scheme">com.mattpocock.avd</string>
     <!-- 快速設定磚「連線車機」（OpenSpec car-bluetooth-connect） -->
     <string name="car_bluetooth_tile_label">連線車機</string>
+    <!-- 無障礙服務「自動點選車機」：顯示在系統無障礙設定 -->
+    <string name="car_bluetooth_auto_tap_label">AVD 自動點選車機</string>
+    <string name="car_bluetooth_auto_tap_description">AVD 為了連線車機而開啟藍牙設定時，自動點選你在 AVD 選定的車機，省去手動點一下；連上後自動返回。只在 AVD 開啟藍牙設定後的 15 秒內動作，其餘時間不處理任何畫面內容。</string>
 </resources>

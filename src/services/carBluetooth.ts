@@ -8,7 +8,8 @@
  *
  * Android 12 起 App 不能直接叫系統連某台已配對裝置（需 BLUETOOTH_PRIVILEGED），原生端
  * 的連線是「盡力而為」（RFCOMM 喚醒鏈路、等車機自己接回音訊協定）；介面在失敗時一律
- * 退回「開系統藍牙設定讓使用者點一下」。
+ * 退回「開系統藍牙設定讓使用者點一下」。實車 CX501A 不吃喚醒，使用者開啟「自動點選車機」
+ * 無障礙服務後，那一下由服務代點。
  */
 
 import { registerPlugin } from '@capacitor/core';
@@ -39,6 +40,8 @@ export interface CarBluetoothState {
   adapterOn: boolean;
   /** 選定的車機目前是否接著音訊協定（A2DP 或通話）。 */
   connected: boolean;
+  /** 「自動點選車機」無障礙服務是否已開啟（開藍牙設定時由服務代點車機）。 */
+  autoTapEnabled: boolean;
 }
 
 /** 與原生端 CarBluetooth.Outcome 一一對應。 */
@@ -109,6 +112,7 @@ function normalizeState(raw: any): CarBluetoothState {
     permissionGranted: raw?.permissionGranted !== false,
     adapterOn: raw?.adapterOn === true,
     connected: raw?.connected === true,
+    autoTapEnabled: raw?.autoTapEnabled === true,
   };
 }
 
@@ -146,7 +150,10 @@ export const CarBluetoothService = {
     }));
   },
 
-  /** 盡力連線（原生端最多等 10 秒）。呼叫端依 needsSettingsFallback 決定要不要開藍牙設定。 */
+  /**
+   * 盡力連線（原生端最多等 10 秒；自動點選開著時不等）。呼叫端依 needsSettingsFallback
+   * 決定要不要開藍牙設定。
+   */
   async connect(): Promise<CarBluetoothConnectResult> {
     const r = await YoutubeDlPlugin.connectCarBluetooth();
     return {
@@ -167,6 +174,11 @@ export const CarBluetoothService = {
 
   async openSettings(): Promise<void> {
     await YoutubeDlPlugin.openBluetoothSettings();
+  },
+
+  /** 前往系統無障礙設定開啟「自動點選車機」。 */
+  async openAutoTapSettings(): Promise<void> {
+    await YoutubeDlPlugin.openCarAutoTapSettings();
   },
 };
 
@@ -196,6 +208,16 @@ export function describeCarBluetoothStatus(state: CarBluetoothState | null): str
   if (!state.permissionGranted) return '需要藍牙權限，請重新選擇車機以授權';
   if (!state.adapterOn) return '手機的藍牙是關閉的';
   return state.connected ? '已連線' : '未連線。鬧鐘響起前會先嘗試連線';
+}
+
+/**
+ * 偏好設定「自動點選車機」那一列的說明。未開啟時要交代去哪裡開，以及側載 App 在
+ * Android 13 起可能被標成「受限制的設定」、得先在 App 資訊頁允許。
+ */
+export function describeCarAutoTap(state: Pick<CarBluetoothState, 'autoTapEnabled'> | null): string {
+  if (state?.autoTapEnabled) return '已開啟：連不上時開啟藍牙設定，會自動點選車機並返回';
+  return '未開啟：點這裡到無障礙設定開啟「AVD 自動點選車機」。若顯示受限制的設定，'
+    + '請先到 App 資訊頁右上角選單「允許受限制的設定」';
 }
 
 /** 哪些結果該退回「開藍牙設定讓使用者點一下」：車機沒回應、或藍牙根本關著。 */

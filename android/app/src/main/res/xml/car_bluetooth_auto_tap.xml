@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    「AVD 自動點選車機」無障礙服務的設定（OpenSpec car-bluetooth-connect）。
+    不以 packageNames 限定 com.android.settings：HyperOS 等 ROM 的藍牙頁不一定在該套件；
+    服務本身只在本 App 開啟藍牙設定後的 15 秒內動作，其餘事件直接忽略。
+    canPerformGestures：設定頁的列不接受無障礙點擊時，改送點按手勢。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/car_bluetooth_auto_tap_description"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:notificationTimeout="200" />

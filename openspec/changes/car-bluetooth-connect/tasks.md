@@ -28,4 +28,16 @@
 
 - [x] 4.1 `npm run build`、`npm test`、`npx vue-tsc --noEmit`、`cargo check`、`gradlew :app:compileDebugJavaWithJavac` 全數通過
 - [x] 4.2 進版七處並更新 `publish_all.ps1` 預設發布說明；提交、推送、執行發布腳本
-- [ ] 4.3 實車驗證：上車後按磚或等鬧鐘，確認 CX501A 是否被 RFCOMM 喚醒接回 A2DP；不吃則記錄並評估 Shizuku 方案
+- [x] 4.3 實車驗證：上車後按磚或等鬧鐘，確認 CX501A 是否被 RFCOMM 喚醒接回 A2DP；不吃則記錄並評估 Shizuku 方案
+  - 結果（2026-11-02）：**不吃**。等滿 10 秒後開藍牙設定，手動點一下才連上。改以無障礙服務代點（見第 5 節），不引入 Shizuku。
+
+## 5. 自動點選車機（無障礙服務）
+
+- [x] 5.1 `CarBluetoothAutoTapService`：待命 15 秒、名稱完全相同（含別名）、點前確認未連線、一次只點一下、捲動找列（僅設定頁所屬套件）、點後等接回即提示並返回；`res/xml/car_bluetooth_auto_tap.xml` 與字串
+- [x] 5.2 `CarBluetoothSettingsActivity` 透明中繼頁（設定待命 → 開系統藍牙設定）；`CarBluetooth.settingsIntent(Context)` 改指中繼頁，磚、插件、「車機未連線」通知、連線排程常駐通知（新增點一下開設定）全部改走它
+- [x] 5.3 `CarBluetooth`：`awaitConnected`、`displayNames`、`manualWaitMs`（自動點選開著時手動入口不等 RFCOMM）；`connect` 等待為 0 時不做喚醒
+- [x] 5.4 Manifest：無障礙服務、中繼頁、藍牙設定動作的 `<queries>`
+- [x] 5.5 插件：狀態帶 `autoTapEnabled`、`openCarAutoTapSettings`、手動連線改用 `manualWaitMs` 與交接訊息
+- [x] 5.6 前端：`autoTapEnabled` 型別與 `describeCarAutoTap` 純函式及測試；偏好設定「自動點選車機」列；App 回前景時重讀車機狀態
+- [ ] 5.7 建置驗證（五項）全數通過；進版七處與 `publish_all.ps1` 預設發布說明；提交、發布
+- [ ] 5.8 實車驗證：開啟無障礙服務後按磚，確認 HyperOS 藍牙設定頁能自動點選 CX501A 並返回

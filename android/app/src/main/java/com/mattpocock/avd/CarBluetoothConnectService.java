@@ -194,14 +194,22 @@ public class CarBluetoothConnectService extends Service {
         PendingIntent stop = PendingIntent.getService(
                 this, 0, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        // 點通知 = 現在就開藍牙設定（自動點選開著時等於立即連線），不必等到區段結束
+        PendingIntent open = PendingIntent.getActivity(
+                this, 1, CarBluetooth.settingsIntent(this),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
         CarBluetoothStore.Device car = new CarBluetoothStore(this).get();
         String until = new SimpleDateFormat("HH:mm", Locale.US).format(new Date(endAt));
         String text = "持續嘗試中，到 " + until + " 為止"
-                + (attempts > 0 ? "（第 " + attempts + " 次）" : "");
+                + (attempts > 0 ? "（第 " + attempts + " 次）" : "")
+                + (CarBluetoothAutoTapService.isActive() ? "。點一下立即連線" : "。點一下開啟藍牙設定");
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("正在連線車機" + (car == null ? "" : " " + car.name))
                 .setContentText(text)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
                 .setSmallIcon(R.drawable.ic_car_bluetooth)
+                .setContentIntent(open)
                 .setOngoing(true)
                 .addAction(0, "停止", stop)
                 .build();

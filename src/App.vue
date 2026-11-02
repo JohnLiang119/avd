@@ -919,6 +919,17 @@
                   @click="onCarBtClear"
                 >清除</van-button>
               </div>
+              <!--
+                自動點選車機：實車 CX501A 不吃 RFCOMM 喚醒，開藍牙設定後由無障礙服務代點。
+                開關在系統無障礙設定（App 不能自己開），這裡只顯示狀態並帶過去。
+              -->
+              <van-cell
+                title="自動點選車機"
+                :label="carBtAutoTapText"
+                :value="carBt.autoTapEnabled ? '已開啟' : '未開啟'"
+                is-link
+                @click="onCarBtAutoTapSettings"
+              />
             </template>
           </van-cell-group>
 
@@ -1911,6 +1922,7 @@ import {
   sortBondedDevices,
   describeBondedKind,
   describeCarBluetoothStatus,
+  describeCarAutoTap,
   needsSettingsFallback,
   newCarScheduleEntry,
   sortCarSchedule,
@@ -3800,6 +3812,7 @@ const carBtPickerVisible = ref(false);
 /** 選擇清單的來源，已依車用→音訊→其餘排序；@select 以 index 對回來。 */
 const carBtBonded = ref<BondedDevice[]>([]);
 const carBtStatusText = computed(() => describeCarBluetoothStatus(carBt.value));
+const carBtAutoTapText = computed(() => describeCarAutoTap(carBt.value));
 const carBtPickerActions = computed(() => carBtBonded.value.map((d) => ({
   name: d.name,
   subname: describeBondedKind(d.kind) || d.address,
@@ -3960,6 +3973,15 @@ const onCarScheduleTimeConfirm = () => {
     return;
   }
   updateCarSchedule(id, isEnd ? { endTime: result.time } : { time: result.time });
+};
+
+/** 前往系統無障礙設定開啟「自動點選車機」；回到 App 時 appStateChange 會重讀狀態。 */
+const onCarBtAutoTapSettings = async () => {
+  try {
+    await CarBluetoothService.openAutoTapSettings();
+  } catch (e) {
+    reportError('車機藍牙', e);
+  }
 };
 
 /** 主畫面的「連線車機」鈕：尚未選車機時提示去設定，已選則盡力連線。 */
@@ -5883,6 +5905,8 @@ App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
     // 部分 Android 版本的 WebView 在回到前景時不可靠觸發 visibilitychange，
     // 在此補一次手動刷新作為保險（見 useNetworkStatus 內建的可見性監聽為主要來源）。
     networkStatus.recheck();
+    // 從系統藍牙或無障礙設定回來：車機連線與自動點選的狀態可能變了
+    void loadCarBluetooth();
   }
 });
 

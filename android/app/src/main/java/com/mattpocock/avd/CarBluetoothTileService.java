@@ -45,16 +45,17 @@ public class CarBluetoothTileService extends TileService {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                // 自動點選開著時不等喚醒，直接開設定頁交給它點
                 CarBluetooth.Outcome outcome = CarBluetooth.connect(
-                        CarBluetoothTileService.this, device, RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS);
+                        CarBluetoothTileService.this, device, CarBluetooth.manualWaitMs());
                 busy = false;
                 boolean ok = outcome == CarBluetooth.Outcome.CONNECTED
                         || outcome == CarBluetooth.Outcome.ALREADY_CONNECTED;
                 Log.d(TAG, "connect outcome: " + outcome);
                 apply(ok ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE, device.name, ok ? "已連線" : "未連線");
                 if (!ok) {
-                    // 盡力而為沒成功：退回一鍵 —— 開藍牙設定，使用者點一下車機即可
-                    launch(CarBluetooth.settingsIntent());
+                    // 盡力而為沒成功：退回一鍵 —— 開藍牙設定，使用者（或自動點選服務）點一下車機即可
+                    launch(CarBluetooth.settingsIntent(CarBluetoothTileService.this));
                 }
             }
         }, "car-bt-tile").start();

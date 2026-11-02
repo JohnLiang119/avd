@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -41,6 +42,9 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * 這是「盡力而為」：成不成要看車機韌體。所以 {@link #connect} 的結果一定要讓呼叫端
  * 能退回「開系統藍牙設定讓使用者點一下」，而不是當成已經連上。
+ *
+ * 實車驗證 CX501A 不吃 RFCOMM 喚醒；使用者開啟「自動點選車機」無障礙服務
+ * （{@link CarBluetoothAutoTapService}）後，開設定頁那一步改由服務代點。
  *
  * 所有會等待的方法都會阻塞且會等主執行緒的回呼，MUST 在背景執行緒呼叫。
  */
@@ -179,7 +183,75 @@ public final class CarBluetooth {
         }
     }
 
+    /**
+     * 等該裝置接回音訊協定，最多 {@code waitMs} 毫秒；接上回 true。與 {@link #isConnected}
+     * 不同的是 profile proxy 只拿一次。會阻塞，MUST 在背景執行緒呼叫。
+     */
+    public static boolean awaitConnected(Context context, String address, long waitMs) {
+        BluetoothAdapter adapter = adapter(context);
+        if (adapter == null || !adapter.isEnabled() || !hasPermission(context)) return false;
+        BluetoothDevice device;
+        try {
+            device = adapter.getRemoteDevice(address);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        ProfileHandle a2dp = ProfileHandle.open(context, adapter, BluetoothProfile.A2DP);
+        ProfileHandle headset = ProfileHandle.open(context, adapter, BluetoothProfile.HEADSET);
+        try {
+            long deadline = System.currentTimeMillis() + waitMs;
+            while (true) {
+                if (a2dp.isConnected(device) || headset.isConnected(device)) return true;
+                if (System.currentTimeMillis() >= deadline) return false;
+                try {
+                    Thread.sleep(POLL_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        } finally {
+            a2dp.close();
+            headset.close();
+        }
+    }
+
+    /**
+     * 系統藍牙設定頁上這台車機可能顯示的名稱：選定時記下的名稱、裝置原名，以及使用者在
+     * 系統改過的別名（API 30 起）。供自動點選比對，順序無意義。
+     */
+    public static Set<String> displayNames(Context context, CarBluetoothStore.Device car) {
+        Set<String> names = new LinkedHashSet<String>();
+        addName(names, car.name);
+        BluetoothAdapter adapter = adapter(context);
+        if (adapter == null || !hasPermission(context)) return names;
+        try {
+            BluetoothDevice device = adapter.getRemoteDevice(car.address);
+            addName(names, device.getName());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                addName(names, device.getAlias());
+            }
+        } catch (IllegalArgumentException | SecurityException e) {
+            Log.w(TAG, "cannot read device names", e);
+        }
+        return names;
+    }
+
+    private static void addName(Set<String> names, String name) {
+        if (name == null) return;
+        String trimmed = name.trim();
+        if (!trimmed.isEmpty()) names.add(trimmed);
+    }
+
     // ---- 連線 ----
+
+    /**
+     * 手動入口（快速設定磚、主畫面鈕）的等待上限。「自動點選車機」開著時回 0：開設定頁
+     * 交給服務代點一定連得上，不必先白等 RFCOMM 喚醒（CX501A 實測不吃）。
+     */
+    public static long manualWaitMs() {
+        return CarBluetoothAutoTapService.isActive() ? 0L : RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS;
+    }
 
     /**
      * 盡力把手機連到車機，最多等 {@code waitMs} 毫秒。會阻塞，MUST 在背景執行緒呼叫。
@@ -187,6 +259,7 @@ public final class CarBluetooth {
      * 流程：已連著就直接回報 → 對車機開 RFCOMM 連線把 ACL 鏈路喚起 → 每半秒查一次
      * 音訊協定是否接回 → 逾時回 {@link Outcome#NOT_CONNECTED}。RFCOMM 連線成功時會
      * 一直開著到等待結束才關，免得鏈路在車機來得及接回協定前就斷掉。
+     * {@code waitMs} 為 0 時只查是否已連著，不喚醒（見 {@link #manualWaitMs}）。
      */
     public static Outcome connect(Context context, CarBluetoothStore.Device target, long waitMs) {
         if (target == null) return Outcome.NO_DEVICE;
@@ -209,6 +282,8 @@ public final class CarBluetooth {
             if (a2dp.isConnected(device) || headset.isConnected(device)) {
                 return Outcome.ALREADY_CONNECTED;
             }
+            // 呼叫端有更可靠的退回（自動點選）：不喚醒、不等待
+            if (waitMs <= 0) return Outcome.NOT_CONNECTED;
 
             wake = Wake.start(device);
             long deadline = System.currentTimeMillis() + Math.max(POLL_INTERVAL_MS, waitMs);
@@ -233,8 +308,19 @@ public final class CarBluetooth {
         }
     }
 
-    /** 退回用：系統藍牙設定頁，使用者在那裡點一下車機即可連線。 */
-    public static Intent settingsIntent() {
+    /**
+     * 退回用：開藍牙設定頁，使用者（或自動點選服務）在那裡點一下車機即可連線。經由透明
+     * 中繼頁 {@link CarBluetoothSettingsActivity}：它在真正開啟的那一刻設定待命，通知被點
+     * 的時間不固定，只有那一刻才準。所有「開藍牙設定」的入口都用這個。
+     */
+    public static Intent settingsIntent(Context context) {
+        Intent intent = new Intent(context, CarBluetoothSettingsActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
+    /** 系統藍牙設定頁本身；只有中繼頁與解析設定頁所屬套件時用。 */
+    public static Intent systemSettingsIntent() {
         Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;
@@ -257,9 +343,11 @@ public final class CarBluetooth {
                 manager.createNotificationChannel(channel);
             }
             PendingIntent open = PendingIntent.getActivity(
-                    context, 0, settingsIntent(),
+                    context, 0, settingsIntent(context),
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-            String message = describe(outcome, deviceName) + "。點這裡開啟藍牙設定。";
+            String message = outcome == Outcome.NOT_CONNECTED && CarBluetoothAutoTapService.isActive()
+                    ? displayName(deviceName) + " 沒有自動接回。點這裡開啟藍牙設定並自動點選它。"
+                    : describe(outcome, deviceName) + "。點這裡開啟藍牙設定。";
             Notification notification = new NotificationCompat.Builder(
                     context, RadioAlarmConstants.CAR_BLUETOOTH_CHANNEL_ID)
                     .setContentTitle("車機未連線")
@@ -278,7 +366,7 @@ public final class CarBluetooth {
 
     /** 可直接顯示給使用者的結果說明。 */
     public static String describe(Outcome outcome, String deviceName) {
-        String name = (deviceName == null || deviceName.isEmpty()) ? "車機" : deviceName;
+        String name = displayName(deviceName);
         switch (outcome) {
             case NO_DEVICE: return "尚未選擇車機";
             case NO_PERMISSION: return "未授予藍牙權限，無法連線車機";
@@ -288,6 +376,15 @@ public final class CarBluetooth {
             case NOT_CONNECTED: return name + " 沒有回應，請在藍牙設定點一下它";
             default: return "";
         }
+    }
+
+    /** 手動入口略過喚醒、直接交給自動點選時的說明。 */
+    public static String describeHandoff(String deviceName) {
+        return "開啟藍牙設定，自動點選 " + displayName(deviceName);
+    }
+
+    private static String displayName(String deviceName) {
+        return (deviceName == null || deviceName.isEmpty()) ? "車機" : deviceName;
     }
 
     // ---- 內部 ----

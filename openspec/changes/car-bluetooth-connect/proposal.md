@@ -24,6 +24,26 @@ Android 12 起，`BluetoothA2dp.connect()` 這類「叫系統去連某台已配�
 - 退回的「一鍵」是**系統藍牙設定頁**而非系統的輸出切換面板：後者在部分 ROM 上要求呼叫者有進行中的媒體工作階段，且 HyperOS 的面板行為未驗證；藍牙設定頁在所有裝置上都能點一下連線。
 - 實車上 CX501A 是否吃 RFCOMM 喚醒這招，**本次無法在開發機驗證**（手機不在線上、車不在旁邊）；若不吃，功能退化為「一鍵開藍牙設定」，仍比現狀少兩步。
 
+## 實車驗證結果與「自動點選車機」（2026-11-02 追加）
+
+實車結果：**CX501A 不吃 RFCOMM 喚醒**。按磚或主畫面鈕後等滿 10 秒，車機都沒有自己接回音訊協定，最後只能開藍牙設定頁，使用者手動點一下 CX501A 才連上。換句話說，對這台車機來說，「盡力自動」其實沒有自動，只剩「失敗一鍵」，而且還要先白等 10 秒。
+
+既然「在設定頁點一下」一定能連上，而 Android 12 起 App 又不能自己叫系統連線，在不加 Shizuku、不 root 的前提下，唯一能自動化的就是**替使用者點那一下**：
+
+- **新增無障礙服務「AVD 自動點選車機」**（`CarBluetoothAutoTapService`，使用者自行到系統無障礙設定開啟，預設關閉）。本 App 為了連車機開啟藍牙設定後的 **15 秒內**，服務會在設定頁中找出名稱與選定車機**完全相同**的列並點一次（先找可點擊的祖先節點執行點擊，失敗時改在文字中心送出點按手勢）；列表裡看不到就往下捲（最多 5 次，只捲藍牙設定所屬的 App）。待命以外的時間，收到的事件一律直接忽略。
+- **點之前先確認尚未連線**：在設定頁點已連線的裝置，部分 ROM 會跳出中斷連線，所以待命期間若車機已經連上，就不點。
+- **點了之後**：等音訊協定接回（最多 12 秒），接上就提示「已連線」並按一次返回，把設定頁收掉；沒接上就把設定頁留著讓使用者處理。
+- **所有「開藍牙設定」的入口都經過一個透明的中繼頁**（`CarBluetoothSettingsActivity`）：先設定待命、再開系統藍牙設定。快速設定磚、主畫面鈕，以及「車機未連線」通知都走這個中繼頁。通知被點的時間點不固定，只有在點下的那一刻設定待命才準。
+- **自動點選開著時，手動入口（磚、主畫面鈕）不再等 RFCOMM 喚醒**，直接開設定頁讓服務點選；鬧鐘與連線排程的背景嘗試不變（螢幕多半鎖著，無障礙服務點不到設定頁）。
+- **連線排程的常駐通知可以點**：點一下開藍牙設定（自動點選開著時等於「立即連線」）。在車上看到「正在連線車機」，點一下就能接上，不必等到區段結束。
+- **偏好設定的車機藍牙區段新增「自動點選車機」一列**，顯示是否已開啟，點一下前往系統無障礙設定（先嘗試直接開到本服務的詳細頁，不支援時退回無障礙設定總表）。側載的 App 在 Android 13 起可能顯示「受限制的設定」，要先到 App 資訊頁的選單「允許受限制的設定」才能開啟，說明文字會提到這一點。
+
+### 追加的假設
+
+- 名稱比對採**完全相同**（含使用者在系統改過的別名，API 30 起以 `getAlias()` 取得），不用「包含」，避免點到名稱相近的其他裝置。
+- 不限制服務只接收 `com.android.settings` 的事件：HyperOS 等 ROM 的藍牙頁不一定在這個套件裡。改為忽略本 App 與系統 UI（快速設定磚的標籤就是車機名稱），點選範圍再以「待命 15 秒＋名稱完全相同＋一次只點一下」限制住。
+- 不做「區段內一解鎖就自動開設定頁」：在家解鎖時車機不在範圍內，設定頁會白跳出來，干擾大於效益。
+
 ## Capabilities
 
 ### New Capabilities
@@ -38,5 +58,6 @@ Android 12 起，`BluetoothA2dp.connect()` 這類「叫系統去連某台已配�
 
 - **Android 原生**（`android/app/src/main/java/com/mattpocock/avd/`）：新增 `CarBluetoothStore`（SharedPreferences）、`CarBluetooth`（連線與查詢）、`CarBluetoothTileService`（快速設定磚）；`RadioPlaybackService` 在鬧鐘模式先連車機；`RadioAlarmConstants` 新增等待上限與通知頻道；`YoutubeDlPlugin` 新增 `getCarBluetooth`／`listBondedBluetoothDevices`／`setCarBluetooth`／`connectCarBluetooth`／`openBluetoothSettings`；`AndroidManifest.xml` 新增權限、feature 與磚；新增磚圖示 `ic_car_bluetooth` 與字串 `car_bluetooth_tile_label`。
 - **前端**：`src/services/carBluetooth.ts`（插件封裝與純函式，附 vitest）；`App.vue` 偏好設定新增「車機藍牙」區段（Android 限定）。
+- **自動點選（追加）**：新增 `CarBluetoothAutoTapService`（無障礙服務）、`CarBluetoothSettingsActivity`（透明中繼頁）、`res/xml/car_bluetooth_auto_tap.xml` 與對應字串；Manifest 宣告服務、中繼頁，並以 `<queries>` 宣告藍牙設定動作（解析設定頁所屬套件，只在那裡捲動）；`CarBluetooth` 新增 `awaitConnected`、`displayNames`、`manualWaitMs`，入口改走中繼頁；`YoutubeDlPlugin` 狀態多帶 `autoTapEnabled`，新增 `openCarAutoTapSettings`；前端偏好設定新增「自動點選車機」列，App 回到前景時重新讀取車機狀態。
 - **不影響**：Windows／Tauri 端、下載佇列、鬧鐘以外的播放路徑。
 - **版本進版**：依工作區規範同步七處版號並更新 `avd_s/publish_all.ps1` 預設發布說明。

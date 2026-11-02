@@ -1,6 +1,7 @@
 package com.mattpocock.avd;
 
 import android.Manifest;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
 import android.net.Uri;
@@ -2262,6 +2263,7 @@ public class YoutubeDlPlugin extends Plugin {
         ret.put("permissionGranted", CarBluetooth.hasPermission(context));
         ret.put("adapterOn", CarBluetooth.isAdapterOn(context));
         ret.put("connected", connected);
+        ret.put("autoTapEnabled", CarBluetoothAutoTapService.isActive());
         return ret;
     }
 
@@ -2326,7 +2328,10 @@ public class YoutubeDlPlugin extends Plugin {
         getCarBluetooth(call);
     }
 
-    /** 盡力連線選定的車機（最多等 CAR_BLUETOOTH_WAIT_MS）；前端依 outcome 決定要不要開藍牙設定。 */
+    /**
+     * 盡力連線選定的車機（最多等 CAR_BLUETOOTH_WAIT_MS；自動點選開著時不等）；前端依 outcome
+     * 決定要不要開藍牙設定。
+     */
     @PluginMethod
     public void connectCarBluetooth(final PluginCall call) {
         final Context context = getContext();
@@ -2334,19 +2339,23 @@ public class YoutubeDlPlugin extends Plugin {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                long wait = CarBluetooth.manualWaitMs();
                 CarBluetooth.Outcome outcome;
                 try {
-                    outcome = CarBluetooth.connect(context, device, RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS);
+                    outcome = CarBluetooth.connect(context, device, wait);
                 } catch (Exception e) {
                     Log.e(TAG, "connectCarBluetooth failed", e);
                     call.reject("連線車機時發生錯誤: " + e.getMessage());
                     return;
                 }
+                String name = device == null ? "" : device.name;
                 JSObject ret = new JSObject();
                 ret.put("outcome", carBluetoothOutcomeKey(outcome));
                 ret.put("connected", outcome == CarBluetooth.Outcome.CONNECTED
                         || outcome == CarBluetooth.Outcome.ALREADY_CONNECTED);
-                ret.put("message", CarBluetooth.describe(outcome, device == null ? "" : device.name));
+                ret.put("message", wait <= 0 && outcome == CarBluetooth.Outcome.NOT_CONNECTED
+                        ? CarBluetooth.describeHandoff(name)
+                        : CarBluetooth.describe(outcome, name));
                 call.resolve(ret);
             }
         }, "car-bt-connect").start();
@@ -2412,15 +2421,32 @@ public class YoutubeDlPlugin extends Plugin {
         }
     }
 
-    /** 退回用：開系統藍牙設定頁，使用者點一下車機即可連線。 */
+    /** 退回用：開系統藍牙設定頁，使用者（或自動點選服務）點一下車機即可連線。 */
     @PluginMethod
     public void openBluetoothSettings(PluginCall call) {
         try {
-            getContext().startActivity(CarBluetooth.settingsIntent());
+            getContext().startActivity(CarBluetooth.settingsIntent(getContext()));
             call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "openBluetoothSettings failed", e);
             call.reject("無法開啟藍牙設定: " + e.getMessage());
+        }
+    }
+
+    /** 前往系統無障礙設定開啟「自動點選車機」：先試本服務的詳細頁，ROM 不支援再開總表。 */
+    @PluginMethod
+    public void openCarAutoTapSettings(PluginCall call) {
+        Context context = getContext();
+        try {
+            try {
+                context.startActivity(CarBluetoothAutoTapService.serviceDetailsIntent(context));
+            } catch (ActivityNotFoundException e) {
+                context.startActivity(CarBluetoothAutoTapService.accessibilitySettingsIntent());
+            }
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "openCarAutoTapSettings failed", e);
+            call.reject("無法開啟無障礙設定: " + e.getMessage());
         }
     }
 

@@ -112,6 +112,32 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!--
+            無障礙服務「AVD 自動點選車機」：實車驗證 CX501A 不吃 RFCOMM 喚醒，改由本服務在
+            本 App 開啟的藍牙設定頁代點車機。預設關閉，使用者自行在系統無障礙設定開啟。
+        -->
+        <service
+            android:name=".CarBluetoothAutoTapService"
+            android:label="@string/car_bluetooth_auto_tap_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/car_bluetooth_auto_tap" />
+        </service>
+
+        <!-- 開藍牙設定的透明中繼頁：先讓自動點選待命再開設定頁，不留在最近使用 -->
+        <activity
+            android:name=".CarBluetoothSettingsActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:exported="false" />
     </application>
 
     <!--
@@ -121,6 +147,10 @@
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <!-- 自動點選車機要知道藍牙設定頁屬於哪個套件（只在那裡捲動找車機） -->
+        <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
         </intent>
     </queries>
 

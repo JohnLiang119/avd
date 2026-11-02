@@ -4,6 +4,7 @@ import {
   sortBondedDevices,
   describeBondedKind,
   describeCarBluetoothStatus,
+  describeCarAutoTap,
   needsSettingsFallback,
   describeNextConnect,
   describeCarScheduleStatus,
@@ -51,6 +52,7 @@ describe('describeCarBluetoothStatus', () => {
     permissionGranted: true,
     adapterOn: true,
     connected: false,
+    autoTapEnabled: false,
   };
 
   it('未選擇車機', () => {
@@ -66,6 +68,21 @@ describe('describeCarBluetoothStatus', () => {
   it('已連線只說已連線；未連線說明鬧鐘前會嘗試', () => {
     expect(describeCarBluetoothStatus({ ...base, connected: true })).toBe('已連線');
     expect(describeCarBluetoothStatus(base)).toContain('未連線');
+  });
+});
+
+describe('describeCarAutoTap', () => {
+  it('已開啟只說明效果', () => {
+    expect(describeCarAutoTap({ autoTapEnabled: true })).toContain('已開啟');
+  });
+
+  it('未開啟（含尚未讀到狀態）要交代去哪裡開與受限制的設定', () => {
+    for (const state of [{ autoTapEnabled: false }, null]) {
+      const text = describeCarAutoTap(state);
+      expect(text).toContain('未開啟');
+      expect(text).toContain('無障礙');
+      expect(text).toContain('允許受限制的設定');
+    }
   });
 });
 
