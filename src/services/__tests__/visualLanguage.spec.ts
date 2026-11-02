@@ -51,7 +51,7 @@ describe('顏色的語意', () => {
   });
 
   it('可復原的動作 MUST NOT 被歸為不可逆', () => {
-    for (const action of ['play', 'upload', 'remove', 'submit', 'stop'] as ActionName[]) {
+    for (const action of ['play', 'upload', 'remove', 'submit', 'stop', 'moveUp', 'moveDown'] as ActionName[]) {
       expect(isIrreversibleAction(action), action).toBe(false);
     }
   });

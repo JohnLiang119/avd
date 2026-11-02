@@ -1079,7 +1079,10 @@
       </div>
     </van-dialog>
 
-    <!-- 本地檔案頻道的明細：名稱、檔案清單（依播放順序）、移除。從頻道列點進來（design.md D15） -->
+    <!--
+      本地檔案頻道的明細：名稱、檔案清單（依播放順序）、移除。從頻道列點進來（design.md D15）。
+      檔案清單可編輯（D18）：每個檔案 ▴／▾ 調整順序、× 移除（至少留一個），清單下方可再加入檔案。
+    -->
     <van-dialog
       v-model:show="showRadioChannelDetail"
       :title="radioChannelDetail?.name || '頻道'"
@@ -1104,8 +1107,37 @@
             檔案（{{ radioFileDetail.files.length }} 個，依播放順序）
           </div>
           <ol class="radio-channel-files">
-            <li v-for="file in radioFileDetail.files" :key="file.path">{{ file.displayName }}</li>
+            <li v-for="(file, index) in radioFileDetail.files" :key="file.path">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px;">
+                <span style="flex: 1; min-width: 0;">{{ file.displayName }}</span>
+                <span style="display: flex; gap: 4px; flex-shrink: 0;">
+                  <van-button
+                    size="mini" :style="GLYPH_BUTTON_STYLE" title="往前移一格"
+                    :disabled="radioAlarmBusy || radioPickBusy || index === 0"
+                    @click="moveRadioChannelFile(radioFileDetail.id, index, -1)"
+                  >{{ ACTION_GLYPH.moveUp }}</van-button>
+                  <van-button
+                    size="mini" :style="GLYPH_BUTTON_STYLE" title="往後移一格"
+                    :disabled="radioAlarmBusy || radioPickBusy || index === radioFileDetail.files.length - 1"
+                    @click="moveRadioChannelFile(radioFileDetail.id, index, 1)"
+                  >{{ ACTION_GLYPH.moveDown }}</van-button>
+                  <van-button
+                    size="mini" :style="GLYPH_BUTTON_STYLE" title="移除這個檔案"
+                    :disabled="radioAlarmBusy || radioPickBusy"
+                    @click="removeRadioChannelFile(radioFileDetail.id, file.path)"
+                  >{{ ACTION_GLYPH.remove }}</van-button>
+                </span>
+              </div>
+            </li>
           </ol>
+          <van-button
+            size="small" block plain
+            style="margin-top: 8px; border-color: #e2e8f0; color: #64748b;"
+            :loading="radioPickBusy"
+            loading-text="正在複製檔案…"
+            :disabled="radioAlarmBusy || radioPickBusy"
+            @click="addFilesToRadioChannel(radioFileDetail.id)"
+          >加入檔案</van-button>
         </template>
         <template v-if="radioStockDetail">
           <!--
@@ -1893,6 +1925,8 @@ import {
   describeSelfTest,
   describeStock,
   defaultFileChannelName,
+  moveFile,
+  canRemoveFile,
   hasWeekday,
   isFileChannel,
   isStockChannel,
@@ -4553,6 +4587,79 @@ const addRadioFileChannel = async () => {
   } finally {
     radioPickBusy.value = false;
   }
+};
+
+/**
+ * 既有檔案頻道加入檔案（design.md D18）：選檔 → 複製進該頻道資料夾 → 接在清單尾端寫回。
+ * 複製失敗由原生端只清新副本；寫回失敗（persistRadioAlarm 會自行回報並重新載入）這裡
+ * 再把新副本清掉 —— 既有檔案一個都不動。
+ */
+const addFilesToRadioChannel = async (id: string) => {
+  if (isTauri() || radioPickBusy.value) return;
+  radioPickBusy.value = true;
+  try {
+    const picked = await RadioAlarmService.pickFiles(id);
+    if (picked.cancelled) return;
+    const newPaths = picked.files.map((f) => f.path);
+
+    const channels = radioAlarm.value.channels.map((c) => (
+      c.id === id && isFileChannel(c) ? { ...c, files: [...c.files, ...picked.files] } : c
+    ));
+    await persistRadioAlarm({ ...radioAlarm.value, channels });
+
+    const after = radioAlarm.value.channels.find((c) => c.id === id);
+    const saved = !!after && isFileChannel(after) && newPaths.every((p) => after.files.some((f) => f.path === p));
+    if (!saved) {
+      await RadioAlarmService.removeFiles(id, newPaths).catch(() => {});
+      showToast('加入檔案失敗，已清除複製的檔案');
+      return;
+    }
+    showToast(`已加入 ${newPaths.length} 個檔案`);
+  } catch (e) {
+    // 原生端 reject 的訊息已含原因（如空間不足），直接給使用者看
+    reportError('廣播鬧鐘', e);
+    showToast(String((e as { message?: string })?.message ?? e));
+  } finally {
+    radioPickBusy.value = false;
+  }
+};
+
+/**
+ * 移除單一檔案（design.md D18）：至少留一個；正在播這個頻道就先停（播放器手上是舊清單，
+ * 循環回來會讀不到被刪的檔）。先寫回設定、確定不再指向它才刪副本。
+ */
+const removeRadioChannelFile = async (id: string, path: string) => {
+  const target = radioAlarm.value.channels.find((c) => c.id === id);
+  if (!target || !isFileChannel(target)) return;
+  if (!canRemoveFile(target.files)) {
+    showToast('頻道至少要有一個檔案；要整個移除請按「移除這個頻道」');
+    return;
+  }
+  if (radioStatus.value?.playingChannelId === id) {
+    await RadioAlarmService.stop().catch(() => {});
+  }
+  const channels = radioAlarm.value.channels.map((c) => (
+    c.id === id && isFileChannel(c) ? { ...c, files: c.files.filter((f) => f.path !== path) } : c
+  ));
+  await persistRadioAlarm({ ...radioAlarm.value, channels });
+
+  const after = radioAlarm.value.channels.find((c) => c.id === id);
+  if (after && isFileChannel(after) && !after.files.some((f) => f.path === path)) {
+    // 刪不掉只是多佔空間，不打擾使用者
+    await RadioAlarmService.removeFiles(id, [path]).catch((e) => console.error('[radioAlarm] 刪除副本失敗', e));
+  }
+};
+
+/** 調整播放順序：一次移一格，移完立即寫回；下次開始播放即依新順序。 */
+const moveRadioChannelFile = (id: string, index: number, delta: -1 | 1) => {
+  const target = radioAlarm.value.channels.find((c) => c.id === id);
+  if (!target || !isFileChannel(target)) return;
+  const files = moveFile(target.files, index, delta);
+  if (files === target.files) return;
+  const channels = radioAlarm.value.channels.map((c) => (
+    c.id === id && isFileChannel(c) ? { ...c, files: [...files] } : c
+  ));
+  void persistRadioAlarm({ ...radioAlarm.value, channels });
 };
 
 const renameRadioChannel = (id: string) => {

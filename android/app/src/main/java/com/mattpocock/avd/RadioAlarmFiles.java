@@ -12,6 +12,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -146,6 +147,57 @@ public final class RadioAlarmFiles {
             }
         }
         return target;
+    }
+
+    /**
+     * 加到既有頻道時，新副本序號的起點：資料夾內現有檔名前綴的最大序號＋1（沒有檔案為 1）。
+     * 序號只為避免撞名，不代表播放順序（順序在設定的 files 裡，design.md D18）。
+     */
+    public static int nextIndex(File dir) {
+        int max = 0;
+        File[] children = dir == null ? null : dir.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                max = Math.max(max, indexPrefix(child.getName()));
+            }
+        }
+        return max + 1;
+    }
+
+    /** 檔名開頭連續數字（`copyInto` 的 `%03d_` 前綴）；沒有時回 0。 */
+    static int indexPrefix(String fileName) {
+        int end = 0;
+        while (end < fileName.length() && end < 9 && Character.isDigit(fileName.charAt(end))) end++;
+        if (end == 0) return 0;
+        return Integer.parseInt(fileName.substring(0, end));
+    }
+
+    /**
+     * 刪除某個頻道內的指定副本（移除單一檔案、或加入檔案後寫回失敗時清掉新副本）。
+     * 只刪落在該頻道資料夾下的路徑 —— 與 {@link RadioAlarmConfig#isValidLocalFilePath}
+     * 同一條紅線，其餘一律略過。
+     *
+     * @return 實際刪掉（或原本就不存在）的檔案數
+     */
+    public static int deleteFiles(Context context, String channelId, List<String> paths) {
+        File dir = channelDir(context, channelId);
+        if (dir == null || paths == null) return 0;
+        String root = dir.getAbsolutePath();
+        int deleted = 0;
+        for (String path : paths) {
+            if (!RadioAlarmConfig.isValidLocalFilePath(path, root)) {
+                Log.w(TAG, "refusing to delete outside channel dir: " + path);
+                continue;
+            }
+            File file = new File(path.trim());
+            if (file.isDirectory()) continue;
+            if (!file.exists() || file.delete()) {
+                deleted++;
+            } else {
+                Log.w(TAG, "failed to delete " + file.getAbsolutePath());
+            }
+        }
+        return deleted;
     }
 
     /**

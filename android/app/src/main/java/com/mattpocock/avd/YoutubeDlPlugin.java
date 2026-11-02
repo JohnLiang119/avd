@@ -1999,9 +1999,18 @@ public class YoutubeDlPlugin extends Plugin {
      *
      * 這裡只複製、不寫設定：頻道要不要成立由前端整包 setRadioAlarmConfig 決定，
      * 寫入失敗時前端負責呼叫 removeRadioAlarmChannelFiles 清掉副本。
+     *
+     * 帶 {@code channelId} 時是「加到既有頻道」（design.md D18）：副本寫進該頻道的資料夾、
+     * 序號往後接；失敗時只刪這次新複製的檔，既有副本不動。前端寫回失敗時以
+     * removeRadioAlarmFiles 清掉這批新副本。
      */
     @PluginMethod
     public void pickRadioAlarmFiles(PluginCall call) {
+        String existing = call.getString("channelId", "");
+        if (existing != null && !existing.trim().isEmpty() && !RadioAlarmFiles.isSafeChannelId(existing)) {
+            call.reject("channelId 不合法");
+            return;
+        }
         try {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -2043,7 +2052,9 @@ public class YoutubeDlPlugin extends Plugin {
         }
 
         final Context context = getContext();
-        final String channelId = RadioAlarmFiles.newChannelId();
+        final String requested = call.getString("channelId", "");
+        final boolean append = requested != null && !requested.trim().isEmpty();
+        final String channelId = append ? requested.trim() : RadioAlarmFiles.newChannelId();
         final File dir = RadioAlarmFiles.channelDir(context, channelId);
         if (dir == null) {
             call.reject("無法建立頻道資料夾");
@@ -2055,11 +2066,15 @@ public class YoutubeDlPlugin extends Plugin {
             @Override
             public void run() {
                 JSArray files = new JSArray();
+                List<String> copied = new ArrayList<String>();
+                int start = append ? RadioAlarmFiles.nextIndex(dir) : 1;
                 try {
                     for (int i = 0; i < uris.size(); i++) {
                         Uri uri = uris.get(i);
                         String displayName = RadioAlarmFiles.displayName(context.getContentResolver(), uri);
-                        File copy = RadioAlarmFiles.copyInto(context.getContentResolver(), uri, dir, i + 1, displayName);
+                        File copy = RadioAlarmFiles.copyInto(
+                                context.getContentResolver(), uri, dir, start + i, displayName);
+                        copied.add(copy.getAbsolutePath());
                         JSObject item = new JSObject();
                         item.put("path", copy.getAbsolutePath());
                         item.put("displayName", displayName);
@@ -2071,14 +2086,32 @@ public class YoutubeDlPlugin extends Plugin {
                     ret.put("files", files);
                     call.resolve(ret);
                 } catch (Exception e) {
-                    // 任一個失敗：整個頻道不建立，已複製的部分一併清掉
                     Log.e(TAG, "copying picked files failed", e);
-                    RadioAlarmFiles.deleteChannelDir(context, channelId);
                     String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                    call.reject("複製檔案失敗，未建立頻道: " + reason);
+                    if (append) {
+                        // 加到既有頻道：只清這次新複製的（含寫到一半的那個），既有副本不動
+                        RadioAlarmFiles.deleteFiles(context, channelId, copied);
+                        RadioAlarmFiles.deleteFiles(context, channelId, partialCopy(dir, start + copied.size()));
+                        call.reject("複製檔案失敗，未加入任何檔案: " + reason);
+                    } else {
+                        // 新頻道：整個頻道不建立，已複製的部分一併清掉
+                        RadioAlarmFiles.deleteChannelDir(context, channelId);
+                        call.reject("複製檔案失敗，未建立頻道: " + reason);
+                    }
                 }
             }
         }, "radio-alarm-copy").start();
+    }
+
+    /** 複製到一半失敗的那個檔（序號為 index 的副本）；copyInto 失敗時它可能已建立。 */
+    private static List<String> partialCopy(File dir, int index) {
+        List<String> paths = new ArrayList<String>();
+        File[] children = dir.listFiles();
+        if (children == null) return paths;
+        for (File child : children) {
+            if (RadioAlarmFiles.indexPrefix(child.getName()) == index) paths.add(child.getAbsolutePath());
+        }
+        return paths;
     }
 
     /**
@@ -2227,6 +2260,35 @@ public class YoutubeDlPlugin extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "removeRadioAlarmChannelFiles failed", e);
             call.reject("刪除頻道檔案失敗: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 刪除某個本地檔案頻道內的指定副本（移除單一檔案、或加入檔案後寫回失敗時清掉新副本；
+     * design.md D18）。只刪落在該頻道資料夾下的路徑。
+     */
+    @PluginMethod
+    public void removeRadioAlarmFiles(PluginCall call) {
+        String channelId = call.getString("channelId");
+        if (!RadioAlarmFiles.isSafeChannelId(channelId)) {
+            call.reject("channelId 不合法");
+            return;
+        }
+        try {
+            List<String> paths = new ArrayList<String>();
+            JSArray arr = call.getArray("paths");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) {
+                    String path = arr.optString(i, "");
+                    if (!path.isEmpty()) paths.add(path);
+                }
+            }
+            JSObject ret = new JSObject();
+            ret.put("deleted", RadioAlarmFiles.deleteFiles(getContext(), channelId.trim(), paths));
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "removeRadioAlarmFiles failed", e);
+            call.reject("刪除檔案失敗: " + e.getMessage());
         }
     }
 

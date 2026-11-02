@@ -315,6 +315,26 @@ export function defaultFileChannelName(files: readonly RadioLocalFile[]): string
     : stem;
 }
 
+/**
+ * 本地檔案頻道調整播放順序：把第 index 個往前（delta < 0）或往後移一格。越界時原樣回傳
+ * （同一個陣列），呼叫端可藉此判斷不必寫回。不改動輸入。
+ */
+export function moveFile<T>(files: readonly T[], index: number, delta: -1 | 1): readonly T[] {
+  const target = index + delta;
+  if (index < 0 || index >= files.length || target < 0 || target >= files.length) return files;
+  const next = [...files];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
+/**
+ * 能不能移除單一檔案：至少要留一個。原生端會剔除沒有檔案的頻道，指向它的鬧鐘會被
+ * 靜默改指內建頻道 —— 只想刪一首歌，早上卻響新聞（design.md D18）。
+ */
+export function canRemoveFile(files: readonly RadioLocalFile[]): boolean {
+  return files.length > 1;
+}
+
 /** 頻道列上的小字摘要：檔案頻道是檔案數、股票頻道是股票數；直播頻道沒有。 */
 export function describeChannelSummary(channel: RadioChannel): string {
   if (isFileChannel(channel)) return `${channel.files.length} 個檔案`;
@@ -597,8 +617,9 @@ export const RadioAlarmService = {
    * 頻道要不要成立由呼叫端整包 setConfig 決定；失敗時呼叫端 MUST 以
    * removeChannelFiles 清掉副本。
    */
-  async pickFiles(): Promise<RadioPickedFiles> {
-    const r = await YoutubeDlPlugin.pickRadioAlarmFiles();
+  async pickFiles(channelId?: string): Promise<RadioPickedFiles> {
+    // 帶 channelId 即加到既有頻道（design.md D18）：回傳的 files 只有這次新複製的
+    const r = await YoutubeDlPlugin.pickRadioAlarmFiles(channelId ? { channelId } : {});
     const files: RadioLocalFile[] = Array.isArray(r?.files)
       ? r.files
           .map((f: any) => ({ path: String(f?.path ?? ''), displayName: String(f?.displayName ?? '') }))
@@ -614,6 +635,11 @@ export const RadioAlarmService = {
   /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */
   async removeChannelFiles(channelId: string): Promise<void> {
     await YoutubeDlPlugin.removeRadioAlarmChannelFiles({ channelId });
+  },
+
+  /** 刪除某個本地檔案頻道內的指定副本（移除單一檔案、或寫回失敗時清掉新副本）。 */
+  async removeFiles(channelId: string, paths: readonly string[]): Promise<void> {
+    await YoutubeDlPlugin.removeRadioAlarmFiles({ channelId, paths: [...paths] });
   },
 
   /** 以指定聲音與語速念一句範例（媒體音量）；失敗會拋出含原因的錯誤。 */

@@ -26,6 +26,8 @@ import {
   isFileChannel,
   isStockChannel,
   defaultFileChannelName,
+  moveFile,
+  canRemoveFile,
   describeChannelSummary,
   normalizeStockSymbol,
   describeStock,
@@ -460,5 +462,29 @@ describe('文字轉語音的聲音與語速', () => {
     expect(describeVoiceLocale('yue-HK')).toBe('粵語（香港）');
     expect(describeTtsVoice({ name: 'x', locale: 'cmn-TW', quality: 400, network: false }, 0)).toBe('國語（台灣） · 聲音 A');
     expect(describeTtsVoice({ name: 'y', locale: 'cmn-TW', quality: 400, network: true }, 1)).toBe('國語（台灣） · 聲音 B · 需網路');
+  });
+});
+
+describe('本地檔案頻道的編輯（design.md D18）', () => {
+  const file = (name: string) => ({ path: `/data/radio_alarm/file1/${name}`, displayName: name });
+
+  it('moveFile 上移與下移一格，不改動輸入', () => {
+    const files = ['a', 'b', 'c'];
+    expect(moveFile(files, 2, -1)).toEqual(['a', 'c', 'b']);
+    expect(moveFile(files, 0, 1)).toEqual(['b', 'a', 'c']);
+    expect(files).toEqual(['a', 'b', 'c']);
+  });
+
+  it('moveFile 越界時原樣回傳同一個陣列（呼叫端據此不寫回）', () => {
+    const files = ['a', 'b'];
+    expect(moveFile(files, 0, -1)).toBe(files);
+    expect(moveFile(files, 1, 1)).toBe(files);
+    expect(moveFile(files, 5, -1)).toBe(files);
+  });
+
+  it('canRemoveFile 至少保留一個檔案', () => {
+    expect(canRemoveFile([file('a.mp3'), file('b.mp4')])).toBe(true);
+    expect(canRemoveFile([file('a.mp3')])).toBe(false);
+    expect(canRemoveFile([])).toBe(false);
   });
 });

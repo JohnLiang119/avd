@@ -38,6 +38,14 @@ export const ACTION_GLYPH = {
    * 故不會同時出現而需要互相區辨。
    */
   stop: '■',
+  /**
+   * 清單中的項目往前／往後移一格（本地檔案頻道的播放順序）。
+   *
+   * 與 `play` 同一套「三角形指向即動作方向」；刻意不用箭頭，免得與 `upload`（↑）、
+   * `submit`（↓）撞字 —— 那兩個是「送出去」，這兩個只是「換位置」。
+   */
+  moveUp: '▴',
+  moveDown: '▾',
 } as const;
 
 export type ActionName = keyof typeof ACTION_GLYPH;

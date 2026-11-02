@@ -666,3 +666,14 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 16.6 建置驗證通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`
 
   功能 commit `18c8b86`；版本 1.0.119 → 1.0.120（versionCode 157），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
+
+## 17. 本地檔案頻道可編輯（使用者要求「mp3／mp4 要可編輯」；design.md D18）
+
+- [x] 17.1 `RadioAlarmFiles`：`nextIndex`（資料夾內現有最大序號＋1）、`deleteFiles`（只刪落在該頻道資料夾下的指定檔）
+- [x] 17.2 `YoutubeDlPlugin`：`pickRadioAlarmFiles` 可帶 `channelId` 加到既有頻道（序號往後接；失敗只刪這次新複製的檔）；新增 `removeRadioAlarmFiles`
+- [x] 17.3 前端 `radioAlarm.ts`：`pickFiles(channelId?)`、`removeFiles`；純函式 `moveFile`、`canRemoveFile` 與測試
+- [x] 17.4 `visualLanguage`：新增 `moveUp`（▴）、`moveDown`（▾）；測試同步
+- [x] 17.5 `App.vue` 檔案頻道明細：每個檔案 ▴／▾／×、「加入檔案」鈕；移除前若正在播此頻道先停止；寫回失敗清掉新副本
+- [x] 17.6 規格、proposal、design 同步（D15 順序固定 → D18 可調整）
+- [ ] 17.7 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`；發布
+- [ ] 17.8 實機驗證：加入、移除、調整順序後試播，順序與內容正確；移除的副本已從私有目錄消失
