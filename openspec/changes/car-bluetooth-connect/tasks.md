@@ -39,5 +39,5 @@
 - [x] 5.4 Manifest：無障礙服務、中繼頁、藍牙設定動作的 `<queries>`
 - [x] 5.5 插件：狀態帶 `autoTapEnabled`、`openCarAutoTapSettings`、手動連線改用 `manualWaitMs` 與交接訊息
 - [x] 5.6 前端：`autoTapEnabled` 型別與 `describeCarAutoTap` 純函式及測試；偏好設定「自動點選車機」列；App 回前景時重讀車機狀態
-- [ ] 5.7 建置驗證（五項）全數通過；進版七處與 `publish_all.ps1` 預設發布說明；提交、發布
+- [x] 5.7 建置驗證（五項）全數通過；進版七處與 `publish_all.ps1` 預設發布說明；提交、發布
 - [ ] 5.8 實車驗證：開啟無障礙服務後按磚，確認 HyperOS 藍牙設定頁能自動點選 CX501A 並返回
