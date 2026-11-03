@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 8 以前（不支援 adaptive icon）的圖示：黑底圓形＋白色線條，取代舊的藍色 PNG -->
+<!-- Android 8 以前（不支援 adaptive icon）的圖示：白底圓形＋黑色線條，取代舊的藍色 PNG -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><shape android:shape="oval"><solid android:color="@color/ic_launcher_bg"/></shape></item>
     <item android:drawable="@drawable/ic_launcher_glyph"/>
