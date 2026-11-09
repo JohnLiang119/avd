@@ -12,7 +12,9 @@
 
 ## 2. 進版與發布
 
-- [ ] 2.1 功能修正與版本進版各自一個 commit；七處版號同步、`avd_s/publish_all.ps1` 預設 `$Message` 更新
+- [x] 2.1 功能修正與版本進版各自一個 commit；七處版號同步、`avd_s/publish_all.ps1` 預設 `$Message` 更新
+
+  功能 commit `693a180`；版本 1.0.136 → 1.0.137（versionCode 174），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
 - [ ] 2.2 執行 `avd_s/publish_all.ps1` 發布
 
 ## 3. 實機驗證
