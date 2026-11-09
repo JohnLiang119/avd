@@ -52,7 +52,11 @@
         </div>
       </div>
       <van-form @submit="onSubmit" class="download-form" v-show="!isTvMode">
-        <div v-if="isTauri()" style="display: flex; align-items: center; gap: 8px; margin: 0 16px;">
+        <!--
+          網址輸入框與送出鈕兩平台皆顯示（OpenSpec android-url-input）：Android 原本只能
+          從其他 App「分享」網址進來，沒有地方貼上。「開啟資料夾」「連結 Drive」仍只在 Windows。
+        -->
+        <div style="display: flex; align-items: center; gap: 8px; margin: 0 16px;">
           <van-cell-group inset style="flex: 1; margin: 0;">
             <van-field
               v-model="url"
@@ -62,27 +66,29 @@
               clearable
             />
           </van-cell-group>
-          
-          <van-button 
-            size="small" 
-            plain
-            round
-            type="primary"
-            @click="openDownloadFolder"
-            style="padding: 0 10px; flex-shrink: 0;"
-          >
-            開啟資料夾
-          </van-button>
-          <van-button 
-            size="small" 
-            plain
-            round
-            :type="driveToken ? 'success' : 'primary'" 
-            @click="showTokenModal = true"
-            style="padding: 0 10px; flex-shrink: 0;"
-          >
-            {{ driveToken ? 'Drive 已連結' : '連結 Drive' }}
-          </van-button>
+
+          <template v-if="isTauri()">
+            <van-button
+              size="small"
+              plain
+              round
+              type="primary"
+              @click="openDownloadFolder"
+              style="padding: 0 10px; flex-shrink: 0;"
+            >
+              開啟資料夾
+            </van-button>
+            <van-button
+              size="small"
+              plain
+              round
+              :type="driveToken ? 'success' : 'primary'"
+              @click="showTokenModal = true"
+              style="padding: 0 10px; flex-shrink: 0;"
+            >
+              {{ driveToken ? 'Drive 已連結' : '連結 Drive' }}
+            </van-button>
+          </template>
           <!-- native-type="submit" 是功能屬性，視覺收斂 MUST NOT 連它一起拿掉 -->
           <van-button size="mini" native-type="submit" :style="GLYPH_BUTTON_STYLE">{{ ACTION_GLYPH.submit }}</van-button>
         </div>
