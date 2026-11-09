@@ -15,7 +15,9 @@
 - [x] 2.1 功能修正與版本進版各自一個 commit；七處版號同步、`avd_s/publish_all.ps1` 預設 `$Message` 更新
 
   功能 commit `693a180`；版本 1.0.136 → 1.0.137（versionCode 174），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步。
-- [ ] 2.2 執行 `avd_s/publish_all.ps1` 發布
+- [x] 2.2 執行 `avd_s/publish_all.ps1` 發布
+
+  已發布 v1.0.137（Latest），附件 `AVD_1.0.137_arm64-v8a.apk`、`AVD_1.0.137_x64_zh-TW.msi`：https://github.com/JohnLiang119/avd/releases/tag/v1.0.137
 
 ## 3. 實機驗證
 
