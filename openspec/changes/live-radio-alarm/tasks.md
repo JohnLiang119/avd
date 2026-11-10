@@ -685,5 +685,9 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 18.3 前端純函式模組 `mediaPicker.ts`：正規化、排序（日期新→舊／名稱／大小）、搜尋、勾選順序、日期／大小／長度格式化，附 vitest
 - [x] 18.4 `RadioMediaPicker.vue` 底部抽屜；`App.vue` 兩個入口（新增 mp3／mp4 頻道、加入檔案）改開此清單，底部保留「用系統選檔器」；`radioAlarm.ts` 新增對應插件封裝
 - [x] 18.5 規格、proposal、design 同步（D19）；`openspec validate live-radio-alarm` 通過
-- [ ] 18.6 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [x] 18.6 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+
+  功能 commit `80a7925`；版本 1.0.137 → 1.0.138（versionCode 175），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步；
+  已發布 https://github.com/JohnLiang119/avd/releases/tag/v1.0.138 。
+
 - [ ] 18.7 實機驗證：首次開清單跳權限；允許後列出 AVD 下載與其他 App 的 mp3／mp4、最新在最上；搜尋與勾選順序正確；加入後試播正常；拒絕權限時只列 AVD 自己的檔且有說明
