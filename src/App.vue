@@ -788,8 +788,9 @@
                 {{ radioPlayingLabel }}
               </div>
               <!--
-                新增本地檔案頻道：系統選檔器多選 → 複製進私有目錄 → 整包寫回。
-                複製期間按鈕顯示忙碌；失敗以文字提示原因，不會留下只有部分檔案的頻道。
+                新增本地檔案頻道：選檔清單（全手機 mp3／mp4，D19；清單內可改用系統選檔器）
+                多選 → 複製進私有目錄 → 整包寫回。複製期間按鈕顯示忙碌；失敗以文字提示原因，
+                不會留下只有部分檔案的頻道。
               -->
               <van-button
                 size="small" block plain
@@ -1254,6 +1255,17 @@
         >移除這個頻道</van-button>
       </div>
     </van-dialog>
+
+    <!-- 選檔清單：全手機的 mp3／mp4，預設日期新到舊（design.md D19）。在頻道明細之後宣告，疊在它上面 -->
+    <RadioMediaPicker
+      v-if="!isTauri()"
+      v-model:show="showRadioMediaPicker"
+      :title="radioMediaPickerTitle"
+      :busy="radioPickBusy"
+      :existing-names="radioMediaExistingNames"
+      @confirm="onRadioMediaConfirm"
+      @system-picker="onRadioMediaSystemPicker"
+    />
 
     <van-popup v-model:show="showCarScheduleTimePicker" position="bottom" round>
       <van-time-picker
@@ -1889,6 +1901,7 @@ import { ref, watch, onUnmounted, onMounted, computed, nextTick } from 'vue';
 import { showToast, showLoadingToast, closeToast, showDialog, showConfirmDialog } from 'vant';
 import QrcodeVue from 'qrcode.vue';
 import YouTubeBatchModal from './components/YouTubeBatchModal.vue';
+import RadioMediaPicker from './components/RadioMediaPicker.vue';
 import pkg from '../package.json';
 
 const version = pkg.version;
@@ -1954,6 +1967,7 @@ import {
   type RadioAlarmConfig,
   type RadioAlarmStatus,
   type RadioChannel,
+  type RadioPickedFiles,
   type RadioStockItem,
   type TtsVoice,
 } from './services/radioAlarm';
@@ -4559,17 +4573,54 @@ const removeStockFromChannel = (channelId: string, symbol: string) => {
 };
 
 /**
- * 選檔 → 複製進私有目錄 → 整包寫回。
+ * 選檔清單（design.md D19）：兩個入口（新增檔案頻道、既有頻道加入檔案）都先開
+ * 全手機 mp3／mp4 的清單；目標為空字串即新頻道，否則為要加入的頻道 id。
+ */
+const showRadioMediaPicker = ref(false);
+const radioMediaTarget = ref('');
+const radioMediaPickerTitle = computed(() => (radioMediaTarget.value ? '加入檔案' : '新增 mp3／mp4 頻道'));
+const radioMediaExistingNames = computed(() => {
+  const target = radioAlarm.value.channels.find((c) => c.id === radioMediaTarget.value);
+  return target && isFileChannel(target) ? target.files.map((f) => f.displayName) : [];
+});
+
+const openRadioMediaPicker = (target: string) => {
+  if (isTauri() || radioPickBusy.value) return;
+  radioMediaTarget.value = target;
+  showRadioMediaPicker.value = true;
+};
+
+const addRadioFileChannel = () => openRadioMediaPicker('');
+const addFilesToRadioChannel = (id: string) => openRadioMediaPicker(id);
+
+/**
+ * 取得副本（清單勾選或系統選檔器）並寫回；成功才關清單，失敗留著讓使用者重試或改選。
+ * acquire 收到的 channelId 為 undefined 即新頻道。
+ */
+const commitRadioMedia = async (acquire: (channelId?: string) => Promise<RadioPickedFiles>) => {
+  const target = radioMediaTarget.value;
+  const ok = target
+    ? await appendFilesToRadioChannel(target, () => acquire(target))
+    : await createRadioFileChannel(() => acquire(undefined));
+  if (ok) showRadioMediaPicker.value = false;
+};
+
+const onRadioMediaConfirm = (uris: string[]) => commitRadioMedia((channelId) => RadioAlarmService.copyMediaFiles(uris, channelId));
+/** 退路：清單以外的檔（雲端硬碟、m4a 等）走原本的系統選檔器；清單留在底下，取消時回到清單。 */
+const onRadioMediaSystemPicker = () => commitRadioMedia((channelId) => RadioAlarmService.pickFiles(channelId));
+
+/**
+ * 新頻道：取得副本 → 整包寫回。回傳頻道是否成立。
  *
  * 複製由原生端保證「全部成功或一個都不留」；寫回若失敗（persistRadioAlarm 會自行
  * 回報並重新載入），這裡再把副本清掉 —— 不留沒有頻道指向的孤兒資料夾。
  */
-const addRadioFileChannel = async () => {
-  if (isTauri() || radioPickBusy.value) return;
+const createRadioFileChannel = async (acquire: () => Promise<RadioPickedFiles>): Promise<boolean> => {
+  if (isTauri() || radioPickBusy.value) return false;
   radioPickBusy.value = true;
   try {
-    const picked = await RadioAlarmService.pickFiles();
-    if (picked.cancelled || !picked.channelId) return;
+    const picked = await acquire();
+    if (picked.cancelled || !picked.channelId) return false;
 
     const channel: RadioChannel = {
       id: picked.channelId,
@@ -4583,29 +4634,31 @@ const addRadioFileChannel = async () => {
     if (!radioAlarm.value.channels.some((c) => c.id === picked.channelId)) {
       await RadioAlarmService.removeChannelFiles(picked.channelId).catch(() => {});
       showToast('新增頻道失敗，已清除複製的檔案');
-      return;
+      return false;
     }
     openRadioChannelDetail(picked.channelId);
+    return true;
   } catch (e) {
     // 原生端 reject 的訊息已含原因（如空間不足），直接給使用者看
     reportError('廣播鬧鐘', e);
     showToast(String((e as { message?: string })?.message ?? e));
+    return false;
   } finally {
     radioPickBusy.value = false;
   }
 };
 
 /**
- * 既有檔案頻道加入檔案（design.md D18）：選檔 → 複製進該頻道資料夾 → 接在清單尾端寫回。
- * 複製失敗由原生端只清新副本；寫回失敗（persistRadioAlarm 會自行回報並重新載入）這裡
- * 再把新副本清掉 —— 既有檔案一個都不動。
+ * 既有檔案頻道加入檔案（design.md D18）：取得副本（複製進該頻道資料夾）→ 接在清單尾端寫回。
+ * 回傳是否已加入。複製失敗由原生端只清新副本；寫回失敗（persistRadioAlarm 會自行回報並
+ * 重新載入）這裡再把新副本清掉 —— 既有檔案一個都不動。
  */
-const addFilesToRadioChannel = async (id: string) => {
-  if (isTauri() || radioPickBusy.value) return;
+const appendFilesToRadioChannel = async (id: string, acquire: () => Promise<RadioPickedFiles>): Promise<boolean> => {
+  if (isTauri() || radioPickBusy.value) return false;
   radioPickBusy.value = true;
   try {
-    const picked = await RadioAlarmService.pickFiles(id);
-    if (picked.cancelled) return;
+    const picked = await acquire();
+    if (picked.cancelled) return false;
     const newPaths = picked.files.map((f) => f.path);
 
     const channels = radioAlarm.value.channels.map((c) => (
@@ -4618,13 +4671,15 @@ const addFilesToRadioChannel = async (id: string) => {
     if (!saved) {
       await RadioAlarmService.removeFiles(id, newPaths).catch(() => {});
       showToast('加入檔案失敗，已清除複製的檔案');
-      return;
+      return false;
     }
     showToast(`已加入 ${newPaths.length} 個檔案`);
+    return true;
   } catch (e) {
     // 原生端 reject 的訊息已含原因（如空間不足），直接給使用者看
     reportError('廣播鬧鐘', e);
     showToast(String((e as { message?: string })?.message ?? e));
+    return false;
   } finally {
     radioPickBusy.value = false;
   }

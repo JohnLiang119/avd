@@ -10,10 +10,11 @@
 - **重開機、系統時間或時區變更後自動重新登錄鬧鐘**；鬧鐘一律登錄為「下一次」單次觸發，響完再登錄下一次。
 - **本地檔案頻道**：頻道除了電台直播，也可以是使用者自手機選取的一或多個 mp3／mp4 —— 選檔時複製進 App 私有目錄，一個頻道是一份固定順序的播放清單，鬧鐘觸發後循環播到時長結束；影片只解音訊。檔案讀不到即依失敗流程通知，不改播電台。頻道列因此新增「新增／檢視檔案／改名／移除」的介面（自訂串流網址的新增介面仍不做）。
 - **本地檔案頻道可編輯**（使用者要求後追加；design.md D18）：建好的檔案頻道可再加入檔案（同樣複製進私有目錄，失敗時不動既有副本）、移除單一檔案（同時刪副本，至少保留一個）、以 ▴／▾ 逐格調整播放順序。
+- **選檔改列全手機的 mp3／mp4**（使用者要求後追加；design.md D19）：新增檔案頻道與「加入檔案」改為先開一份清單，以 MediaStore 列出手機上所有 mp3 與 mp4（含檔名、資料夾、日期、大小、長度），預設依日期新到舊，可依名稱、大小排序與搜尋，勾選順序即加入順序；不必記得檔案在哪個資料夾。清單底部保留系統選檔器作為退路。需新增讀取媒體的權限（打開清單時才申請）。
 - **股票報價頻道**：頻道可以是多支台股代號；鬧鐘時間到向富果（Fugle）行情 API 逐支抓報價，組成中文口說稿，以裝置的文字轉語音合成成音檔後由同一個播放器播放、循環到時長結束。金鑰為全域設定存原生端。全部抓不到時仍念出原因並記為失敗；部分抓不到念其餘並說明數量。
 - **偏好設定新增「鬧鐘」區段**：以時間為第一層的鬧鐘卡片（展開後為星期、頻道、時長）、頻道列（每個頻道附直播鈕）、音量滑桿；試播與自我測試收於「進階」。介面遵守「正常時安靜、異常才說話」。Windows（Tauri）端不顯示此區段。
 - **失敗回報**：觸發時無網路或串流不可用，於限時重試後停止並以通知告知；失敗摘要保留於原生端，下次開啟 App 時寫入既有的錯誤紀錄。
-- **新增 Android 權限**：精確鬧鐘（`USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM`）、媒體播放型前景服務、開機完成廣播、通知（執行期請求）。
+- **新增 Android 權限**：精確鬧鐘（`USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM`）、媒體播放型前景服務、開機完成廣播、通知（執行期請求）；D19 追加讀取媒體（`READ_MEDIA_AUDIO`／`READ_MEDIA_VIDEO`，API 32 以下為 `READ_EXTERNAL_STORAGE`，皆為執行期請求、打開選檔清單時才要）。
 
 ### 已做的假設（可在審閱時推翻）
 
@@ -37,7 +38,7 @@
 
 ## Impact
 
-- **Android 原生**（`android/app/src/main/java/com/mattpocock/avd/`）：新增鬧鐘接收器（鬧鐘觸發、開機完成、時間與時區變更）、媒體播放前景服務、鬧鐘排程與設定儲存類別；`YoutubeDlPlugin` 新增讀寫設定、試播、查詢狀態的插件方法，以及本地檔案頻道的選檔複製（`pickRadioAlarmFiles`，系統選檔器多選後複製至 `filesDir/radio_alarm/<channelId>/`）與副本刪除（`removeRadioAlarmChannelFiles`；D18 追加：`pickRadioAlarmFiles` 帶 `channelId` 即加到既有頻道、`removeRadioAlarmFiles` 刪單一頻道內指定副本）；`AndroidManifest.xml` 新增元件與權限；`build.gradle` 新增 media3 ExoPlayer 依賴（可靠播放無長度的 AAC 串流）。
+- **Android 原生**（`android/app/src/main/java/com/mattpocock/avd/`）：新增鬧鐘接收器（鬧鐘觸發、開機完成、時間與時區變更）、媒體播放前景服務、鬧鐘排程與設定儲存類別；`YoutubeDlPlugin` 新增讀寫設定、試播、查詢狀態的插件方法，以及本地檔案頻道的選檔複製（`pickRadioAlarmFiles`，系統選檔器多選後複製至 `filesDir/radio_alarm/<channelId>/`）與副本刪除（`removeRadioAlarmChannelFiles`；D18 追加：`pickRadioAlarmFiles` 帶 `channelId` 即加到既有頻道、`removeRadioAlarmFiles` 刪單一頻道內指定副本；D19 追加：`listRadioMediaFiles` 以 MediaStore 列出全手機 mp3／mp4、`copyRadioAlarmMediaFiles` 以同一段複製程式複製選中的 `content://media/` 檔、`openAppSettings` 開本 App 的系統設定頁）；`AndroidManifest.xml` 新增元件與權限；`build.gradle` 新增 media3 ExoPlayer 依賴（可靠播放無長度的 AAC 串流）。
 - **前端**：`App.vue` 偏好設定新增區段；新增服務模組封裝插件方法與純函式（時間字串驗證、「下一次觸發」顯示），純函式附 vitest 測試。
 - **對外網路存取**：`www.bcc.com.tw` 的官方 API 與 `stream.rcs.revma.com` 串流（公開端點，不需憑證）；股票報價頻道另存取 `api.fugle.tw`，需使用者自行申請的 API 金鑰（`X-API-KEY`）。
 - **Android Manifest**：宣告 `TTS_SERVICE` 的 `<queries>`，讓 `TextToSpeech` 在 Android 11+ 找得到語音引擎。

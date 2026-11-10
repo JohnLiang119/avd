@@ -12,6 +12,7 @@
  */
 
 import { registerPlugin } from '@capacitor/core';
+import { normalizeMediaList, type DeviceMediaList } from './mediaPicker';
 
 const YoutubeDlPlugin = registerPlugin<any>('YoutubeDl');
 
@@ -545,6 +546,20 @@ export function normalizeConfig(raw: any): RadioAlarmConfig {
 
 // ---- 插件封裝 ----
 
+/** 原生端複製結果（pickRadioAlarmFiles／copyRadioAlarmMediaFiles 共用）→ RadioPickedFiles。 */
+function toPickedFiles(r: any): RadioPickedFiles {
+  const files: RadioLocalFile[] = Array.isArray(r?.files)
+    ? r.files
+        .map((f: any) => ({ path: String(f?.path ?? ''), displayName: String(f?.displayName ?? '') }))
+        .filter((f: RadioLocalFile) => f.path !== '')
+    : [];
+  return {
+    cancelled: Boolean(r?.cancelled) || files.length === 0,
+    channelId: String(r?.channelId ?? ''),
+    files,
+  };
+}
+
 export const RadioAlarmService = {
   async getConfig(): Promise<RadioAlarmConfig> {
     return normalizeConfig(await YoutubeDlPlugin.getRadioAlarmConfig());
@@ -620,16 +635,30 @@ export const RadioAlarmService = {
   async pickFiles(channelId?: string): Promise<RadioPickedFiles> {
     // 帶 channelId 即加到既有頻道（design.md D18）：回傳的 files 只有這次新複製的
     const r = await YoutubeDlPlugin.pickRadioAlarmFiles(channelId ? { channelId } : {});
-    const files: RadioLocalFile[] = Array.isArray(r?.files)
-      ? r.files
-          .map((f: any) => ({ path: String(f?.path ?? ''), displayName: String(f?.displayName ?? '') }))
-          .filter((f: RadioLocalFile) => f.path !== '')
-      : [];
-    return {
-      cancelled: Boolean(r?.cancelled) || files.length === 0,
-      channelId: String(r?.channelId ?? ''),
-      files,
-    };
+    return toPickedFiles(r);
+  },
+
+  /**
+   * 列出手機上所有 mp3／mp4 供選檔清單使用（design.md D19）。request 為 true 且未授權時
+   * 原生端先請求讀取媒體的權限；被拒照常回傳（列得到本 App 自己下載的檔）。
+   */
+  async listMediaFiles(request = true): Promise<DeviceMediaList> {
+    return normalizeMediaList(await YoutubeDlPlugin.listRadioMediaFiles({ request }));
+  },
+
+  /**
+   * 把選檔清單勾選的檔案複製進私有目錄（design.md D19）；uris 的順序即加入順序。
+   * 與 pickFiles 同一段原生複製程式、同樣的回傳與失敗語意：不帶 channelId 建新頻道的副本，
+   * 帶 channelId 加到既有頻道。
+   */
+  async copyMediaFiles(uris: readonly string[], channelId?: string): Promise<RadioPickedFiles> {
+    const r = await YoutubeDlPlugin.copyRadioAlarmMediaFiles(channelId ? { uris: [...uris], channelId } : { uris: [...uris] });
+    return toPickedFiles(r);
+  },
+
+  /** 開本 App 的系統設定頁（讀取媒體的權限被拒兩次後只能在這裡開）。 */
+  async openAppSettings(): Promise<void> {
+    await YoutubeDlPlugin.openAppSettings();
   },
 
   /** 刪除某個本地檔案頻道的全部副本（移除頻道時呼叫）。 */

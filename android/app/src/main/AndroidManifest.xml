@@ -182,6 +182,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+        鬧鐘選檔清單（OpenSpec live-radio-alarm design.md D19）：以 MediaStore 列出全手機的
+        mp3／mp4，使用者不必記得檔案在哪個資料夾。API 33+ 用 READ_MEDIA_AUDIO／VIDEO，
+        以下用 READ_EXTERNAL_STORAGE。皆為執行期權限，打開清單時才請求；只用來讀清單與複製，
+        副本仍放私有目錄，撤銷權限不影響已建好的頻道。
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- NFC 讀卡機：兩者皆為普通權限，安裝即授予，無執行期請求（design.md D7）。 -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.VIBRATE" />

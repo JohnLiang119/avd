@@ -55,7 +55,12 @@ import android.net.wifi.WifiManager;
                 // 車機藍牙（OpenSpec car-bluetooth-connect）。API 31 起列出已配對裝置與開
                 // RFCOMM 連線都需要這個執行期權限；更舊的版本上 BLUETOOTH 為安裝即授予，
                 // 插件方法會跳過請求。
-                @Permission(alias = "bluetooth", strings = {Manifest.permission.BLUETOOTH_CONNECT})
+                @Permission(alias = "bluetooth", strings = {Manifest.permission.BLUETOOTH_CONNECT}),
+                // 鬧鐘選檔清單列出全手機的 mp3／mp4（OpenSpec live-radio-alarm design.md D19）。
+                // API 33+ 用 media，以下用 storage；打開清單時才請求，被拒時清單照樣列出本 App 自己的檔。
+                @Permission(alias = "media", strings = {
+                        Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.READ_MEDIA_VIDEO}),
+                @Permission(alias = "storage", strings = {Manifest.permission.READ_EXTERNAL_STORAGE})
         })
 public class YoutubeDlPlugin extends Plugin {
 
@@ -2051,8 +2056,125 @@ public class YoutubeDlPlugin extends Plugin {
             return;
         }
 
+        copyIntoRadioChannel(call, uris, call.getString("channelId", ""));
+    }
+
+    /**
+     * 列出手機上所有 mp3 與 mp4 供選檔清單使用（design.md D19）。
+     *
+     * {@code request}（預設 true）為 true 且尚未授權時先請求讀取媒體的權限；被拒也照常回傳
+     * —— MediaStore 仍看得到本 App 自己下載的檔，清單不該因此打不開。從系統設定頁回來時
+     * 前端以 {@code request:false} 重新整理，不再跳詢問。
+     */
+    @PluginMethod
+    public void listRadioMediaFiles(PluginCall call) {
+        boolean request = Boolean.TRUE.equals(call.getBoolean("request", true));
+        String alias = radioMediaPermissionAlias();
+        if (request && getPermissionState(alias) != PermissionState.GRANTED) {
+            requestPermissionForAlias(alias, call, "radioMediaPermissionCallback");
+            return;
+        }
+        resolveRadioMediaFiles(call);
+    }
+
+    @PermissionCallback
+    private void radioMediaPermissionCallback(PluginCall call) {
+        resolveRadioMediaFiles(call);
+    }
+
+    private static String radioMediaPermissionAlias() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU ? "media" : "storage";
+    }
+
+    private void resolveRadioMediaFiles(final PluginCall call) {
         final Context context = getContext();
-        final String requested = call.getString("channelId", "");
+        // 媒體多的手機查詢要一兩秒，不可在主執行緒
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    RadioMediaLibrary.ScanResult result = RadioMediaLibrary.scan(context);
+                    JSArray files = new JSArray();
+                    for (RadioMediaLibrary.Item it : result.items) {
+                        JSObject item = new JSObject();
+                        item.put("uri", it.uri);
+                        item.put("displayName", it.displayName);
+                        item.put("folder", it.folder);
+                        item.put("kind", it.kind);
+                        item.put("sizeBytes", it.sizeBytes);
+                        item.put("modifiedAt", it.modifiedMs);
+                        item.put("durationMs", it.durationMs);
+                        files.put(item);
+                    }
+                    JSObject ret = new JSObject();
+                    ret.put("files", files);
+                    ret.put("truncated", result.truncated);
+                    ret.put("audioGranted", RadioMediaLibrary.canReadAudio(context));
+                    ret.put("videoGranted", RadioMediaLibrary.canReadVideo(context));
+                    call.resolve(ret);
+                } catch (Exception e) {
+                    Log.e(TAG, "listRadioMediaFiles failed", e);
+                    call.reject("列出手機上的 mp3／mp4 失敗: " + e.getMessage());
+                }
+            }
+        }, "radio-media-scan").start();
+    }
+
+    /**
+     * 把選檔清單勾選的檔案複製進頻道（design.md D19）。與 {@link #pickRadioAlarmFiles} 共用
+     * 同一段複製程式：不帶 channelId 建新頻道、帶 channelId 加到既有頻道，全有或全無照舊。
+     * 只收 MediaStore 的 {@code content://media/} URI —— 輸入來自 WebView，不讓它變成讀任意 URI 的通道。
+     */
+    @PluginMethod
+    public void copyRadioAlarmMediaFiles(PluginCall call) {
+        String existing = call.getString("channelId", "");
+        if (existing != null && !existing.trim().isEmpty() && !RadioAlarmFiles.isSafeChannelId(existing)) {
+            call.reject("channelId 不合法");
+            return;
+        }
+        JSArray raw = call.getArray("uris");
+        List<Uri> uris = new ArrayList<Uri>();
+        try {
+            for (int i = 0; raw != null && i < raw.length(); i++) {
+                String value = raw.getString(i);
+                if (!RadioMediaLibrary.isMediaStoreUri(value)) {
+                    call.reject("只能加入手機媒體庫裡的檔案");
+                    return;
+                }
+                uris.add(Uri.parse(value.trim()));
+            }
+        } catch (Exception e) {
+            call.reject("檔案清單格式不正確");
+            return;
+        }
+        if (uris.isEmpty()) {
+            call.reject("沒有選取任何檔案");
+            return;
+        }
+        copyIntoRadioChannel(call, uris, existing);
+    }
+
+    /** 開本 App 的系統設定頁（拒絕過兩次後系統不再跳詢問，只能在這裡開權限）。 */
+    @PluginMethod
+    public void openAppSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", getContext().getPackageName(), null));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "openAppSettings failed", e);
+            call.reject("無法開啟設定: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 把一批來源複製進頻道資料夾，全部成功才回傳（design.md D15／D18）。
+     * requested 為空即新頻道；否則加到該頻道，失敗時只刪這次新複製的檔。
+     */
+    private void copyIntoRadioChannel(final PluginCall call, final List<Uri> uris, final String requested) {
+        final Context context = getContext();
         final boolean append = requested != null && !requested.trim().isEmpty();
         final String channelId = append ? requested.trim() : RadioAlarmFiles.newChannelId();
         final File dir = RadioAlarmFiles.channelDir(context, channelId);

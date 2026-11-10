@@ -677,3 +677,13 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 17.6 規格、proposal、design 同步（D15 順序固定 → D18 可調整）
 - [x] 17.7 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，並同步更新 `avd_s/publish_all.ps1` 的預設 `$Message`；發布
 - [ ] 17.8 實機驗證：加入、移除、調整順序後試播，順序與內容正確；移除的副本已從私有目錄消失
+
+## 18. 選檔改列全手機 mp3／mp4（使用者要求「我不會記得檔在哪個目錄」；design.md D19）
+
+- [x] 18.1 原生 `RadioMediaLibrary`：查 MediaStore Audio（`.mp3`）與 Video（`.mp4`），回傳 uri、檔名、資料夾、大小、日期、長度、種類，上限 5000 筆；副檔名判斷與資料夾字串抽成純函式並以 JUnit 釘住
+- [x] 18.2 Manifest 宣告 `READ_MEDIA_AUDIO`、`READ_MEDIA_VIDEO`、`READ_EXTERNAL_STORAGE`（`maxSdkVersion="32"`）；`YoutubeDlPlugin` 新增權限別名與 `listRadioMediaFiles`（開清單時才申請）、`copyRadioAlarmMediaFiles`（只收 `content://media/`，與 `pickRadioAlarmFiles` 共用複製程式）、`openAppSettings`
+- [x] 18.3 前端純函式模組 `mediaPicker.ts`：正規化、排序（日期新→舊／名稱／大小）、搜尋、勾選順序、日期／大小／長度格式化，附 vitest
+- [x] 18.4 `RadioMediaPicker.vue` 底部抽屜；`App.vue` 兩個入口（新增 mp3／mp4 頻道、加入檔案）改開此清單，底部保留「用系統選檔器」；`radioAlarm.ts` 新增對應插件封裝
+- [x] 18.5 規格、proposal、design 同步（D19）；`openspec validate live-radio-alarm` 通過
+- [ ] 18.6 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [ ] 18.7 實機驗證：首次開清單跳權限；允許後列出 AVD 下載與其他 App 的 mp3／mp4、最新在最上；搜尋與勾選順序正確；加入後試播正常；拒絕權限時只列 AVD 自己的檔且有說明
