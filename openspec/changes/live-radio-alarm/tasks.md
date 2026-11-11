@@ -697,5 +697,9 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 19.1 `mediaPicker.ts`：`MediaKindFilter`、`MEDIA_KIND_OPTIONS`、`filterMediaKind`、`countMediaKinds`，附 vitest
 - [x] 19.2 `RadioMediaPicker.vue`：排序列上方加「種類：全部／MP3／MP4」（附數量），預設全部、每次開啟重設；切換不取消已勾選；空清單文字依篩選說明
 - [x] 19.3 規格、proposal、design 同步；`openspec validate live-radio-alarm` 通過
-- [ ] 19.4 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [x] 19.4 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+
+  功能 commit `c4945cc`；版本 1.0.138 → 1.0.139（versionCode 176），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步；
+  已發布 https://github.com/JohnLiang119/avd/releases/tag/v1.0.139 。
+
 - [ ] 19.5 實機驗證：切 MP3／MP4 只列該類且數量正確；跨篩選勾選後加入順序正確
