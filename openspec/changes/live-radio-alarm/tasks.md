@@ -711,5 +711,9 @@ design.md 新增 D14、改寫 D4／D9。
 - [x] 20.3 Manifest 宣告 `MANAGE_EXTERNAL_STORAGE`；`YoutubeDlPlugin`：`listRadioMediaFiles` 加 `rescan` 參數並回傳 `fullAccess`／`scannedAt`、新增 `openAllFilesAccessSettings`、`copyRadioAlarmMediaFiles` 放行通過把關的 `file://` 路徑
 - [x] 20.4 前端：`mediaPicker.ts` 的 `fullAccess`／`scannedAt`、`describeFullScan`（附 vitest）；`radioAlarm.ts` 封裝；`RadioMediaPicker.vue` 顯示掃描狀態、「開啟」權限與「重新掃描」
 - [x] 20.5 規格、proposal、design 同步（D20）；`openspec validate live-radio-alarm` 通過
-- [ ] 20.6 建置驗證（五項，另加 `:app:testDebugUnitTest`）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [x] 20.6 建置驗證（五項，另加 `:app:testDebugUnitTest`）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+
+  功能 commit `5877000`；版本 1.0.139 → 1.0.140（versionCode 177），七處版號與 `publish_all.ps1` 預設 `$Message` 已同步；
+  已發布 https://github.com/JohnLiang119/avd/releases/tag/v1.0.140 。
+
 - [ ] 20.7 實機驗證：開權限後第一次開清單會掃描並列出 `.nomedia` 資料夾裡的檔；再開清單不重掃（立即出現、掃描時間不變）；按重新掃描後時間更新；完整掃描列出的檔可加入並試播；未開權限時行為與先前相同
