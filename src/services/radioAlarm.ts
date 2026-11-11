@@ -642,8 +642,13 @@ export const RadioAlarmService = {
    * 列出手機上所有 mp3／mp4 供選檔清單使用（design.md D19）。request 為 true 且未授權時
    * 原生端先請求讀取媒體的權限；被拒照常回傳（列得到本 App 自己下載的檔）。
    */
-  async listMediaFiles(request = true): Promise<DeviceMediaList> {
-    return normalizeMediaList(await YoutubeDlPlugin.listRadioMediaFiles({ request }));
+  async listMediaFiles(request = true, rescan = false): Promise<DeviceMediaList> {
+    return normalizeMediaList(await YoutubeDlPlugin.listRadioMediaFiles({ request, rescan }));
+  },
+
+  /** 開「所有檔案存取權」的系統設定頁（design.md D20；這個權限只能由使用者在設定裡手動開）。 */
+  async openAllFilesAccessSettings(): Promise<void> {
+    await YoutubeDlPlugin.openAllFilesAccessSettings();
   },
 
   /**

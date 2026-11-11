@@ -193,6 +193,12 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!--
+        選檔清單的完整掃描（design.md D20）：直接走訪所有資料夾，補上 MediaStore 不索引的
+        .nomedia／隱藏資料夾。沒有執行期詢問，須由使用者到系統設定手動開「所有檔案存取權」；
+        沒開時清單維持只列 MediaStore。本 App 不上架 Play 商店，不受其對此權限的審查限制。
+    -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <!-- NFC 讀卡機：兩者皆為普通權限，安裝即授予，無執行期請求（design.md D7）。 -->
     <uses-permission android:name="android.permission.NFC" />

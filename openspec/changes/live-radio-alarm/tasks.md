@@ -703,3 +703,13 @@ design.md 新增 D14、改寫 D4／D9。
   已發布 https://github.com/JohnLiang119/avd/releases/tag/v1.0.139 。
 
 - [ ] 19.5 實機驗證：切 MP3／MP4 只列該類且數量正確；跨篩選勾選後加入順序正確
+
+## 20. 選檔清單加完整掃描並記錄（使用者要求「改成全掃描，並在掃描後記錄，不要每次都全掃描」；design.md D20）
+
+- [x] 20.1 原生 `RadioMediaScanner`：走訪所有外部儲存區找 mp3／mp4（含 `.nomedia`、隱藏資料夾，跳過 `Android/data`／`Android/obb`、防循環連結）、紀錄讀寫（`filesDir/radio_media_index.json`）、`loadOrScan`、複製用的路徑把關；JUnit `RadioMediaScannerTest`
+- [x] 20.2 `RadioMediaLibrary.scan` 併入掃描紀錄：以絕對路徑與 MediaStore 去重、略過已不存在的檔、以 `file://` URI 加入
+- [x] 20.3 Manifest 宣告 `MANAGE_EXTERNAL_STORAGE`；`YoutubeDlPlugin`：`listRadioMediaFiles` 加 `rescan` 參數並回傳 `fullAccess`／`scannedAt`、新增 `openAllFilesAccessSettings`、`copyRadioAlarmMediaFiles` 放行通過把關的 `file://` 路徑
+- [x] 20.4 前端：`mediaPicker.ts` 的 `fullAccess`／`scannedAt`、`describeFullScan`（附 vitest）；`radioAlarm.ts` 封裝；`RadioMediaPicker.vue` 顯示掃描狀態、「開啟」權限與「重新掃描」
+- [x] 20.5 規格、proposal、design 同步（D20）；`openspec validate live-radio-alarm` 通過
+- [ ] 20.6 建置驗證（五項，另加 `:app:testDebugUnitTest`）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [ ] 20.7 實機驗證：開權限後第一次開清單會掃描並列出 `.nomedia` 資料夾裡的檔；再開清單不重掃（立即出現、掃描時間不變）；按重新掃描後時間更新；完整掃描列出的檔可加入並試播；未開權限時行為與先前相同

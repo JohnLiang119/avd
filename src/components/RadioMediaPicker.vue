@@ -1,7 +1,8 @@
 <template>
   <!--
     鬧鐘選檔清單（OpenSpec live-radio-alarm design.md D19）：列出全手機的 mp3／mp4，
-    預設日期新到舊，可搜尋、切換排序、只看 mp3 或只看 mp4；勾選的先後就是加入順序（列上顯示序號）。
+    預設日期新到舊，可搜尋、切換排序、只看 mp3 或只看 mp4；
+    開了「所有檔案存取權」時含完整掃描的結果（D20：掃完記錄，按「重新掃描」才再掃）；勾選的先後就是加入順序（列上顯示序號）。
     複製進行中（busy）不可關閉、不可再改選取，避免使用者以為已取消而實際仍在寫入。
   -->
   <van-popup
@@ -53,11 +54,18 @@
         {{ permissionHint }}
         <button type="button" class="mp-link" @click="openSettings">開啟設定</button>
       </div>
+      <div v-if="list" class="mp-hint">
+        {{ scanHint }}
+        <button v-if="!list.fullAccess" type="button" class="mp-link" @click="openAllFilesAccess">開啟</button>
+        <button v-else type="button" class="mp-link" :disabled="busy || rescanning" @click="rescan">
+          {{ rescanning ? '掃描中…' : '重新掃描' }}
+        </button>
+      </div>
       <div v-if="list?.truncated" class="mp-hint">檔案太多，只列最新 {{ list.files.length }} 個；可用搜尋找較舊的</div>
     </div>
 
     <div class="mp-body">
-      <div v-if="loading" class="mp-state"><van-loading size="22px" /><span>正在找手機裡的 mp3／mp4…</span></div>
+      <div v-if="loading" class="mp-state"><van-loading size="22px" /><span>正在找手機裡的 mp3／mp4…</span><span class="mp-faint">第一次掃描全部資料夾會久一點</span></div>
       <div v-else-if="loadError" class="mp-state">
         <span>{{ loadError }}</span>
         <van-button size="small" plain class="mp-plain" @click="load(true)">重試</van-button>
@@ -123,6 +131,7 @@ import {
   MEDIA_PAGE_SIZE,
   MEDIA_SORT_OPTIONS,
   countMediaKinds,
+  describeFullScan,
   describeMediaFolder,
   describeMediaPermission,
   filterMediaFiles,
@@ -161,6 +170,7 @@ const sortKey = ref<MediaSortKey>('date');
 const kindFilter = ref<MediaKindFilter>('all');
 const selected = ref<string[]>([]);
 const renderLimit = ref(MEDIA_PAGE_SIZE);
+const rescanning = ref(false);
 const now = ref(new Date());
 let loadSeq = 0;
 
@@ -176,6 +186,7 @@ const emptyText = computed(() => {
 const visible = computed(() => filtered.value.slice(0, renderLimit.value));
 const existingSet = computed(() => new Set(props.existingNames ?? []));
 const permissionHint = computed(() => (list.value ? describeMediaPermission(list.value) : ''));
+const scanHint = computed(() => (list.value ? describeFullScan(list.value, now.value) : ''));
 
 const subtitle = computed(() => {
   const total = list.value?.files.length ?? 0;
@@ -198,12 +209,13 @@ const toggle = (uri: string) => {
 };
 
 /** request=false：從設定頁回來時重新整理，不再跳權限詢問。 */
-const load = async (request: boolean) => {
+const load = async (request: boolean, forceRescan = false) => {
   const seq = ++loadSeq;
   loading.value = !list.value;
+  rescanning.value = forceRescan;
   loadError.value = '';
   try {
-    const result = await RadioAlarmService.listMediaFiles(request);
+    const result = await RadioAlarmService.listMediaFiles(request, forceRescan);
     if (seq !== loadSeq) return;
     list.value = result;
     now.value = new Date();
@@ -214,21 +226,37 @@ const load = async (request: boolean) => {
     if (seq !== loadSeq) return;
     loadError.value = String((e as { message?: string })?.message ?? e);
   } finally {
-    if (seq === loadSeq) loading.value = false;
+    if (seq === loadSeq) {
+      loading.value = false;
+      rescanning.value = false;
+    }
   }
+};
+
+/** 重新走訪所有資料夾並更新紀錄；平常開清單只讀紀錄，不重掃。 */
+const rescan = () => {
+  if (props.busy || rescanning.value) return;
+  void load(false, true);
+};
+
+const openAllFilesAccess = () => {
+  RadioAlarmService.openAllFilesAccessSettings().catch(() => {});
 };
 
 const openSettings = () => {
   RadioAlarmService.openAppSettings().catch(() => {});
 };
 
-// 從系統設定頁回來（可能剛開了權限）時重新整理；只在缺權限時做，免得每次切回 App 都重查
+// 從系統設定頁回來（可能剛開了權限）時重新整理；只在缺權限時做，免得每次切回 App 都重查。
+// 剛開了「所有檔案存取權」而還沒有掃描紀錄時，原生端會在這次重新整理順便做第一次完整掃描
 let resumeHandle: PluginListenerHandle | null = null;
 const attachResume = async () => {
   if (resumeHandle) return;
   try {
     resumeHandle = await CapApp.addListener('resume', () => {
-      if (props.show && !props.busy && permissionHint.value) void load(false);
+      if (props.show && !props.busy && !rescanning.value && (permissionHint.value || !list.value?.fullAccess)) {
+        void load(false);
+      }
     });
   } catch {
     resumeHandle = null;
@@ -249,6 +277,7 @@ watch(
       kindFilter.value = 'all';
       selected.value = [];
       renderLimit.value = MEDIA_PAGE_SIZE;
+      rescanning.value = false;
       list.value = null;
       void load(true);
       void attachResume();
@@ -335,6 +364,10 @@ const onShowUpdate = (value: boolean) => {
   color: #64748b;
   margin: 4px 0 2px;
   line-height: 1.5;
+}
+.mp-link:disabled {
+  color: #94a3b8;
+  text-decoration: none;
 }
 .mp-link {
   border: none;

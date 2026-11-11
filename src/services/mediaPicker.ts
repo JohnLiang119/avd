@@ -28,6 +28,10 @@ export interface DeviceMediaList {
   audioGranted: boolean;
   /** 讀得到別的 App 的 mp4（有讀取影片權限） */
   videoGranted: boolean;
+  /** 已開「所有檔案存取權」，清單含完整掃描的結果（design.md D20） */
+  fullAccess: boolean;
+  /** 上次完整掃描的時間（毫秒）；未開權限或從未掃描為 0 */
+  scannedAt: number;
 }
 
 export type MediaSortKey = 'date' | 'name' | 'size';
@@ -90,6 +94,8 @@ export function normalizeMediaList(raw: any): DeviceMediaList {
     truncated: Boolean(raw?.truncated),
     audioGranted: Boolean(raw?.audioGranted),
     videoGranted: Boolean(raw?.videoGranted),
+    fullAccess: Boolean(raw?.fullAccess),
+    scannedAt: toNumber(raw?.scannedAt),
   };
 }
 
@@ -180,11 +186,28 @@ export function describeMediaFolder(folder: string): string {
 /**
  * 權限不足時清單上方的一行說明（正常時安靜、異常才說話）；全部有權限時為空字串。
  */
-export function describeMediaPermission(list: Pick<DeviceMediaList, 'audioGranted' | 'videoGranted'>): string {
+export function describeMediaPermission(
+  list: Pick<DeviceMediaList, 'audioGranted' | 'videoGranted'> & Partial<Pick<DeviceMediaList, 'fullAccess'>>,
+): string {
+  // 已開「所有檔案存取權」時直接走訪資料夾，讀取媒體的權限缺不缺都不影響清單
+  if (list.fullAccess) return '';
   if (list.audioGranted && list.videoGranted) return '';
   if (!list.audioGranted && !list.videoGranted) {
     return '未允許讀取音樂與影片，只列得到本 App 下載的檔案';
   }
   if (!list.audioGranted) return '未允許讀取音樂，mp3 只列得到本 App 下載的';
   return '未允許讀取影片，mp4 只列得到本 App 下載的';
+}
+
+/**
+ * 完整掃描的狀態說明（design.md D20）。未開「所有檔案存取權」時說明清單可能不完整；
+ * 已開時說明清單用的是哪一次的掃描紀錄 —— 掃完就記錄，之後開清單不重掃，要按「重新掃描」才更新。
+ */
+export function describeFullScan(
+  list: Pick<DeviceMediaList, 'fullAccess' | 'scannedAt'>,
+  now: Date = new Date(),
+): string {
+  if (!list.fullAccess) return '只列系統媒體庫裡的檔，可能不完整；開啟「所有檔案存取權」可掃描全部資料夾';
+  const when = formatMediaDate(list.scannedAt, now);
+  return when ? `已掃描全部資料夾（${when}）` : '已掃描全部資料夾';
 }

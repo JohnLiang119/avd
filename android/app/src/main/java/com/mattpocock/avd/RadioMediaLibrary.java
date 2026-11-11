@@ -11,11 +11,14 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 選檔清單的資料來源：以 MediaStore 列出這支手機上所有 mp3 與 mp4（design.md D19）。
@@ -66,9 +69,11 @@ public final class RadioMediaLibrary {
         public final long sizeBytes;
         public final long modifiedMs;
         public final long durationMs;
+        /** 檔案的絕對路徑，只用來與完整掃描的結果去重（D20）；未知為空字串。 */
+        final String path;
 
         Item(String uri, String displayName, String folder, String kind,
-             long sizeBytes, long modifiedMs, long durationMs) {
+             long sizeBytes, long modifiedMs, long durationMs, String path) {
             this.uri = uri;
             this.displayName = displayName;
             this.folder = folder;
@@ -76,6 +81,7 @@ public final class RadioMediaLibrary {
             this.sizeBytes = sizeBytes;
             this.modifiedMs = modifiedMs;
             this.durationMs = durationMs;
+            this.path = path == null ? "" : path;
         }
     }
 
@@ -119,10 +125,36 @@ public final class RadioMediaLibrary {
      * 清單照樣可用，缺了哪類由呼叫端以 {@link #canReadAudio}／{@link #canReadVideo} 說明。
      */
     public static ScanResult scan(Context context) {
+        return scan(context, null);
+    }
+
+    /**
+     * 同 {@link #scan(Context)}，另併入完整掃描的紀錄（design.md D20）：MediaStore 已有的檔以
+     * MediaStore 為準（有長度），紀錄裡多出來的（.nomedia、隱藏資料夾等）以 {@code file://} URI 加入；
+     * 紀錄裡已不存在的檔略過。extra 為 null 即只列 MediaStore。
+     */
+    public static ScanResult scan(Context context, RadioMediaScanner.Index extra) {
         List<Item> all = new ArrayList<Item>();
         boolean truncated = false;
         truncated |= query(context, MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, "mp3", KIND_AUDIO, all);
         truncated |= query(context, MediaStore.Video.Media.EXTERNAL_CONTENT_URI, "mp4", KIND_VIDEO, all);
+
+        if (extra != null) {
+            Set<String> known = new HashSet<String>();
+            for (Item it : all) {
+                if (!it.path.isEmpty()) known.add(it.path);
+            }
+            List<String> roots = RadioMediaScanner.storageRoots(context);
+            for (RadioMediaScanner.Entry e : extra.entries) {
+                if (known.contains(e.path)) continue;
+                File file = new File(e.path);
+                if (!file.isFile()) continue;
+                String name = e.name();
+                all.add(new Item(Uri.fromFile(file).toString(), name, RadioMediaScanner.folderOf(e.path, roots),
+                        RadioMediaScanner.kindOf(name), e.sizeBytes, e.modifiedMs, 0L, e.path));
+            }
+            truncated |= extra.truncated;
+        }
 
         Collections.sort(all, new Comparator<Item>() {
             @Override
@@ -142,7 +174,7 @@ public final class RadioMediaLibrary {
         boolean scoped = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q;
         String[] projection = scoped
                 ? new String[]{COL_ID, COL_DISPLAY_NAME, COL_SIZE, COL_DATE_MODIFIED, COL_DATE_ADDED,
-                        COL_DURATION, COL_RELATIVE_PATH, COL_VOLUME_NAME}
+                        COL_DURATION, COL_RELATIVE_PATH, COL_VOLUME_NAME, COL_DATA}
                 : new String[]{COL_ID, COL_DISPLAY_NAME, COL_SIZE, COL_DATE_MODIFIED, COL_DATE_ADDED,
                         COL_DURATION, COL_DATA};
         String storageRoot = scoped ? "" : Environment.getExternalStorageDirectory().getAbsolutePath();
@@ -177,7 +209,8 @@ public final class RadioMediaLibrary {
                 String folder = folderLabel(
                         stringAt(cursor, relativeCol),
                         stringAt(cursor, volumeCol),
-                        stringAt(cursor, dataCol),
+                        // API 29+ 的 _data 只用來去重（D20），資料夾一律取 relative_path
+                        scoped ? "" : stringAt(cursor, dataCol),
                         storageRoot);
                 out.add(new Item(
                         ContentUris.withAppendedId(collection, id).toString(),
@@ -186,7 +219,8 @@ public final class RadioMediaLibrary {
                         kind,
                         longAt(cursor, sizeCol),
                         dateMs(longAt(cursor, modifiedCol), longAt(cursor, addedCol)),
-                        longAt(cursor, durationCol)));
+                        longAt(cursor, durationCol),
+                        stringAt(cursor, dataCol).trim()));
                 added++;
             }
             return false;

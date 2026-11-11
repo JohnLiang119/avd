@@ -2065,12 +2065,16 @@ public class YoutubeDlPlugin extends Plugin {
      * {@code request}（預設 true）為 true 且尚未授權時先請求讀取媒體的權限；被拒也照常回傳
      * —— MediaStore 仍看得到本 App 自己下載的檔，清單不該因此打不開。從系統設定頁回來時
      * 前端以 {@code request:false} 重新整理，不再跳詢問。
+     *
+     * 已開「所有檔案存取權」時另併入完整掃描的結果（design.md D20）：有紀錄就用紀錄，
+     * 沒有紀錄或 {@code rescan:true} 才走訪所有資料夾並記錄。此時不再請求讀取媒體的權限。
      */
     @PluginMethod
     public void listRadioMediaFiles(PluginCall call) {
         boolean request = Boolean.TRUE.equals(call.getBoolean("request", true));
         String alias = radioMediaPermissionAlias();
-        if (request && getPermissionState(alias) != PermissionState.GRANTED) {
+        if (request && !RadioMediaScanner.canScanAllFiles(getContext())
+                && getPermissionState(alias) != PermissionState.GRANTED) {
             requestPermissionForAlias(alias, call, "radioMediaPermissionCallback");
             return;
         }
@@ -2088,12 +2092,16 @@ public class YoutubeDlPlugin extends Plugin {
 
     private void resolveRadioMediaFiles(final PluginCall call) {
         final Context context = getContext();
+        final boolean rescan = Boolean.TRUE.equals(call.getBoolean("rescan", false));
         // 媒體多的手機查詢要一兩秒，不可在主執行緒
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    RadioMediaLibrary.ScanResult result = RadioMediaLibrary.scan(context);
+                    boolean fullAccess = RadioMediaScanner.canScanAllFiles(context);
+                    RadioMediaScanner.Index index = fullAccess
+                            ? RadioMediaScanner.loadOrScan(context, rescan) : null;
+                    RadioMediaLibrary.ScanResult result = RadioMediaLibrary.scan(context, index);
                     JSArray files = new JSArray();
                     for (RadioMediaLibrary.Item it : result.items) {
                         JSObject item = new JSObject();
@@ -2111,6 +2119,8 @@ public class YoutubeDlPlugin extends Plugin {
                     ret.put("truncated", result.truncated);
                     ret.put("audioGranted", RadioMediaLibrary.canReadAudio(context));
                     ret.put("videoGranted", RadioMediaLibrary.canReadVideo(context));
+                    ret.put("fullAccess", fullAccess);
+                    ret.put("scannedAt", index == null ? 0L : index.scannedAt);
                     call.resolve(ret);
                 } catch (Exception e) {
                     Log.e(TAG, "listRadioMediaFiles failed", e);
@@ -2123,7 +2133,9 @@ public class YoutubeDlPlugin extends Plugin {
     /**
      * 把選檔清單勾選的檔案複製進頻道（design.md D19）。與 {@link #pickRadioAlarmFiles} 共用
      * 同一段複製程式：不帶 channelId 建新頻道、帶 channelId 加到既有頻道，全有或全無照舊。
-     * 只收 MediaStore 的 {@code content://media/} URI —— 輸入來自 WebView，不讓它變成讀任意 URI 的通道。
+     * 只收 MediaStore 的 {@code content://media/} URI，以及完整掃描列出的 {@code file://} 路徑
+     * （須在外部儲存區底下、副檔名為 mp3／mp4，design.md D20）—— 輸入來自 WebView，
+     * 不讓它變成讀任意 URI 或任意檔案的通道。
      */
     @PluginMethod
     public void copyRadioAlarmMediaFiles(PluginCall call) {
@@ -2134,14 +2146,28 @@ public class YoutubeDlPlugin extends Plugin {
         }
         JSArray raw = call.getArray("uris");
         List<Uri> uris = new ArrayList<Uri>();
+        List<String> storageRoots = null;
         try {
             for (int i = 0; raw != null && i < raw.length(); i++) {
                 String value = raw.getString(i);
-                if (!RadioMediaLibrary.isMediaStoreUri(value)) {
+                if (RadioMediaLibrary.isMediaStoreUri(value)) {
+                    uris.add(Uri.parse(value.trim()));
+                    continue;
+                }
+                Uri parsed = value == null ? null : Uri.parse(value.trim());
+                String path = parsed != null && "file".equals(parsed.getScheme()) ? parsed.getPath() : null;
+                if (path == null) {
                     call.reject("只能加入手機媒體庫裡的檔案");
                     return;
                 }
-                uris.add(Uri.parse(value.trim()));
+                if (storageRoots == null) storageRoots = RadioMediaScanner.storageRoots(getContext());
+                File file = new File(path);
+                if (!RadioMediaScanner.canScanAllFiles(getContext())
+                        || !RadioMediaScanner.isAllowedFile(file, storageRoots)) {
+                    call.reject("只能加入手機儲存空間裡的 mp3／mp4");
+                    return;
+                }
+                uris.add(Uri.fromFile(file));
             }
         } catch (Exception e) {
             call.reject("檔案清單格式不正確");
@@ -2167,6 +2193,36 @@ public class YoutubeDlPlugin extends Plugin {
             Log.e(TAG, "openAppSettings failed", e);
             call.reject("無法開啟設定: " + e.getMessage());
         }
+    }
+
+    /**
+     * 開「所有檔案存取權」的系統設定頁（design.md D20）。這個權限沒有執行期詢問，只能由使用者
+     * 在設定裡手動開；API 29 以下沒有這個權限，退回本 App 的設定頁（開儲存權限）。
+     */
+    @PluginMethod
+    public void openAllFilesAccessSettings(PluginCall call) {
+        Context context = getContext();
+        Uri pkg = Uri.fromParts("package", context.getPackageName(), null);
+        Intent[] candidates = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? new Intent[]{
+                        new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, pkg),
+                        new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+                        new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)}
+                : new Intent[]{new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)};
+        Exception last = null;
+        for (Intent intent : candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+                call.resolve();
+                return;
+            } catch (Exception e) {
+                // 部分廠牌沒有「單一 App」那一頁，退到下一個
+                last = e;
+            }
+        }
+        Log.e(TAG, "openAllFilesAccessSettings failed", last);
+        call.reject("無法開啟設定: " + (last == null ? "" : last.getMessage()));
     }
 
     /**

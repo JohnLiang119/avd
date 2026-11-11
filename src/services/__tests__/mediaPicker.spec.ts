@@ -12,6 +12,7 @@ import {
   formatMediaDate,
   describeMediaFolder,
   describeMediaPermission,
+  describeFullScan,
   type DeviceMediaFile,
 } from '../mediaPicker';
 
@@ -42,6 +43,14 @@ describe('normalizeMediaList', () => {
     expect(list.truncated).toBe(true);
     expect(list.audioGranted).toBe(true);
     expect(list.videoGranted).toBe(false);
+    expect(list.fullAccess).toBe(false);
+    expect(list.scannedAt).toBe(0);
+  });
+
+  it('完整掃描的狀態', () => {
+    const list = normalizeMediaList({ files: [], fullAccess: true, scannedAt: 1700000000000 });
+    expect(list.fullAccess).toBe(true);
+    expect(list.scannedAt).toBe(1700000000000);
   });
 
   it('剔除缺 uri 或檔名的列，重複的 uri 只留第一個，未知 kind 當音訊', () => {
@@ -59,7 +68,7 @@ describe('normalizeMediaList', () => {
   });
 
   it('原生端回傳壞掉時是空清單、無權限', () => {
-    expect(normalizeMediaList(undefined)).toEqual({ files: [], truncated: false, audioGranted: false, videoGranted: false });
+    expect(normalizeMediaList(undefined)).toEqual({ files: [], truncated: false, audioGranted: false, videoGranted: false, fullAccess: false, scannedAt: 0 });
   });
 });
 
@@ -194,5 +203,23 @@ describe('describeMediaPermission', () => {
     expect(describeMediaPermission({ audioGranted: false, videoGranted: false })).toContain('音樂與影片');
     expect(describeMediaPermission({ audioGranted: false, videoGranted: true })).toContain('mp3');
     expect(describeMediaPermission({ audioGranted: true, videoGranted: false })).toContain('mp4');
+  });
+});
+
+describe('describeFullScan', () => {
+  const now = new Date(2026, 10, 11, 9, 0);
+
+  it('未開所有檔案存取權時說明清單可能不完整', () => {
+    expect(describeFullScan({ fullAccess: false, scannedAt: 0 }, now)).toContain('所有檔案存取權');
+  });
+
+  it('已開時說明用的是哪一次的掃描紀錄', () => {
+    const scannedAt = new Date(2026, 10, 10, 21, 10).getTime();
+    expect(describeFullScan({ fullAccess: true, scannedAt }, now)).toBe('已掃描全部資料夾（昨天 21:10）');
+    expect(describeFullScan({ fullAccess: true, scannedAt: 0 }, now)).toBe('已掃描全部資料夾');
+  });
+
+  it('已開所有檔案存取權時不再提讀取媒體的權限', () => {
+    expect(describeMediaPermission({ audioGranted: false, videoGranted: false, fullAccess: true })).toBe('');
   });
 });
