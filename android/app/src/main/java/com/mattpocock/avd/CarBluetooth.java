@@ -246,11 +246,12 @@ public final class CarBluetooth {
     // ---- 連線 ----
 
     /**
-     * 手動入口（快速設定磚、主畫面鈕）的等待上限。「自動點選車機」開著時回 0：開設定頁
-     * 交給服務代點一定連得上，不必先白等 RFCOMM 喚醒（CX501A 實測不吃）。
+     * 手動入口（快速設定磚、主畫面鈕）的等待上限。一律回 0：已連著就回報，否則立刻開
+     * 藍牙設定頁（自動點選開著由服務代點，沒開則由使用者點選），不先白等 RFCOMM 喚醒
+     * （CX501A 實測不吃）。鬧鐘前連線與連線排程仍用 CAR_BLUETOOTH_WAIT_MS。
      */
     public static long manualWaitMs() {
-        return CarBluetoothAutoTapService.isActive() ? 0L : RadioAlarmConstants.CAR_BLUETOOTH_WAIT_MS;
+        return 0L;
     }
 
     /**
@@ -380,7 +381,9 @@ public final class CarBluetooth {
 
     /** 手動入口略過喚醒、直接交給自動點選時的說明。 */
     public static String describeHandoff(String deviceName) {
-        return "開啟藍牙設定，自動點選 " + displayName(deviceName);
+        return CarBluetoothAutoTapService.isActive()
+                ? "開啟藍牙設定，自動點選 " + displayName(deviceName)
+                : "開啟藍牙設定，請點選 " + displayName(deviceName);
     }
 
     private static String displayName(String deviceName) {

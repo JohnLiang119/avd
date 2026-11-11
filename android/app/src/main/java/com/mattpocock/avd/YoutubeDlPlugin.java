@@ -2569,7 +2569,7 @@ public class YoutubeDlPlugin extends Plugin {
     }
 
     /**
-     * 盡力連線選定的車機（最多等 CAR_BLUETOOTH_WAIT_MS；自動點選開著時不等）；前端依 outcome
+     * 手動連線選定的車機（不等待喚醒：已連著就回報，否則 NOT_CONNECTED）；前端依 outcome
      * 決定要不要開藍牙設定。
      */
     @PluginMethod
