@@ -1,7 +1,7 @@
 <template>
   <!--
     鬧鐘選檔清單（OpenSpec live-radio-alarm design.md D19）：列出全手機的 mp3／mp4，
-    預設日期新到舊，可搜尋與切換排序；勾選的先後就是加入順序（列上顯示序號）。
+    預設日期新到舊，可搜尋、切換排序、只看 mp3 或只看 mp4；勾選的先後就是加入順序（列上顯示序號）。
     複製進行中（busy）不可關閉、不可再改選取，避免使用者以為已取消而實際仍在寫入。
   -->
   <van-popup
@@ -25,6 +25,19 @@
         :disabled="busy"
       />
       <div class="mp-sort">
+        <span class="mp-sort-label">種類</span>
+        <button
+          v-for="opt in MEDIA_KIND_OPTIONS"
+          :key="opt.key"
+          type="button"
+          class="mp-sort-btn"
+          :class="{ active: kindFilter === opt.key }"
+          :disabled="busy"
+          :aria-pressed="kindFilter === opt.key"
+          @click="kindFilter = opt.key"
+        >{{ opt.label }}<span v-if="list" class="mp-count">{{ kindCounts[opt.key] }}</span></button>
+      </div>
+      <div class="mp-sort mp-sort-second">
         <span class="mp-sort-label">排序</span>
         <button
           v-for="opt in MEDIA_SORT_OPTIONS"
@@ -53,7 +66,7 @@
         <span>手機裡找不到 mp3／mp4</span>
         <span class="mp-faint">檔案在雲端硬碟或其他位置時，請用下方的系統選檔器</span>
       </div>
-      <div v-else-if="!filtered.length" class="mp-state"><span>沒有符合「{{ query.trim() }}」的檔案</span></div>
+      <div v-else-if="!filtered.length" class="mp-state"><span>{{ emptyText }}</span></div>
       <template v-else>
         <div
           v-for="item in visible"
@@ -106,17 +119,21 @@ import { App as CapApp } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { RadioAlarmService } from '../services/radioAlarm';
 import {
+  MEDIA_KIND_OPTIONS,
   MEDIA_PAGE_SIZE,
   MEDIA_SORT_OPTIONS,
+  countMediaKinds,
   describeMediaFolder,
   describeMediaPermission,
   filterMediaFiles,
+  filterMediaKind,
   formatMediaDate,
   formatMediaDuration,
   formatMediaSize,
   sortMediaFiles,
   toggleMediaSelection,
   type DeviceMediaList,
+  type MediaKindFilter,
   type MediaSortKey,
 } from '../services/mediaPicker';
 
@@ -141,13 +158,21 @@ const loading = ref(false);
 const loadError = ref('');
 const query = ref('');
 const sortKey = ref<MediaSortKey>('date');
+const kindFilter = ref<MediaKindFilter>('all');
 const selected = ref<string[]>([]);
 const renderLimit = ref(MEDIA_PAGE_SIZE);
 const now = ref(new Date());
 let loadSeq = 0;
 
 const sorted = computed(() => sortMediaFiles(list.value?.files ?? [], sortKey.value));
-const filtered = computed(() => filterMediaFiles(sorted.value, query.value));
+const kindCounts = computed(() => countMediaKinds(list.value?.files ?? []));
+const filtered = computed(() => filterMediaFiles(filterMediaKind(sorted.value, kindFilter.value), query.value));
+const kindLabel = computed(() => (kindFilter.value === 'audio' ? 'mp3' : kindFilter.value === 'video' ? 'mp4' : 'mp3／mp4'));
+const emptyText = computed(() => {
+  const q = query.value.trim();
+  if (q) return kindFilter.value === 'all' ? `沒有符合「${q}」的檔案` : `沒有符合「${q}」的 ${kindLabel.value}`;
+  return `手機裡找不到 ${kindLabel.value}`;
+});
 const visible = computed(() => filtered.value.slice(0, renderLimit.value));
 const existingSet = computed(() => new Set(props.existingNames ?? []));
 const permissionHint = computed(() => (list.value ? describeMediaPermission(list.value) : ''));
@@ -156,7 +181,11 @@ const subtitle = computed(() => {
   const total = list.value?.files.length ?? 0;
   if (!list.value) return '';
   const parts: string[] = [];
-  parts.push(query.value.trim() ? `符合 ${filtered.value.length}／${total} 個` : `共 ${total} 個 mp3／mp4`);
+  parts.push(
+    query.value.trim()
+      ? `符合 ${filtered.value.length}／${total} 個`
+      : `共 ${filtered.value.length} 個 ${kindLabel.value}`,
+  );
   if (selected.value.length) parts.push(`已選 ${selected.value.length} 個，依勾選順序加入`);
   return parts.join('，');
 });
@@ -217,6 +246,7 @@ watch(
     if (open) {
       query.value = '';
       sortKey.value = 'date';
+      kindFilter.value = 'all';
       selected.value = [];
       renderLimit.value = MEDIA_PAGE_SIZE;
       list.value = null;
@@ -230,7 +260,7 @@ watch(
   { immediate: true },
 );
 
-watch([query, sortKey], () => {
+watch([query, sortKey, kindFilter], () => {
   renderLimit.value = MEDIA_PAGE_SIZE;
 });
 
@@ -285,6 +315,15 @@ const onShowUpdate = (value: boolean) => {
   min-height: 32px;
   padding: 0 10px;
   border-bottom: 2px solid transparent;
+}
+.mp-sort-second {
+  margin-top: 0;
+}
+.mp-count {
+  margin-left: 3px;
+  font-size: 11px;
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
 }
 .mp-sort-btn.active {
   color: #0f172a;

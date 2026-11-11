@@ -691,3 +691,11 @@ design.md 新增 D14、改寫 D4／D9。
   已發布 https://github.com/JohnLiang119/avd/releases/tag/v1.0.138 。
 
 - [ ] 18.7 實機驗證：首次開清單跳權限；允許後列出 AVD 下載與其他 App 的 mp3／mp4、最新在最上；搜尋與勾選順序正確；加入後試播正常；拒絕權限時只列 AVD 自己的檔且有說明
+
+## 19. 選檔清單加種類篩選（使用者要求「加一個篩選，區別 mp3 或 mp4」；design.md D19）
+
+- [x] 19.1 `mediaPicker.ts`：`MediaKindFilter`、`MEDIA_KIND_OPTIONS`、`filterMediaKind`、`countMediaKinds`，附 vitest
+- [x] 19.2 `RadioMediaPicker.vue`：排序列上方加「種類：全部／MP3／MP4」（附數量），預設全部、每次開啟重設；切換不取消已勾選；空清單文字依篩選說明
+- [x] 19.3 規格、proposal、design 同步；`openspec validate live-radio-alarm` 通過
+- [ ] 19.4 建置驗證（五項）通過後，功能修正與版本進版各自一個 commit，同步 `avd_s/publish_all.ps1` 預設 `$Message`；發布
+- [ ] 19.5 實機驗證：切 MP3／MP4 只列該類且數量正確；跨篩選勾選後加入順序正確

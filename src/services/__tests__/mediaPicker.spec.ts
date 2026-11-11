@@ -4,6 +4,8 @@ import {
   normalizeMediaList,
   sortMediaFiles,
   filterMediaFiles,
+  filterMediaKind,
+  countMediaKinds,
   toggleMediaSelection,
   formatMediaSize,
   formatMediaDuration,
@@ -108,6 +110,26 @@ describe('filterMediaFiles', () => {
   it('多個詞須全部符合', () => {
     expect(filterMediaFiles(files, '早報 avd').map((f) => f.uri)).toEqual(['1']);
     expect(filterMediaFiles(files, '早報 download')).toEqual([]);
+  });
+});
+
+describe('filterMediaKind／countMediaKinds', () => {
+  const files = [
+    file({ uri: '1', displayName: 'a.mp3', kind: 'audio' }),
+    file({ uri: '2', displayName: 'b.mp4', kind: 'video' }),
+    file({ uri: '3', displayName: 'c.mp3', kind: 'audio' }),
+  ];
+
+  it('全部、只看 mp3、只看 mp4，順序不變且不改動輸入', () => {
+    expect(filterMediaKind(files, 'all').map((f) => f.uri)).toEqual(['1', '2', '3']);
+    expect(filterMediaKind(files, 'audio').map((f) => f.uri)).toEqual(['1', '3']);
+    expect(filterMediaKind(files, 'video').map((f) => f.uri)).toEqual(['2']);
+    expect(files).toHaveLength(3);
+  });
+
+  it('各種類的數量', () => {
+    expect(countMediaKinds(files)).toEqual({ all: 3, audio: 2, video: 1 });
+    expect(countMediaKinds([])).toEqual({ all: 0, audio: 0, video: 0 });
   });
 });
 

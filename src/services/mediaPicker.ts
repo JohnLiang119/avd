@@ -38,6 +38,26 @@ export const MEDIA_SORT_OPTIONS: ReadonlyArray<{ key: MediaSortKey; label: strin
   { key: 'size', label: '大小' },
 ];
 
+/** 種類篩選：全部、只看 mp3（音訊）、只看 mp4（影片）。 */
+export type MediaKindFilter = 'all' | 'audio' | 'video';
+
+export const MEDIA_KIND_OPTIONS: ReadonlyArray<{ key: MediaKindFilter; label: string }> = [
+  { key: 'all', label: '全部' },
+  { key: 'audio', label: 'MP3' },
+  { key: 'video', label: 'MP4' },
+];
+
+/** 依種類過濾（不改動輸入）；`all` 回傳全部。 */
+export function filterMediaKind(files: readonly DeviceMediaFile[], kind: MediaKindFilter): DeviceMediaFile[] {
+  return kind === 'all' ? [...files] : files.filter((f) => f.kind === kind);
+}
+
+/** 各種類的檔案數，顯示在篩選鈕上。 */
+export function countMediaKinds(files: readonly DeviceMediaFile[]): Record<MediaKindFilter, number> {
+  const video = files.reduce((n, f) => n + (f.kind === 'video' ? 1 : 0), 0);
+  return { all: files.length, audio: files.length - video, video };
+}
+
 /** 清單一次畫幾列；其餘按「顯示更多」再畫（design.md D19「大量檔案」）。 */
 export const MEDIA_PAGE_SIZE = 200;
 
