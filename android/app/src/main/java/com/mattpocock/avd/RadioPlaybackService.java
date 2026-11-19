@@ -107,6 +107,22 @@ public class RadioPlaybackService extends Service {
     }
 
     /**
+     * 播放互斥：要交給外部播放器（VLC）之前呼叫。本服務正在播放電台或 MP3／MP4 時
+     * 先送停止，避免兩邊同時出聲。沒在播放時什麼都不做。
+     */
+    public static void stopIfPlaying(Context context) {
+        if (!playing) return;
+        try {
+            Intent stop = new Intent(context, RadioPlaybackService.class);
+            stop.setAction(ACTION_STOP);
+            context.startService(stop);
+            Log.d(TAG, "stopped for external player");
+        } catch (Exception e) {
+            Log.e(TAG, "failed to stop before external player", e);
+        }
+    }
+
+    /**
      * 目前播放中的是否為鬧鐘或試播（而非手動直播）。
      * 介面據此把狀態字寫成「播放中」或「直播中」；音量來源兩者相同，皆為媒體音量。
      */
@@ -434,6 +450,7 @@ public class RadioPlaybackService extends Service {
         }
 
         try {
+            pauseOtherPlayers();
             requestAudioFocus();
 
             player = new ExoPlayer.Builder(this).build();
@@ -601,6 +618,28 @@ public class RadioPlaybackService extends Service {
 
     // ---- 音訊焦點 ----
 
+    /**
+     * 播放互斥：本服務開始出聲前，若有其他 App（VLC 等）正在播放，先送一次「暫停」媒體鍵。
+     * 媒體鍵由系統交給最近在播放的媒體工作階段；本服務的播放器此時尚未建立，不會暫停到
+     * 自己。再加上 {@link #requestAudioFocus} 取得長期焦點，不理媒體鍵的播放器也會因
+     * 失去焦點而停下。
+     */
+    private void pauseOtherPlayers() {
+        if (audioManager == null) return;
+        try {
+            if (!audioManager.isMusicActive()) return;
+            audioManager.dispatchMediaKeyEvent(
+                    new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE));
+            audioManager.dispatchMediaKeyEvent(
+                    new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
+                            android.view.KeyEvent.KEYCODE_MEDIA_PAUSE));
+            Log.d(TAG, "paused other media player before playback");
+        } catch (Exception e) {
+            Log.e(TAG, "failed to pause other players", e);
+        }
+    }
+
     private void requestAudioFocus() {
         if (audioManager == null) return;
         focusListener = new AudioManager.OnAudioFocusChangeListener() {
@@ -612,9 +651,11 @@ public class RadioPlaybackService extends Service {
             }
         };
         try {
+            // 長期焦點（AUDIOFOCUS_GAIN）：播放互斥 —— VLC 等其他播放器收到 LOSS 會停下，
+            // 且不會在本服務放掉焦點後自行恢復播放（暫時性焦點會讓它們自己接回來）。
             audioManager.requestAudioFocus(focusListener,
                     AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+                    AudioManager.AUDIOFOCUS_GAIN);
         } catch (Exception e) {
             Log.e(TAG, "failed to request audio focus", e);
         }

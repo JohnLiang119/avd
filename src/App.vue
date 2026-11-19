@@ -144,6 +144,24 @@
               </template>
             </button>
           </div>
+          <!--
+            中廣流行／新聞快捷鈕：只放圖示（名稱在 title／aria-label），上下疊放以免佔寬。
+            播放中改用狀態色並換成停止圖示，再按一次即停止。
+          -->
+          <div v-if="!isTauri() && homeRadios.length" style="display: flex; flex-direction: column; justify-content: center; gap: 4px; flex-shrink: 0;">
+            <button
+              v-for="r in homeRadios"
+              :key="r.channelId"
+              type="button"
+              :title="radioStatus?.playingChannelId === r.channelId ? `停止${r.name}` : `收聽${r.name}`"
+              :aria-label="radioStatus?.playingChannelId === r.channelId ? `停止${r.name}` : `收聽${r.name}`"
+              :disabled="homeRadioBusy"
+              :style="radioStatus?.playingChannelId === r.channelId
+                ? `width: 30px; height: 30px; padding: 0; font-size: 15px; line-height: 1; border-radius: 8px; background: ${UI_COLOR.okSurface}; color: ${UI_COLOR.ok}; border: 1px solid ${UI_COLOR.okLine}; cursor: pointer;`
+                : `width: 30px; height: 30px; padding: 0; font-size: 15px; line-height: 1; border-radius: 8px; background: transparent; border: 1px solid #e2e8f0; cursor: pointer;`"
+              @click="onHomeRadioToggle(r.channelId)"
+            >{{ radioStatus?.playingChannelId === r.channelId ? '⏹' : r.icon }}</button>
+          </div>
           <div v-else-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <!--
               連線正常時保留狀態色。這是全應用程式唯一用於「狀態」的顏色，
@@ -1970,6 +1988,7 @@ import {
   type RadioPickedFiles,
   type RadioStockItem,
   type TtsVoice,
+  homeRadioButtons,
 } from './services/radioAlarm';
 import {
   CarBluetoothService,
@@ -2357,6 +2376,8 @@ onMounted(async () => {
   // 主畫面的「連線車機」鈕要先知道有沒有選車機、是否已連線
   void loadCarBluetooth();
   void loadCarSchedule();
+  // 主畫面的中廣快捷鈕要知道有哪些頻道、哪一台正在播
+  void loadRadioAlarm();
 
   // 早報鬧鐘若在背景播放失敗，摘要留在原生端等這一刻才寫入錯誤紀錄
   void drainRadioAlarmJournal();
@@ -4781,6 +4802,45 @@ const onRadioLiveToggle = async (channelId: string) => {
   await refreshRadioStatus();
 };
 
+/**
+ * 主畫面的中廣流行／新聞快捷鈕。播放中的那台再按即停止；按另一台則先停再切換。
+ * 與 VLC 的互斥在原生端：開始播放前會先暫停其他播放器並取得長期音訊焦點。
+ */
+const homeRadios = computed(() => homeRadioButtons(radioAlarm.value.channels));
+const homeRadioBusy = ref(false);
+/**
+ * 主畫面快捷鈕的狀態輪詢：只在電台正在播、且設定對話框沒開（那邊有自己的輪詢）時跑，
+ * 讓播放結束或被別處停止後，停止圖示能自己換回電台圖示。
+ */
+let homeRadioTimer: ReturnType<typeof setInterval> | null = null;
+watch(() => radioStatus.value?.playing === true, (playing) => {
+  if (playing && homeRadioTimer === null) {
+    homeRadioTimer = setInterval(() => {
+      if (radioStatusTimer === null && document.visibilityState === 'visible') void refreshRadioStatus();
+    }, 5000);
+  } else if (!playing && homeRadioTimer !== null) {
+    clearInterval(homeRadioTimer);
+    homeRadioTimer = null;
+  }
+});
+onUnmounted(() => {
+  if (homeRadioTimer !== null) clearInterval(homeRadioTimer);
+});
+const onHomeRadioToggle = async (channelId: string) => {
+  if (isTauri() || homeRadioBusy.value) return;
+  homeRadioBusy.value = true;
+  try {
+    const playingId = radioStatus.value?.playingChannelId ?? '';
+    if (radioStatus.value?.playing) await RadioAlarmService.stop();
+    if (playingId !== channelId) await RadioAlarmService.playLive(channelId);
+  } catch (e) {
+    reportError('中廣直播', e);
+  } finally {
+    homeRadioBusy.value = false;
+  }
+  await refreshRadioStatus();
+};
+
 /** 自我測試：登錄一個兩分鐘後的真鬧鐘，走與早上完全相同的路徑。按完就可以把應用程式關掉。 */
 const onRadioSelfTest = async () => {
   radioAlarmBusy.value = true;
@@ -6075,6 +6135,8 @@ App.addListener('appStateChange', ({ isActive }: { isActive: boolean }) => {
     networkStatus.recheck();
     // 從系統藍牙或無障礙設定回來：車機連線與自動點選的狀態可能變了
     void loadCarBluetooth();
+    // 從 VLC 等外部播放器回來：電台可能已被停止，快捷鈕要回到播放圖示
+    void refreshRadioStatus();
   }
 });
 

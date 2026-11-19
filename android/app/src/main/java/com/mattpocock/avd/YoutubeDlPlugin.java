@@ -1422,6 +1422,8 @@ public class YoutubeDlPlugin extends Plugin {
             return;
         }
         try {
+            // 播放互斥：交給 VLC 之前，先停掉本 App 正在播的電台或 MP3／MP4
+            RadioPlaybackService.stopIfPlaying(getContext());
             android.net.Uri uri = android.net.Uri.parse(uriString);
             String mimeType = call.getString("mimeType", "video/*");
             android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);

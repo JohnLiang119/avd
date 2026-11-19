@@ -298,6 +298,29 @@ export function defaultChannelId(channels: readonly RadioChannel[]): string {
   return channels.find((c) => c.kind === 'bcc')?.id ?? channels[0]?.id ?? '';
 }
 
+/** 主畫面的電台快捷鈕：只有圖示，名稱放在 title／aria-label 供長按與無障礙。 */
+export interface HomeRadioButton {
+  channelId: string;
+  name: string;
+  icon: string;
+}
+
+/** 主畫面快捷鈕對應的中廣頻道（依 source 比對，順序固定：流行、新聞）。 */
+const HOME_RADIO_SOURCES: readonly { source: string; icon: string }[] = [
+  { source: '中廣流行網', icon: '🎵' },
+  { source: '中廣新聞網', icon: '📰' },
+];
+
+/** 從頻道設定挑出主畫面的中廣流行／新聞快捷鈕；使用者刪掉的頻道就不顯示。 */
+export function homeRadioButtons(channels: readonly RadioChannel[]): HomeRadioButton[] {
+  const result: HomeRadioButton[] = [];
+  for (const { source, icon } of HOME_RADIO_SOURCES) {
+    const found = channels.find((c) => c.kind === 'bcc' && c.source === source);
+    if (found) result.push({ channelId: found.id, name: found.name, icon });
+  }
+  return result;
+}
+
 /** 頻道標題的長度上限（字元）。下載的檔名常是整句影片標題，只取前段當標題。 */
 export const CHANNEL_TITLE_MAX_CHARS = 16;
 

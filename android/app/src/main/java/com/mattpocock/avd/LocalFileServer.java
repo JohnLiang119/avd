@@ -193,6 +193,8 @@ public class LocalFileServer extends NanoHTTPD {
                     android.app.ActivityManager am = (android.app.ActivityManager) this.context.getSystemService(android.content.Context.ACTIVITY_SERVICE);
                     if (am != null) am.killBackgroundProcesses("org.videolan.vlc");
                 } catch (Exception ignored) {}
+                // 播放互斥：交給 VLC 之前，先停掉本 App 正在播的電台或 MP3／MP4
+                RadioPlaybackService.stopIfPlaying(this.context);
 
                 android.net.Uri uri = android.net.Uri.parse(playUri);
                 String mimeType = playUri.toLowerCase().endsWith(".mp3") ? "audio/*" : "video/*";

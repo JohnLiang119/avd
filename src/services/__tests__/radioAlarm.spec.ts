@@ -14,6 +14,7 @@ import {
   clampVolume,
   channelName,
   defaultChannelId,
+  homeRadioButtons,
   describeAlarmSummary,
   newAlarm,
   describePlaybackState,
@@ -486,5 +487,23 @@ describe('本地檔案頻道的編輯（design.md D18）', () => {
     expect(canRemoveFile([file('a.mp3'), file('b.mp4')])).toBe(true);
     expect(canRemoveFile([file('a.mp3')])).toBe(false);
     expect(canRemoveFile([])).toBe(false);
+  });
+});
+
+describe('homeRadioButtons', () => {
+  it('依流行、新聞的固定順序挑出中廣頻道，帶圖示', () => {
+    expect(homeRadioButtons(CHANNELS)).toEqual([
+      { channelId: 'bcc-pop', name: '中廣流行網', icon: '🎵' },
+      { channelId: 'bcc-news', name: '中廣新聞網', icon: '📰' },
+    ]);
+  });
+
+  it('使用者刪掉的頻道不顯示；同名的 url 頻道不算', () => {
+    const channels: RadioChannel[] = [
+      { id: 'u1', name: '中廣流行網', kind: 'url', source: '中廣流行網' },
+      { id: 'bcc-news', name: '新聞', kind: 'bcc', source: '中廣新聞網' },
+    ];
+    expect(homeRadioButtons(channels)).toEqual([{ channelId: 'bcc-news', name: '新聞', icon: '📰' }]);
+    expect(homeRadioButtons([])).toEqual([]);
   });
 });
