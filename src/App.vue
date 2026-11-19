@@ -119,32 +119,6 @@
         <!-- 網路狀態標籤（正常／檢查中，置左，與右側兩排按鈕等高）＋ 重整/清除/刪除/設定、音訊/頻道/快傳/收合 -->
         <div style="display: flex; align-items: stretch; gap: 8px;">
           <!--
-            Android：此處原為「網路正常」標籤，改放手動「連線車機」鈕（OpenSpec car-bluetooth-connect）。
-            網路不穩／離線時上方仍有獨立警示列，不會因此看不到網路異常。
-            已連線時用狀態色（與原標籤同一組顏色），並以文字「已連／車機」並列，不單靠顏色。
-          -->
-          <div v-if="!isTauri()" style="display: flex; align-items: center; flex-shrink: 0;">
-            <button
-              type="button"
-              :disabled="carBtConnecting"
-              title="連線車機藍牙；連不上會開啟藍牙設定"
-              :style="carBt?.connected
-                ? `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px; background: ${UI_COLOR.okSurface}; color: ${UI_COLOR.ok}; border: 1px solid ${UI_COLOR.okLine}; cursor: pointer;`
-                : `display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 34px; font-size: 11px; line-height: 1.3; text-align: center; padding: 4px 6px; border-radius: 10px; background: transparent; color: ${UI_COLOR.text}; border: 1px solid #e2e8f0; cursor: pointer;`"
-              @click="onCarBtMainButton"
-            >
-              <span v-if="carBtConnecting" class="ns-spinner"></span>
-              <template v-else-if="carBt?.connected">
-                <span>已連</span>
-                <span>車機</span>
-              </template>
-              <template v-else>
-                <span>連線</span>
-                <span>車機</span>
-              </template>
-            </button>
-          </div>
-          <!--
             中廣流行／新聞快捷鈕：只放圖示（名稱在 title／aria-label），上下疊放以免佔寬。
             播放中改用狀態色並換成停止圖示，再按一次即停止。
           -->
@@ -162,7 +136,7 @@
               @click="onHomeRadioToggle(r.channelId)"
             >{{ radioStatus?.playingChannelId === r.channelId ? '⏹' : r.icon }}</button>
           </div>
-          <div v-else-if="networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
+          <div v-if="isTauri() && networkStatusText.compact" style="display: flex; align-items: center; flex-shrink: 0;">
             <!--
               連線正常時保留狀態色。這是全應用程式唯一用於「狀態」的顏色，
               與 `danger` 分屬兩個用途軸（一個說「現在如何」、一個說「按下
@@ -182,6 +156,28 @@
           <div style="display: flex; flex-direction: column; gap: 8px; flex: 1;">
             <!-- 第一排：重整、清除、刪除、設定 (4 顆按鈕) -->
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <!--
+                Android：手動「連線車機」鈕（OpenSpec car-bluetooth-connect），放在第一排最左邊。
+                網路不穩／離線時上方仍有獨立警示列；Windows 版左側仍是網路狀態標籤。
+                已連線時用狀態色，並以文字「已連車機」表達，不單靠顏色。寬度比其他鈕窄，
+                第二排在同一位置放等寬的空白，兩排按鈕上下對齊。
+              -->
+              <van-button
+                v-if="!isTauri()"
+                size="small"
+                round
+                type="default"
+                class="top-ctrl-btn"
+                :disabled="carBtConnecting"
+                title="連線車機藍牙；連不上會開啟藍牙設定"
+                :style="carBt?.connected
+                  ? `flex: 0 0 52px !important; max-width: none !important; font-size: 11px !important; background: ${UI_COLOR.okSurface} !important; color: ${UI_COLOR.ok} !important; border-color: ${UI_COLOR.okLine} !important;`
+                  : 'flex: 0 0 52px !important; max-width: none !important; font-size: 11px !important;'"
+                @click="onCarBtMainButton"
+              >
+                <span v-if="carBtConnecting" class="ns-spinner"></span>
+                <template v-else>{{ carBt?.connected ? '已連車機' : '連線車機' }}</template>
+              </van-button>
               <van-button
                 size="small"
                 round
@@ -218,6 +214,8 @@
 
             <!-- 第二排：音訊、頻道、快傳、收合 (4 顆按鈕，與第一排垂直精確對齊) -->
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <!-- 佔住第一排「連線車機」的寬度，讓兩排其餘按鈕上下對齊 -->
+              <span v-if="!isTauri()" aria-hidden="true" style="flex: 0 0 52px;"></span>
               <van-button
                 size="small"
                 round
@@ -6687,14 +6685,17 @@ DownloadService.addListener('driveUploadProgress', (info: any) => {
 
 /* 頂部 8 顆操作按鈕統一等寬等高置中樣式 */
 .top-ctrl-btn {
-  width: 70px !important;
+  /* 寬度可縮（最寬 70px）：第一排多了「連線車機」、左側有中廣快捷鈕時，窄螢幕不會擠出畫面 */
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: 70px !important;
   height: 30px !important;
   padding: 0 !important;
   font-size: 12px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  flex-shrink: 0 !important;
+  white-space: nowrap !important;
   border-radius: 999px !important;
   border: 1px solid #e2e8f0 !important;
   color: #0f172a !important;
