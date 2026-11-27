@@ -1102,6 +1102,24 @@
       </div>
     </van-dialog>
 
+    <!-- 富果 API 金鑰 QR code（fugle-key-qrcode）：不顯示金鑰全文，60 秒自動關閉 -->
+    <van-dialog
+      v-model:show="showFugleKeyQr"
+      title="富果 API 金鑰"
+      confirm-button-text="關閉"
+      style="max-width: 320px; width: 86%;"
+      @confirm="closeFugleKeyQr"
+    >
+      <div style="padding: 16px 20px 8px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+        <qrcode-vue v-if="fugleKeyQrValue" :value="fugleKeyQrValue" :size="200" level="M" />
+        <p style="font-size: 12px; color: #64748b; margin: 0; text-align: center; line-height: 1.6;">
+          用另一台裝置「掃一掃」取得金鑰
+        </p>
+        <p style="font-size: 12px; color: #d03050; margin: 0; text-align: center;">金鑰不可截圖或讓別人掃描</p>
+        <p style="font-size: 11px; color: #94a3b8; margin: 0;">{{ fugleKeyQrRemaining }} 秒後自動關閉</p>
+      </div>
+    </van-dialog>
+
     <!--
       本地檔案頻道的明細：名稱、檔案清單（依播放順序）、移除。從頻道列點進來（design.md D15）。
       檔案清單可編輯（D18）：每個檔案 ▴／▾ 調整順序、× 移除（至少留一個），清單下方可再加入檔案。
@@ -1177,6 +1195,8 @@
               @blur="saveFugleApiKey"
               @keyup.enter="saveFugleApiKey"
             />
+            <!-- 以 QR code 把金鑰交給其他裝置（fugle-key-qrcode） -->
+            <van-button size="small" title="以 QR code 顯示金鑰，給其他裝置掃描" @click="openFugleKeyQr">QR</van-button>
           </div>
           <div style="font-size: 12px; color: #64748b; margin: 10px 0 4px;">
             股票（{{ radioStockDetail.stocks.length }} 支，依念的順序）
@@ -4381,6 +4401,49 @@ const saveFugleApiKey = () => {
   if (key === radioAlarm.value.fugleApiKey) return;
   void persistRadioAlarm({ ...radioAlarm.value, fugleApiKey: key });
 };
+
+// ---- 富果金鑰 QR code（openspec change fugle-key-qrcode）----
+// 讓另一台裝置（例如跑「Claude 額度」看板的舊手機）用掃一掃取得金鑰；本機產生、不經網路，
+// 不在畫面上顯示金鑰全文，60 秒後自動關閉。
+
+const FUGLE_QR_SECONDS = 60;
+const showFugleKeyQr = ref(false);
+const fugleKeyQrValue = ref('');
+const fugleKeyQrRemaining = ref(0);
+let fugleKeyQrTimer: ReturnType<typeof setInterval> | null = null;
+
+const closeFugleKeyQr = () => {
+  if (fugleKeyQrTimer) clearInterval(fugleKeyQrTimer);
+  fugleKeyQrTimer = null;
+  showFugleKeyQr.value = false;
+  fugleKeyQrValue.value = '';
+};
+
+const openFugleKeyQr = () => {
+  saveFugleApiKey();
+  const key = radioFugleKeyDraft.value.trim() || radioAlarm.value.fugleApiKey;
+  if (!key) {
+    showToast('請先填寫富果 API 金鑰');
+    return;
+  }
+  fugleKeyQrValue.value = key;
+  fugleKeyQrRemaining.value = FUGLE_QR_SECONDS;
+  showFugleKeyQr.value = true;
+  if (fugleKeyQrTimer) clearInterval(fugleKeyQrTimer);
+  fugleKeyQrTimer = setInterval(() => {
+    fugleKeyQrRemaining.value -= 1;
+    if (fugleKeyQrRemaining.value <= 0) closeFugleKeyQr();
+  }, 1000);
+};
+
+// 以任何方式關閉對話框（按鈕、點背景）都停止倒數並清掉金鑰
+watch(showFugleKeyQr, (open) => {
+  if (!open && fugleKeyQrTimer) closeFugleKeyQr();
+});
+
+onUnmounted(() => {
+  if (fugleKeyQrTimer) clearInterval(fugleKeyQrTimer);
+});
 
 /** 以名稱搜尋到多筆時的候選；使用者從 action sheet 挑一筆 */
 const radioStockMatches = ref<RadioStockItem[]>([]);
